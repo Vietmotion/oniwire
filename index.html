@@ -1,0 +1,1400 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Visual Node App (Fresh Layout)</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --panel: rgba(255,255,255,.04);
+      --panelSolid:#0f1620;
+      --line: rgba(255,255,255,.10);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.60);
+      --shadow: 0 18px 55px rgba(0,0,0,.55);
+      --r: 18px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+
+      /* Layout sizing */
+      --leftW: 260px;
+      --rightW: 360px;
+      --topH: 54vh;
+      --gap: 14px;
+
+      /* Preview zoom */
+      --previewZoom: 1;
+
+      /* Node editor transform */
+      --nx: 0px;
+      --ny: 0px;
+      --nz: 1;
+    }
+
+    *{ box-sizing:border-box; }
+    html, body { height:100%; }
+    body{
+      margin:0;
+      overflow:hidden;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 900px at 25% 10%, rgba(122,167,255,.10), transparent 60%),
+        radial-gradient(1200px 900px at 75% 30%, rgba(138,242,201,.10), transparent 55%),
+        var(--bg);
+    }
+
+    /* App grid: 3 columns x 2 rows */
+    .app{
+      height:100vh;
+      display:grid;
+      grid-template-columns: var(--leftW) 1fr var(--rightW);
+      grid-template-rows: var(--topH) 1fr;
+      gap: var(--gap);
+      padding: var(--gap);
+      min-height:0;
+      min-width:0;
+    }
+
+    /* Panels */
+    .panel{
+      background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      min-width:0;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .hdr{
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      background: rgba(0,0,0,.18);
+      gap:10px;
+    }
+
+    .title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      font-weight:650;
+      font-size:13px;
+      letter-spacing:.2px;
+      white-space:nowrap;
+    }
+
+    .pill{
+      font-family: var(--mono);
+      font-size: 11px;
+      padding:3px 8px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      color: var(--muted);
+      background: rgba(0,0,0,.2);
+      white-space:nowrap;
+    }
+
+    .btns{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+
+    button, select, input[type="range"]{
+      font: inherit;
+    }
+
+    button{
+      appearance:none;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      color: var(--text);
+      border-radius: 12px;
+      padding:8px 10px;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+      transition: background .15s ease, transform .05s ease;
+    }
+    button:hover{ background: rgba(255,255,255,.06); }
+    button:active{ transform: translateY(1px); }
+
+    .danger{ border-color: rgba(255,107,107,.35); }
+    .danger:hover{ background: rgba(255,107,107,.12); }
+
+    select{
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      color: var(--text);
+      border-radius: 12px;
+      padding:7px 10px;
+      font-size:12px;
+      outline:none;
+    }
+
+    .content{
+      padding:12px 14px;
+      overflow:auto;
+      min-height:0;
+    }
+
+    /* Left (blue) */
+    .left{
+      grid-column: 1;
+      grid-row: 1 / span 2;
+      background:
+        linear-gradient(180deg, rgba(30,120,255,.22), rgba(30,120,255,.10)),
+        linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+    }
+
+    .left .content{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .menuGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .menuTile{
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.08);
+      border-radius: 14px;
+      height: 56px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color: rgba(255,255,255,.9);
+      font-weight:600;
+      cursor:pointer;
+      user-select:none;
+    }
+    .menuTile:hover{ background: rgba(255,255,255,.12); }
+
+    /* Preview (center top) */
+    .preview{
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .previewInner{
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      min-height:0;
+      overflow:hidden;
+    }
+
+    .previewInner.previewLayout{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 12px;
+      padding: 14px;
+      align-items: stretch;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .hintRow{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+      color: var(--muted);
+      font-size:12px;
+    }
+
+    .screenShell {
+      
+      min-height: 0; 
+      display: grid; 
+      place-items: center; 
+      padding: 6px;
+    }
+
+   
+    .screen {
+      position: relative;
+      width: auto;
+      height: 100%;
+      aspect-ratio: 16 / 9;
+      max-width: 100%;
+      
+      outline: 1px solid rgba(255,255,255,.12);
+      
+      overflow: hidden;
+      border-radius: 8px; /* optional */
+    }
+
+    .panel.preview, .previewInner{ min-height: 0; }
+
+    .previewOuter {
+      height: 100%;
+      width: 100%;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+
+    .previewNotes{
+      grid-column: 2;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: flex-start;
+    }
+
+    .previewNotes .hintRow{
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .previewFrame {
+      width: min(100%, calc(100vh - 220px)); /* tweak minus header/footer */
+      aspect-ratio: 16 / 9;
+      max-width: 100%;
+      max-height: 100%;
+      background: #111;
+      border-radius: 14px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .previewContent {
+      position: absolute;
+      inset: 0;
+      transform-origin: center center;
+    }
+    /* This is what we zoom */
+    .previewScale{
+      position: absolute;
+      inset: 0;
+      transform-origin: center center;
+      will-change: transform;
+    }
+
+    .panel.preview{
+      display: flex;
+      flex-direction: column;
+      min-height: 0; /* IMPORTANT: allow children to shrink */
+    }
+
+    /* Inside preview panel */
+    .previewInner{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+      min-height:0; /* IMPORTANT */
+    }
+
+    /* Right (red) Inspector */
+    .inspector{
+      grid-column: 3;
+      grid-row: 1;
+      background:
+        linear-gradient(180deg, rgba(255,60,60,.20), rgba(255,60,60,.08)),
+        linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+    }
+
+
+
+    .kv{
+      display:grid;
+      gap:10px;
+    }
+    .kv .row{
+      display:grid;
+      grid-template-columns: 110px 1fr;
+      gap:10px;
+      align-items:center;
+    }
+    label{
+      font-size:12px;
+      color: var(--muted);
+    }
+    input[type="text"], input[type="number"], input[type="color"]{
+      width:100%;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.25);
+      color: var(--text);
+      border-radius: 12px;
+      padding:8px 10px;
+      font-size:12px;
+      outline:none;
+    }
+    input[type="color"]{ padding:0; height:34px; }
+
+    .emptyNote{
+      color: rgba(255,255,255,.55);
+      font-family: var(--mono);
+      font-size:12px;
+      line-height:1.5;
+      border:1px dashed rgba(255,255,255,.18);
+      border-radius: 14px;
+      padding:12px;
+      background: rgba(0,0,0,.18);
+    }
+
+    /* Node editor (bottom spans center+right) */
+    .editorWrap{
+      grid-column: 2 / 4;
+      grid-row: 2;
+      overflow:hidden;
+    }
+
+    .editor{
+      position:relative;
+      height:100%;
+      min-height:0;
+      background:
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,.06) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(180deg, rgba(0,0,0,.20), rgba(0,0,0,.32));
+      overflow:hidden;
+      cursor: default;
+    }
+
+    /* Transform stage */
+    .stage{
+      position:absolute;
+      inset:0;
+      transform: translate(var(--nx), var(--ny)) scale(var(--nz));
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    .wires{
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+    }
+
+    .nodes{
+      position:absolute;
+      inset:0;
+    }
+
+    .node{
+      position:absolute;
+      width:260px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(10,14,20,.86);
+      box-shadow: 0 12px 30px rgba(0,0,0,.45);
+      overflow:hidden;
+      user-select:none;
+      backdrop-filter: blur(6px);
+    }
+
+    .node.selected{
+      outline: 2px solid rgba(122,167,255,.55);
+      outline-offset: 2px;
+    }
+
+    .nh{
+      padding:10px 12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.03);
+      cursor:grab;
+    }
+    .nh:active{ cursor:grabbing; }
+
+    .nname{
+      display:flex; gap:8px; align-items:center;
+      font-size:13px; font-weight:650;
+    }
+
+    .ntype{
+      font-family: var(--mono);
+      font-size:11px;
+      color: var(--muted);
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.25);
+    }
+
+    .nbody{
+      padding:10px 12px 12px;
+      display:grid;
+      gap:10px;
+    }
+
+    .ports{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      margin-top:6px;
+    }
+    .portcol{ display:flex; flex-direction:column; gap:8px; }
+    .port{ display:flex; align-items:center; gap:8px; font-size:12px; color: var(--muted); }
+
+    .dot{
+      width:12px; height:12px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.25);
+      background: rgba(255,255,255,.06);
+      cursor:pointer;
+    }
+    .dot.out{ border-color: rgba(138,242,201,.55); }
+    .dot.in{ border-color: rgba(122,167,255,.55); }
+    .dot.active{
+      box-shadow: 0 0 0 6px rgba(122,167,255,.14);
+      background: rgba(122,167,255,.20);
+    }
+
+    .toast{
+      position:absolute;
+      left:14px;
+      bottom:14px;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.40);
+      color: var(--muted);
+      font-size:12px;
+      max-width: 640px;
+      pointer-events:none;
+      opacity:0;
+      transform: translateY(6px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .toast.show{ opacity:1; transform: translateY(0); }
+
+    /* Responsive */
+    @media (max-width: 1100px){
+      :root{ --leftW: 220px; --rightW: 320px; }
+    }
+
+    @media (max-width: 1200px){
+      .previewInner .previewLayout{
+        grid-template-columns: 1fr;
+      }
+      .previewNotes .hintRow{
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+    }
+
+    @media (max-width: 980px){
+      body{ overflow:auto; }
+      .app{
+        height:auto;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto auto;
+      }
+      .left{ grid-row: 1; grid-column:1; }
+      .preview{ grid-row: 2; grid-column:1; }
+      .inspector{ grid-row: 3; grid-column:1; }
+      .editorWrap{ grid-row: 4; grid-column:1; height: 650px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- LEFT (Blue) -->
+    <section class="panel left">
+      <div class="hdr">
+        <div class="title">🧊 Workspace <span class="pill">Menu</span></div>
+      </div>
+      <div class="content">
+        <div class="menuGrid">
+          <div class="menuTile" id="btnNew">New</div>
+          <div class="menuTile">Login</div>
+          <div class="menuTile">Open</div>
+          <div class="menuTile">Settings</div>
+          <div class="menuTile">Export</div>
+          <div class="menuTile">Help</div>
+        </div>
+
+        <div class="emptyNote">
+          Blue panel is yours:
+          <br>• New project
+          <br>• Login/user switch
+          <br>• Menu / file ops
+          <br><br>
+          We keep it flexible.
+        </div>
+      </div>
+    </section>
+
+    <!-- PREVIEW (Center Top) -->
+    <section class="panel preview">
+      <div class="hdr">
+        <div class="title">🎬 Preview <span class="pill">16:9</span></div>
+        <div class="btns">
+          <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);">
+            Screen
+            <select id="previewZoom">
+              <option value="0.7">70%</option>
+              <option value="1" selected>100%</option>
+              <option value="1.25">125%</option>
+            </select>
+          </label>
+          <button id="btnResetGraph" class="danger">Reset Graph</button>
+        </div>
+      </div>
+
+      <div class="previewInner previewLayout">
+        <!-- LEFT: Screen -->
+        <div class="screenShell">
+          <div class="screen" id="screen">
+            <div class="previewScale" id="previewScale">
+              <div id="renderRoot" style="position:absolute; inset:0;"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- RIGHT: Notes -->
+        <div class="previewNotes">
+          <div class="hintRow">
+            <span class="pill">Preview zoom affects only the screen content</span>
+            <span class="pill">Editor: Space+Drag to pan • Wheel to zoom</span>
+          </div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- INSPECTOR (Red Right Top) -->
+    <section class="panel inspector">
+      <div class="hdr">
+        <div class="title">🧰 Inspector <span class="pill">Selected</span></div>
+        <div class="btns">
+          <button id="btnClearSel">Clear</button>
+        </div>
+      </div>
+      <div class="content" id="inspectorBody">
+        <div class="emptyNote">
+          Click a node to edit its parameters here.
+          <br><br>
+          Red panel can later become:
+          <br>• advanced params
+          <br>• notes / metadata
+          <br>• node help / docs
+        </div>
+      </div>
+    </section>
+
+    <!-- NODE EDITOR (Bottom spans Center+Right) -->
+    <section class="panel editorWrap">
+      <div class="hdr">
+        <div class="title">🧩 Node Editor <span class="pill">Pan + Zoom</span></div>
+        <div class="btns">
+          <select id="nodeType">
+            <option value="Gradient">Gradient</option>
+            <option value="Text">Text</option>
+            <option value="Transform">Transform</option>
+            <option value="Composite">Composite</option>
+            <option value="Output">Output</option>
+            <option value="Color">Color</option>
+          </select>
+          <button id="btnAdd">Add Node</button>
+          <button id="btnClearWires" class="danger">Clear Wires</button>
+        </div>
+      </div>
+
+      <div class="editor" id="editor">
+        <div class="toast" id="toast"></div>
+
+        <!-- stage is panned/zoomed -->
+        <div class="stage" id="stage">
+          <svg class="wires" id="wires"></svg>
+          <div class="nodes" id="nodes"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+<script>
+(() => {
+  // -----------------------------
+  // State
+  // -----------------------------
+  const state = {
+    nodes: new Map(),
+    wires: [],
+    nextId: 1,
+    draggingNode: null,   // {id, ox, oy}
+    connecting: null,     // {nodeId, port}
+    selected: null,       // nodeId
+    toastTimer: null,
+
+    // Editor transform
+    panX: 0,
+    panY: 0,
+    zoom: 1,
+
+    // panning gesture
+    isPanning: false,
+    panStart: null,       // {x,y, panX, panY}
+    spaceDown: false,
+  };
+
+  const renderRoot = document.getElementById("renderRoot");
+  const inspectorBody = document.getElementById("inspectorBody");
+
+  const editorEl = document.getElementById("editor");
+  const stageEl  = document.getElementById("stage");
+  const nodesEl  = document.getElementById("nodes");
+  const wiresSvg = document.getElementById("wires");
+  const toastEl  = document.getElementById("toast");
+
+  // -----------------------------
+  // Preview zoom (only screen content)
+  // -----------------------------
+
+
+ 
+  function clamp(v, min, max){
+    return Math.max(min, Math.min(max, v));
+  }
+
+
+  // -----------------------------
+  // Toast
+  // -----------------------------
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
+  }
+
+  // -----------------------------
+  // Node definitions (same spirit as your MVP)
+  // -----------------------------
+  const NODE_DEFS = {
+    Color: {
+      inputs: [],
+      outputs: ["layer"],
+      defaults: { color:"#1e293b" },
+      icon: "🟦",
+      run: (node) => {
+        const el = document.createElement("div");
+        el.style.position = "absolute";
+        el.style.inset = "0";
+        el.style.background = node.params.color;
+        return { el };
+      },
+      inspector: (node) => ([
+        {k:"color", type:"color", label:"Color"}
+      ])
+    },
+    Gradient: {
+      inputs: [],
+      outputs: ["layer"],
+      defaults: { a:"#0ea5e9", b:"#22c55e", angle:45 },
+      icon: "🌈",
+      run: (node) => {
+        const el = document.createElement("div");
+        el.style.position = "absolute";
+        el.style.inset = "0";
+        el.style.background = `linear-gradient(${node.params.angle}deg, ${node.params.a}, ${node.params.b})`;
+        return { el };
+      },
+      inspector: () => ([
+        {k:"a", type:"color", label:"Color A"},
+        {k:"b", type:"color", label:"Color B"},
+        {k:"angle", type:"number", label:"Angle"}
+      ])
+    },
+    Text: {
+      inputs: ["bg"],
+      outputs: ["layer"],
+      defaults: { text:"Hello 👋", size:44, color:"#ffffff", x:40, y:60, weight:700 },
+      icon: "🔤",
+      run: (node, inputs) => {
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+
+        if(inputs.bg?.el) wrap.appendChild(inputs.bg.el);
+
+        const t = document.createElement("div");
+        t.textContent = node.params.text ?? "";
+        t.style.position = "absolute";
+        t.style.left = (Number(node.params.x)||0) + "px";
+        t.style.top  = (Number(node.params.y)||0) + "px";
+        t.style.color = node.params.color;
+        t.style.fontSize = (Number(node.params.size)||32) + "px";
+        t.style.fontWeight = String(node.params.weight||700);
+        t.style.textShadow = "0 10px 30px rgba(0,0,0,.45)";
+        wrap.appendChild(t);
+
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"text", type:"text", label:"Text"},
+        {k:"size", type:"number", label:"Size"},
+        {k:"color", type:"color", label:"Color"},
+        {k:"x", type:"number", label:"X"},
+        {k:"y", type:"number", label:"Y"},
+        {k:"weight", type:"number", label:"Weight"}
+      ])
+    },
+    Transform: {
+      inputs: ["in"],
+      outputs: ["layer"],
+      defaults: { x:0, y:0, scale:1, rot:0 },
+      icon: "🧲",
+      run: (node, inputs) => {
+        const src = inputs.in;
+        if(!src?.el) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        wrap.appendChild(src.el);
+
+        const x = Number(node.params.x) || 0;
+        const y = Number(node.params.y) || 0;
+        const s = Number(node.params.scale) || 1;
+        const r = Number(node.params.rot) || 0;
+
+        src.el.style.transformOrigin = "50% 50%";
+        src.el.style.transform = `translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"x", type:"number", label:"X"},
+        {k:"y", type:"number", label:"Y"},
+        {k:"scale", type:"number", label:"Scale"},
+        {k:"rot", type:"number", label:"Rotate°"},
+      ])
+    },
+    Composite: {
+      inputs: ["a", "b"],
+      outputs: ["layer"],
+      defaults: {},
+      icon: "🧬",
+      run: (node, inputs) => {
+        const A = inputs.a?.el || null;
+        const B = inputs.b?.el || null;
+        if(!A && !B) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        if(B) wrap.appendChild(B);
+        if(A) wrap.appendChild(A);
+        return { el: wrap };
+      },
+      inspector: () => ([])
+    },
+    Output: {
+      inputs: ["in"],
+      outputs: [],
+      defaults: {},
+      icon: "🎯",
+      run: (node, inputs) => inputs.in ?? null,
+      inspector: () => ([])
+    },
+  };
+
+
+  const previewZoom = document.getElementById("previewZoom");
+  const previewScale = document.getElementById("previewScale");
+
+  function applyPreviewScale() {
+    const k = Number(previewZoom.value);
+    previewScale.style.transform = `scale(${k})`;
+  }
+
+  previewZoom.addEventListener("change", applyPreviewScale);
+  applyPreviewScale(); // run once on load
+
+  // -----------------------------
+  // Graph eval (topo-ish, simple)
+  // -----------------------------
+  function findWireToInput(nodeId, inPort){
+    return state.wires.find(w => w.to.nodeId === nodeId && w.to.port === inPort);
+  }
+
+  function evaluate(){
+    const cache = new Map(); // nodeId -> outputMap
+    const ids = Array.from(state.nodes.keys()); // insertion order is fine for MVP
+
+    for(const nodeId of ids){
+      const node = state.nodes.get(nodeId);
+      const def  = NODE_DEFS[node.type];
+
+      const inputValues = {};
+      for(const p of def.inputs){
+        const w = findWireToInput(nodeId, p);
+        if(w){
+          const upstream = cache.get(w.from.nodeId);
+          inputValues[p] = upstream?.[w.from.port] ?? null;
+        }else{
+          inputValues[p] = null;
+        }
+      }
+
+      let outVal = null;
+      try{ outVal = def.run(node, inputValues); } catch(e){ console.error(e); outVal = null; }
+
+      const outMap = {};
+      for(const op of def.outputs) outMap[op] = outVal;
+      cache.set(nodeId, outMap);
+    }
+    return cache;
+  }
+
+  function evaluateAndRender(){
+    renderRoot.innerHTML = "";
+
+    const outputs = Array.from(state.nodes.values()).filter(n => n.type === "Output");
+    const outNode = outputs[0] || null;
+
+    if(!outNode){
+      const msg = document.createElement("div");
+      msg.style.position="absolute";
+      msg.style.inset="0";
+      msg.style.display="grid";
+      msg.style.placeItems="center";
+      msg.style.color="rgba(255,255,255,.55)";
+      msg.style.fontFamily="var(--mono)";
+      msg.style.fontSize="12px";
+      msg.textContent="Add an Output node and connect something into it.";
+      renderRoot.appendChild(msg);
+      return;
+    }
+
+    const cache = evaluate();
+    const wire = findWireToInput(outNode.id, "in");
+    const inVal = wire ? cache.get(wire.from.nodeId)?.[wire.from.port] : null;
+    const finalLayer = NODE_DEFS.Output.run(outNode, {in: inVal});
+
+    if(finalLayer?.el){
+      renderRoot.appendChild(finalLayer.el);
+    }else{
+      const msg = document.createElement("div");
+      msg.style.position="absolute";
+      msg.style.inset="0";
+      msg.style.display="grid";
+      msg.style.placeItems="center";
+      msg.style.color="rgba(255,255,255,.55)";
+      msg.style.fontFamily="var(--mono)";
+      msg.style.fontSize="12px";
+      msg.textContent="Output is not connected (or upstream is empty).";
+      renderRoot.appendChild(msg);
+    }
+  }
+
+  // -----------------------------
+  // Nodes + wires rendering with pan/zoom
+  // -----------------------------
+  function portKey(nodeId, kind, port){ return `${nodeId}:${kind}:${port}`; }
+
+  function editorToWorld(x, y){
+    // convert editor pixel to world coords under current transform
+    return {
+      x: (x - state.panX) / state.zoom,
+      y: (y - state.panY) / state.zoom
+    };
+  }
+
+  function worldToEditor(x, y){
+    return {
+      x: x * state.zoom + state.panX,
+      y: y * state.zoom + state.panY
+    };
+  }
+
+  function getDotCenter(dotEl){
+    const r = dotEl.getBoundingClientRect();
+    const er = editorEl.getBoundingClientRect();
+    const cx = (r.left + r.right)/2 - er.left;
+    const cy = (r.top + r.bottom)/2 - er.top;
+    // dot is inside stage, already transformed visually
+    // but cx/cy are in editor space, good for wiring
+    return { x: cx, y: cy };
+  }
+
+  function drawWires(){
+    const w = editorEl.clientWidth;
+    const h = editorEl.clientHeight;
+    wiresSvg.setAttribute("width", w);
+    wiresSvg.setAttribute("height", h);
+    wiresSvg.innerHTML = "";
+
+    const makePath = (a, b) => {
+      const dx = Math.max(40, Math.abs(b.x - a.x) * 0.35);
+      const c1 = { x: a.x + dx, y: a.y };
+      const c2 = { x: b.x - dx, y: b.y };
+      return `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
+    };
+
+    for(const w0 of state.wires){
+      const fromDot = document.querySelector(`[data-port="${portKey(w0.from.nodeId,"out",w0.from.port)}"]`);
+      const toDot   = document.querySelector(`[data-port="${portKey(w0.to.nodeId,"in",w0.to.port)}"]`);
+      if(!fromDot || !toDot) continue;
+
+      const a = getDotCenter(fromDot);
+      const b = getDotCenter(toDot);
+
+      const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+      p.setAttribute("d", makePath(a,b));
+      p.setAttribute("fill","none");
+      p.setAttribute("stroke","rgba(138,242,201,.75)");
+      p.setAttribute("stroke-width","2");
+      p.setAttribute("stroke-linecap","round");
+      p.setAttribute("opacity","0.9");
+      wiresSvg.appendChild(p);
+    }
+
+    if(state.connecting && state._mouse){
+      const fromDot = document.querySelector(`[data-port="${portKey(state.connecting.nodeId,"out",state.connecting.port)}"]`);
+      if(fromDot){
+        const a = getDotCenter(fromDot);
+        const b = state._mouse;
+        const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+        p.setAttribute("d", makePath(a,b));
+        p.setAttribute("fill","none");
+        p.setAttribute("stroke","rgba(122,167,255,.75)");
+        p.setAttribute("stroke-width","2");
+        p.setAttribute("stroke-dasharray","5 6");
+        p.setAttribute("stroke-linecap","round");
+        p.setAttribute("opacity","0.9");
+        wiresSvg.appendChild(p);
+      }
+    }
+  }
+
+  function render(){
+    nodesEl.innerHTML = "";
+
+    for(const node of state.nodes.values()){
+      const def = NODE_DEFS[node.type];
+
+      const el = document.createElement("div");
+      el.className = "node" + (state.selected === node.id ? " selected" : "");
+      el.style.left = node.pos.x + "px";
+      el.style.top  = node.pos.y + "px";
+      el.dataset.id = node.id;
+
+      el.innerHTML = `
+        <div class="nh" title="Drag node. Click body to select.">
+          <div class="nname">${def.icon} ${node.type}</div>
+          <div class="ntype">${node.id}</div>
+        </div>
+        <div class="nbody">
+          <div class="ports">
+            <div class="portcol">
+              ${def.inputs.map(p => `
+                <div class="port">
+                  <div class="dot in" data-io="in" data-port="${portKey(node.id,"in",p)}" data-node="${node.id}" data-name="${p}"></div>
+                  <span>${p}</span>
+                </div>
+              `).join("")}
+            </div>
+            <div class="portcol" style="justify-self:end;">
+              ${def.outputs.map(p => `
+                <div class="port" style="justify-content:flex-end;">
+                  <span>${p}</span>
+                  <div class="dot out" data-io="out" data-port="${portKey(node.id,"out",p)}" data-node="${node.id}" data-name="${p}"></div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Node selection
+      el.addEventListener("mousedown", (ev) => {
+        // clicking anywhere selects, but dragging handled in header
+        if(!ev.target.classList.contains("dot")){
+          selectNode(node.id);
+        }
+      });
+
+      // Drag node header (needs to respect zoom)
+      const header = el.querySelector(".nh");
+      header.addEventListener("mousedown", (ev) => {
+        if(ev.button !== 0) return;
+        ev.stopPropagation();
+
+        selectNode(node.id);
+
+        // calculate offset in WORLD coords so drag feels correct under zoom
+        const er = editorEl.getBoundingClientRect();
+        const mx = ev.clientX - er.left;
+        const my = ev.clientY - er.top;
+        const mWorld = editorToWorld(mx, my);
+
+        state.draggingNode = {
+          id: node.id,
+          ox: mWorld.x - node.pos.x,
+          oy: mWorld.y - node.pos.y
+        };
+      });
+
+      // Port clicks
+      el.querySelectorAll(".dot").forEach(dot => {
+        dot.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const io = dot.getAttribute("data-io");
+          const nodeId = dot.getAttribute("data-node");
+          const port = dot.getAttribute("data-name");
+
+          if(io === "out"){
+            state.connecting = { nodeId, port };
+            toast(`Connecting from ${nodeId}.${port}`);
+          }else{
+            if(!state.connecting){
+              // remove existing wire into this input
+              const existing = findWireToInput(nodeId, port);
+              if(existing){
+                state.wires = state.wires.filter(w => w !== existing);
+                toast(`Removed wire into ${nodeId}.${port}`);
+                evaluateAndRender();
+              }
+              render();
+              drawWires();
+              return;
+            }
+
+            const from = state.connecting;
+            const to = { nodeId, port };
+
+            // one wire per input
+            state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
+            state.wires.push({ from, to });
+            state.connecting = null;
+            toast(`Connected → ${to.nodeId}.${to.port}`);
+
+            evaluateAndRender();
+            render();
+            drawWires();
+          }
+        });
+      });
+
+      nodesEl.appendChild(el);
+    }
+
+    renderActiveDots();
+    drawWires();
+  }
+
+  function renderActiveDots(){
+    document.querySelectorAll(".dot").forEach(d => d.classList.remove("active"));
+    if(state.connecting){
+      const sel = `[data-port="${portKey(state.connecting.nodeId,"out",state.connecting.port)}"]`;
+      const dot = document.querySelector(sel);
+      if(dot) dot.classList.add("active");
+    }
+  }
+
+  // -----------------------------
+  // Inspector (Red panel)
+  // -----------------------------
+  function selectNode(nodeId){
+    state.selected = nodeId;
+    render(); // updates highlight
+    renderInspector();
+  }
+
+  function renderInspector(){
+    const node = state.selected ? state.nodes.get(state.selected) : null;
+    if(!node){
+      inspectorBody.innerHTML = `
+        <div class="emptyNote">
+          Click a node to edit its parameters here.
+          <br><br>
+          Red panel can later become:
+          <br>• advanced params
+          <br>• notes / metadata
+          <br>• node help / docs
+        </div>`;
+      return;
+    }
+
+    const def = NODE_DEFS[node.type];
+    const fields = def.inspector ? def.inspector(node) : [];
+
+    const header = `
+      <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+        <div class="pill">${def.icon} ${node.type}</div>
+        <div class="pill">id: ${node.id}</div>
+      </div>
+    `;
+
+    if(fields.length === 0){
+      inspectorBody.innerHTML = header + `
+        <div class="emptyNote">No parameters for this node (yet).</div>
+      `;
+      return;
+    }
+
+    inspectorBody.innerHTML = header + `
+      <div class="kv">
+        ${fields.map(f => `
+          <div class="row">
+            <label>${f.label}</label>
+            <input
+              data-k="${f.k}"
+              type="${f.type}"
+              ${f.type === "number" ? `step="1"` : ""}
+              value="${escapeAttr(node.params[f.k] ?? "")}"
+            />
+          </div>
+        `).join("")}
+      </div>
+    `;
+
+    inspectorBody.querySelectorAll("input[data-k]").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const k = inp.getAttribute("data-k");
+        let v = inp.value;
+        if(inp.type === "number") v = Number(v);
+        node.params[k] = v;
+        evaluateAndRender();
+      });
+    });
+  }
+
+  function escapeAttr(s){
+    return String(s).replaceAll('"','&quot;');
+  }
+
+  // -----------------------------
+  // Pan + Zoom controls for editor
+  // -----------------------------
+  function applyEditorTransform(){
+    document.documentElement.style.setProperty("--nx", state.panX + "px");
+    document.documentElement.style.setProperty("--ny", state.panY + "px");
+    document.documentElement.style.setProperty("--nz", state.zoom);
+    drawWires();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if(e.code === "Space"){
+      state.spaceDown = true;
+      editorEl.style.cursor = "grab";
+      e.preventDefault();
+    }
+  });
+
+
+
+  window.addEventListener("keyup", (e) => {
+    if(e.code === "Space"){
+      state.spaceDown = false;
+      state.isPanning = false;
+      state.panStart = null;
+      editorEl.style.cursor = "default";
+    }
+  });
+
+  editorEl.addEventListener("mousedown", (e) => {
+    // Start panning only if Space is held (or middle mouse if you want later)
+    if(e.button !== 0) return;
+    if(!state.spaceDown) return;
+
+    const er = editorEl.getBoundingClientRect();
+    const mx = e.clientX - er.left;
+    const my = e.clientY - er.top;
+
+    state.isPanning = true;
+    state.panStart = { x: mx, y: my, panX: state.panX, panY: state.panY };
+    editorEl.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    const er = editorEl.getBoundingClientRect();
+    const mx = e.clientX - er.left;
+    const my = e.clientY - er.top;
+
+    state._mouse = { x: mx, y: my };
+
+    // Panning
+    if(state.isPanning && state.panStart){
+      const dx = mx - state.panStart.x;
+      const dy = my - state.panStart.y;
+      state.panX = state.panStart.panX + dx;
+      state.panY = state.panStart.panY + dy;
+      applyEditorTransform();
+    }
+
+    // Dragging node (world coords)
+    if(state.draggingNode){
+      const mWorld = editorToWorld(mx, my);
+      const n = state.nodes.get(state.draggingNode.id);
+      if(n){
+        n.pos.x = mWorld.x - state.draggingNode.ox;
+        n.pos.y = mWorld.y - state.draggingNode.oy;
+
+        const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+        if(nodeEl){
+          nodeEl.style.left = n.pos.x + "px";
+          nodeEl.style.top  = n.pos.y + "px";
+        }
+        drawWires();
+      }
+    }
+
+    if(state.connecting){
+      drawWires();
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    state.draggingNode = null;
+    if(state.isPanning){
+      state.isPanning = false;
+      state.panStart = null;
+      editorEl.style.cursor = state.spaceDown ? "grab" : "default";
+    }
+  });
+
+  // Wheel zoom (zoom to cursor)
+  editorEl.addEventListener("wheel", (e) => {
+    e.preventDefault();
+
+    const er = editorEl.getBoundingClientRect();
+    const mx = e.clientX - er.left;
+    const my = e.clientY - er.top;
+
+    // world position under mouse BEFORE zoom
+    const before = editorToWorld(mx, my);
+
+    // smooth-ish zoom
+    const delta = -e.deltaY;
+    const factor = Math.exp(delta * 0.0012); // small exponential feel
+    const nextZoom = clamp(state.zoom * factor, 0.25, 2.5);
+
+    // apply zoom
+    state.zoom = nextZoom;
+
+    // world position under mouse AFTER zoom
+    const after = editorToWorld(mx, my);
+
+    // adjust pan so the same world point stays under cursor
+    state.panX += (after.x - before.x) * state.zoom;
+    state.panY += (after.y - before.y) * state.zoom;
+
+    applyEditorTransform();
+  }, { passive:false });
+
+  // Click background cancels connection
+  editorEl.addEventListener("click", (e) => {
+    // If clicked on editor (not a node/dot), cancel connecting
+    const isDot = e.target.classList?.contains("dot");
+    const isNode = e.target.closest?.(".node");
+    if(!isDot && !isNode && state.connecting){
+      state.connecting = null;
+      renderActiveDots();
+      drawWires();
+      toast("Cancelled connection.");
+    }
+  });
+
+  // -----------------------------
+  // Commands
+  // -----------------------------
+  document.getElementById("btnAdd").addEventListener("click", () => {
+    const t = document.getElementById("nodeType").value;
+    addNode(t);
+  });
+
+  document.getElementById("btnClearWires").addEventListener("click", () => {
+    state.wires = [];
+    state.connecting = null;
+    render();
+    evaluateAndRender();
+    toast("Cleared all wires.");
+  });
+
+  document.getElementById("btnResetGraph").addEventListener("click", () => {
+    resetGraph();
+    toast("Reset graph.");
+  });
+
+  document.getElementById("btnClearSel").addEventListener("click", () => {
+    state.selected = null;
+    render();
+    renderInspector();
+  });
+
+  document.getElementById("btnNew").addEventListener("click", () => {
+    resetGraph();
+    toast("New project (graph reset).");
+  });
+
+  window.addEventListener("resize", () => {
+    drawWires();
+  });
+
+  // -----------------------------
+  // Node creation
+  // -----------------------------
+  function uid(){ return String(state.nextId++); }
+
+  function addNode(type, pos){
+    const def = NODE_DEFS[type];
+    if(!def) return null;
+
+    const id = uid();
+    const node = {
+      id,
+      type,
+      pos: pos || { x: 60 + Math.random()*420, y: 60 + Math.random()*220 },
+      params: { ...(def.defaults || {}) }
+    };
+
+    state.nodes.set(id, node);
+    selectNode(id);
+    evaluateAndRender();
+    return node;
+  }
+
+  function resetGraph(){
+    state.nodes.clear();
+    state.wires = [];
+    state.connecting = null;
+    state.selected = null;
+    state.nextId = 1;
+
+    // Reset editor view
+    state.panX = 0;
+    state.panY = 0;
+    state.zoom = 1;
+    applyEditorTransform();
+
+    // Starter: Gradient -> Text -> Output
+    const g = addNode("Gradient", {x: 60,  y: 80});
+    const t = addNode("Text",     {x: 360, y: 105});
+    const o = addNode("Output",   {x: 660, y: 130});
+
+    // Auto wires
+    state.wires.push({ from:{nodeId:g.id, port:"layer"}, to:{nodeId:t.id, port:"bg"} });
+    state.wires.push({ from:{nodeId:t.id, port:"layer"}, to:{nodeId:o.id, port:"in"} });
+
+    render();
+    evaluateAndRender();
+    renderInspector();
+  }
+
+  // Init
+  resetGraph();
+
+})();
+
+</script>
+</body>
+</html>

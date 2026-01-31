@@ -1,0 +1,2470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Oniwire (v0.1)</title>
+  <style>
+:root{
+  --bg:#0b0f14;
+  --line: rgba(255,255,255,.10);
+  --text: rgba(255,255,255,.92);
+  --muted: rgba(255,255,255,.60);
+  --shadow: 0 18px 55px rgba(0,0,0,.55);
+  --r: 18px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+
+  /* Layout sizing */
+  --leftW: 260px;
+  --rightW: 500px;
+  --topH: 54vh;
+  --gap: 14px;
+
+  /* Node editor transform */
+  --nx: 0px;
+  --ny: 0px;
+  --nz: 1;
+}
+
+  /* ===== Better Node Dropdown Styling ===== */
+  select#nodeType{
+    background: rgba(15,18,25,.95);
+    color: rgba(255,255,255,.88);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 14px;
+    padding: 8px 12px;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  select#nodeType:hover{
+    background: rgba(25,28,40,.95);
+  }
+
+  select#nodeType:focus{
+    border-color: rgba(122,167,255,.55);
+    box-shadow: 0 0 0 3px rgba(122,167,255,.15);
+  }
+
+  /* Darker dropdown list */
+  select#nodeType option{
+    background: #10131b;
+    color: rgba(255,255,255,.9);
+  }
+
+select#nodeType optgroup{
+  font-style: normal;
+  font-weight: 700;
+  color: rgba(180,200,255,.6);
+}
+
+/* Inspector inputs (dark) */
+#inspectorBody input[data-k],
+#inspectorBody select[data-k],
+#inspectorBody textarea[data-k] {
+  background: rgba(15,18,25,.6);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+}
+
+#inspectorBody textarea[data-k] {
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.35;
+}
+
+#inspectorBody input[data-k]:focus,
+#inspectorBody select[data-k]:focus,
+#inspectorBody textarea[data-k]:focus{
+  box-shadow: 0 0 0 4px rgba(122,167,255,.06);
+  border-color: rgba(122,167,255,.35);
+}
+
+/* Scrollbar for textarea */
+#inspectorBody textarea[data-k]::-webkit-scrollbar{ height:12px; width:12px }
+#inspectorBody textarea[data-k]::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.08); border-radius:8px }
+#inspectorBody textarea[data-k]::-webkit-scrollbar-track{ background: transparent }
+
+*{ box-sizing:border-box; }
+html, body { height:100%; }
+body{
+  margin:0;
+  overflow:hidden;
+  font-family: var(--sans);
+  color: var(--text);
+  background:
+    radial-gradient(1200px 900px at 25% 10%, rgba(122,167,255,.10), transparent 60%),
+    radial-gradient(1200px 900px at 75% 30%, rgba(138,242,201,.10), transparent 55%),
+    var(--bg);
+}
+
+/* App grid: 3 columns x 2 rows */
+.app{
+  height:100vh;
+  display:grid;
+  grid-template-columns: var(--leftW) 1fr var(--rightW);
+  grid-template-rows: var(--topH) 1fr;
+  gap: var(--gap);
+  padding: var(--gap);
+  min-height:0;
+  min-width:0;
+}
+
+/* Panels */
+.panel{
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow:hidden;
+  min-width:0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+
+.hdr{
+  padding:12px 14px;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  border-bottom:1px solid var(--line);
+  background: rgba(0,0,0,.18);
+  gap:10px;
+}
+
+.logoFrame {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  display: inline-block;
+  vertical-align: -5px;
+  margin-right: 8px;
+  pointer-events: none;
+}
+
+
+.title{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:650;
+  font-size:24px;
+  letter-spacing:.2px;
+  white-space:nowrap;
+}
+
+.pill{
+  font-family: var(--mono);
+  font-size: 11px;
+  padding:3px 8px;
+  border-radius: 999px;
+  border:1px solid var(--line);
+  color: var(--muted);
+  background: rgba(0,0,0,.2);
+  white-space:normal;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.btns{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+
+button, select{ font: inherit; }
+
+button{
+  appearance:none;
+  border:1px solid var(--line);
+  background: rgba(0,0,0,.25);
+  color: var(--text);
+  border-radius: 12px;
+  padding:8px 10px;
+  font-size:12px;
+  cursor:pointer;
+  user-select:none;
+  transition: background .15s ease, transform .05s ease;
+}
+button:hover{ background: rgba(255,255,255,.06); }
+button:active{ transform: translateY(1px); }
+
+.danger{ border-color: rgba(255,107,107,.35); }
+.danger:hover{ background: rgba(255,107,107,.12); }
+
+select{
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.35);
+  color: var(--text);
+  border-radius: 12px;
+  padding:7px 38px 7px 12px; /* space for arrow */
+  font-size:12px;
+  outline:none;
+
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  cursor: pointer;
+
+  /* custom arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20'%3E%3Cpath fill='rgba(255,255,255,0.6)' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+}
+
+select option{
+  background: #0f1620;
+  color: rgba(255,255,255,.9);
+}
+
+
+.content{
+  padding:12px 14px;
+  overflow:auto;
+  min-height:0;
+}
+
+/* Left (blue) */
+.left{
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  background: rgba(255,255,255,.02);
+    
+}
+
+.left .content{ display:flex; flex-direction:column; gap:12px; }
+
+.menuGrid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+.menuTile{
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.08);
+  border-radius: 14px;
+  height: 56px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: rgba(255,255,255,.9);
+  font-weight:600;
+  cursor:pointer;
+  user-select:none;
+}
+.menuTile:hover{ background: rgba(255,255,255,.12); }
+
+/* Preview (center top) */
+.preview{ grid-column: 2; grid-row: 1; }
+.panel.preview{ min-height:0; }
+
+.previewInner{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+
+.previewLayout{
+   display: grid;
+  /* Screen column has a minimum, Notes column is allowed to shrink */
+  grid-template-columns: minmax(720px, 1fr) minmax(220px, 360px);
+  gap: 12px;
+  padding: 20px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hintRow{
+  display:flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 0;
+  gap:12px;
+  padding-right: 14px;
+  padding-top: 8px;
+  color: var(--muted);
+  font-size:12px;
+}
+
+.screenShell{
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+/* The 16:9 viewport should never become “wider than 16:9”.
+   Size it by HEIGHT, and cap by WIDTH too. */
+.screen{
+  position: relative;
+
+  /* key trick: height drives size, so ratio stays true */
+  height: 100%;
+  width: auto;
+  aspect-ratio: 16 / 9;
+
+  /* don’t exceed the available column width */
+  max-width: 100%;
+
+  outline: 1px solid rgba(255,255,255,.12);
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+
+.previewScale{
+  position:absolute;
+  inset:0;
+  transform-origin:center center;
+  will-change: transform;
+}
+
+.previewNotes{
+  min-height: 0;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  padding: 8px 14px 0 16px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 16px;
+}
+
+.hintRow{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hintRow .pill {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.75);
+
+  white-space: normal;
+  word-break: break-word;
+}
+
+.previewNotes .hintRow{
+  flex-direction:column;
+  align-items:flex-start;
+  padding-left: 10px;
+  
+}
+
+.previewNotes .pill{
+  white-space: normal;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* wider inspector */
+:root{ --rightW: 460px; }  /* tweak */
+
+
+#previewViewport{
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px; /* optional */
+  cursor: default;
+  user-select: none;
+}
+
+#previewViewport.pannable{ cursor: grab; }
+#previewViewport.panning { cursor: grabbing; }
+
+#previewInner{
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+/* Right (red) Inspector */
+.inspector{
+  grid-column: 3;
+  grid-row: 1;
+  background: rgba(255,255,255,.02);
+    
+}
+
+.kv{ display:grid; gap:10px; }
+.kv .row{
+  display:grid;
+  grid-template-columns: 110px 1fr;
+  gap:10px;
+  align-items:center;
+}
+label{ font-size:12px; color: var(--muted); }
+
+input[type="text"], input[type="number"], input[type="color"]{
+  width:100%;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.25);
+  color: var(--text);
+  border-radius: 12px;
+  padding:8px 10px;
+  font-size:12px;
+  outline:none;
+}
+input[type="color"]{ padding:0; height:34px; }
+
+.emptyNote{
+  color: rgba(255,255,255,.55);
+  font-family: var(--mono);
+  font-size:12px;
+  line-height:1.5;
+  border:1px dashed rgba(255,255,255,.18);
+  border-radius: 14px;
+  padding:12px;
+  background: rgba(0,0,0,.18);
+}
+
+
+select:hover{
+  border-color: rgba(122,167,255,.35);
+}
+
+select optgroup{
+  background: #0f1620;
+  color: rgba(180,200,255,.6);
+}
+
+/* Node editor (bottom spans center+right) */
+.editorWrap{
+  grid-column: 2 / 4;
+  grid-row: 2;
+  overflow:hidden;
+}
+
+.editor{
+  position:relative;
+  height:100%;
+  min-height:0;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,.06) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, rgba(0,0,0,.20), rgba(0,0,0,.32));
+  overflow:hidden;
+  cursor: default;
+}
+
+/* ===== Tab Node Search ===== */
+.nodeSearch{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,.22);
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: start;
+  padding: 14px;
+}
+.nodeSearch.hidden{ display:none; }
+
+.nodeSearchBox{
+  width: 360px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(12,14,20,.92);
+  box-shadow: 0 22px 70px rgba(0,0,0,.6);
+  overflow: hidden;
+}
+
+#nodeSearchInput{
+  width: 100%;
+  border: 0;
+  outline: none;
+  padding: 12px 12px;
+  font-size: 13px;
+  color: rgba(255,255,255,.92);
+  background: rgba(0,0,0,.18);
+  border-bottom: 1px solid rgba(255,255,255,.10);
+}
+
+.nodeSearchList{
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.nodeItem{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  cursor: pointer;
+  user-select: none;
+}
+.nodeItem:hover{ background: rgba(255,255,255,.07); }
+.nodeItem.active{
+  border-color: rgba(122,167,255,.55);
+  box-shadow: 0 0 0 3px rgba(122,167,255,.14);
+}
+
+.nodeLeft{
+  display:flex; align-items:center; gap:10px;
+}
+.nodeIcon{
+  width: 26px; height: 26px;
+  display:grid; place-items:center;
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  font-size: 14px;
+}
+.nodeText{
+  display:flex; flex-direction:column; gap:2px;
+}
+.nodeName{
+  font-weight: 650;
+  font-size: 12px;
+  color: rgba(255,255,255,.92);
+}
+.nodeCat{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(255,255,255,.55);
+}
+.nodeHint{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(255,255,255,.45);
+}
+
+
+/* Transform stage */
+.stage{
+  position:absolute;
+  inset:0;
+  transform: translate(var(--nx), var(--ny)) scale(var(--nz));
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.wires{ position:absolute; inset:0; pointer-events:none; }
+.nodes{ position:absolute; inset:0; }
+
+.wires{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index: 50; /* ✅ above nodes */
+}
+
+.stage{
+  position:absolute;
+  inset:0;
+  z-index: 10; /* ✅ below wires */
+}
+
+
+.node{
+  position:absolute;
+  width:260px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(10,14,20,.86);
+  box-shadow: 0 12px 30px rgba(0,0,0,.45);
+  overflow:hidden;
+  user-select:none;
+  backdrop-filter: blur(6px);
+}
+.node.selected{
+  outline: 2px solid rgba(122,167,255,.55);
+  outline-offset: 2px;
+}
+
+.nh{
+  padding:10px 12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.03);
+  cursor:grab;
+}
+.nh:active{ cursor:grabbing; }
+
+.nname{ display:flex; gap:8px; align-items:center; font-size:13px; font-weight:650; }
+.ntype{
+  font-family: var(--mono);
+  font-size:11px;
+  color: var(--muted);
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.25);
+}
+
+.nbody{ padding:10px 12px 12px; display:grid; gap:10px; }
+
+.ports{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:6px; }
+.portcol{ display:flex; flex-direction:column; gap:8px; }
+.port{ display:flex; align-items:center; gap:8px; font-size:12px; color: var(--muted); }
+
+.dot{
+  width:12px; height:12px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.25);
+  background: rgba(255,255,255,.06);
+  cursor:pointer;
+}
+.dot.out{ border-color: rgba(138,242,201,.55); }
+.dot.in{ border-color: rgba(122,167,255,.55); }
+.dot.active{
+  box-shadow: 0 0 0 6px rgba(122,167,255,.14);
+  background: rgba(122,167,255,.20);
+}
+
+.toast{
+  position:absolute;
+  left:14px;
+  bottom:14px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--line);
+  background: rgba(0,0,0,.40);
+  color: var(--muted);
+  font-size:12px;
+  max-width: 640px;
+  pointer-events:none;
+  opacity:0;
+  transform: translateY(6px);
+  transition: opacity .2s ease, transform .2s ease;
+}
+.toast.show{ opacity:1; transform: translateY(0); }
+
+/* Responsive */
+@media (max-width: 1100px){
+  :root{ --leftW: 220px; --rightW: 320px; }
+}
+
+@media (max-width: 1200px){
+  .previewLayout{ grid-template-columns: 1fr; }
+  .previewNotes{ padding-top: 12px }
+  .previewNotes .hintRow{
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+}
+
+@media (max-width: 980px){
+  body{ overflow:auto; }
+  .app{
+    height:auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+  }
+  .left{ grid-row: 1; grid-column:1; }
+  .preview{ grid-row: 2; grid-column:1; }
+  .inspector{ grid-row: 3; grid-column:1; }
+  .editorWrap{ grid-row: 4; grid-column:1; height: 650px; }
+}
+</style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- LEFT (Blue) -->
+    <section class="panel left">
+      <div class="hdr">
+        <iframe src="logo.html" class="logoFrame"></iframe>
+        <div class="title">ONIWIRE</div> 
+      </div>
+      <div class="content">
+        <div class="menuGrid">
+          <div class="menuTile" id="btnNew">New</div>
+          <div class="menuTile" id="btnImport">Import</div>
+          <div class="menuTile" id="btnExport">Export</div>
+          <div class="menuTile">Help</div>
+        </div>
+
+        <div style="display:grid; gap:10px;">
+          <input id="projectName" type="text" placeholder="Project name (e.g. My Shot 01)" />
+
+          <div style="display:flex; gap:10px;">
+            <button id="btnSaveNamed" style="flex:1;">Save</button>
+            <button id="btnLoadNamed" style="flex:1;">Load</button>
+          </div>
+
+          <select id="projectList"></select>
+
+          <div style="display:flex; gap:10px;">
+            <button id="btnDeleteProject" class="danger" style="flex:1;">Delete</button>
+          </div>
+        </div>
+
+        <div class="emptyNote">
+          Blue panel is yours:
+          <br>• New project
+          <br>• Login/user switch
+          <br>• Menu / file ops
+          <br><br>
+          We keep it flexible.
+        </div>
+      </div>
+    </section>
+
+    <!-- PREVIEW (Center Top) -->
+    <section class="panel preview">
+      <div class="hdr">
+        <div class="title">🎬 Preview <span class="pill">16:9</span></div>
+        <div class="btns">
+          <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);">
+            Screen
+            <select id="previewZoom">
+              <option value="0.7">70%</option>
+              <option value="1" selected>100%</option>
+              <option value="1.25">125%</option>
+              <option value="1.5">150%</option>
+              <option value="2">200%</option>
+            </select>
+          </label>
+          <button id="btnResetGraph" class="danger">Reset Graph</button>
+        </div>
+      </div>
+
+      <div class="previewInner previewLayout">
+        <!-- LEFT: Screen -->
+        <div class="screenShell">
+          <div class="screen" id="previewViewport" draggable ="false">
+            <div class="previewScale" id="previewInner">
+              <div id="renderRoot" style="position:absolute; inset:0;"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- RIGHT: Notes -->
+        <div class="previewNotes">
+          <div class="hintRow">
+            <span class="pill">Hi, this is an online node based visual creation app. <br> 
+              - Press Tab for node searching. <br>
+              - You can pan and scrool for viewport Control. 
+              - More is coming. 
+            </span>
+            <span class="pill">Editor: Space+Drag to pan • Wheel to zoom</span>
+          </div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- INSPECTOR (Red Right Top) -->
+    <section class="panel inspector">
+      <div class="hdr">
+        <div class="title">🧰 Inspector <span class="pill">Selected</span></div>
+        <div class="btns">
+          <button id="btnClearSel">Clear</button>
+        </div>
+      </div>
+      <div class="content" id="inspectorBody">
+        <div class="emptyNote">
+          Click a node to edit its parameters here.
+          <br><br>
+          Red panel can later become:
+          <br>• advanced params
+          <br>• notes / metadata
+          <br>• node help / docs
+        </div>
+      </div>
+    </section>
+
+    <!-- NODE EDITOR (Bottom spans Center+Right) -->
+    <section class="panel editorWrap">
+      <div class="hdr">
+        <div class="title">
+          🧩 Node Editor
+          <div class="hdrInlineControls">
+            <select id="nodeType">
+              <!-- Geometry / Generators -->
+              <optgroup label="Generators">
+                <option value="Color">Color</option>
+                <option value="Gradient">Gradient</option>
+                <option value="Text">Text</option>
+              </optgroup>
+
+              <!-- Transform + Modifiers -->
+              <optgroup label="Operations">
+                <option value="Transform">Transform</option>
+                <option value="Composite">Composite</option>
+              </optgroup>
+
+              <!-- Final Nodes -->
+              <optgroup label="Output">
+                <option value="Output">Output</option>
+              </optgroup>
+            </select>
+            <button id="btnAdd">Add Node</button>
+        </div>
+      </div>
+
+        <div class="btns">
+          <button id="btnClearWires" class="danger">Clear Wires</button>
+          </div>
+      </div>
+
+      <div class="editor" id="editor">
+        <div class="toast" id="toast"></div>
+
+        <!-- stage is panned/zoomed -->
+        <!-- wires overlay (NOT transformed) -->
+          <svg class="wires" id="wires"></svg>
+
+          <!-- stage is panned/zoomed -->
+          <div class="stage" id="stage">
+            <div class="nodes" id="nodes"></div>
+          </div>
+      </div>
+    </section>
+
+  </div>
+
+<!-- Node Search (Tab Menu) -->
+<div id="nodeSearch" class="nodeSearch hidden" aria-hidden="true">
+  <div class="nodeSearchBox">
+    <input id="nodeSearchInput" type="text" placeholder="Search nodes… (e.g. gradient, text, transform)" autocomplete="off" />
+    <div id="nodeSearchList" class="nodeSearchList"></div>
+  </div>
+</div>
+
+
+
+<script>
+(() => {
+  // -----------------------------
+  // State
+  // -----------------------------
+  const state = {
+    nodes: new Map(),
+    wires: [],
+    nextId: 1,
+
+    draggingNode: null,   // {id, ox, oy}
+    connecting: null,     // {nodeId, port}
+    selected: null,       // nodeId
+    toastTimer: null,
+
+    // Editor transform
+    panX: 0,
+    panY: 0,
+    zoom: 1,
+
+    // panning gesture
+    isPanning: false,
+    panStart: null,       // {x,y, panX, panY}
+    spaceDown: false,
+
+    // mouse in editor space (for live wire)
+    mouse: null,
+  };
+
+  const renderRoot = document.getElementById("renderRoot");
+  const inspectorBody = document.getElementById("inspectorBody");
+
+  const editorEl = document.getElementById("editor");
+  const nodesEl  = document.getElementById("nodes");
+  const wiresSvg = document.getElementById("wires");
+  const toastEl  = document.getElementById("toast");
+
+  // -----------------------------
+  // Preview zoom + pan
+  // -----------------------------
+  const previewZoomSel = document.getElementById("previewZoom");
+  const previewViewport = document.getElementById("previewViewport");
+  const previewInner = document.getElementById("previewInner"); // or previewScale if you kept that id
+
+  let previewZoomValue = Number(previewZoomSel.value) || 1;
+  let pan = { x: 0, y: 0 };
+
+  let isPreviewPanning = false;
+  let panStart = { x: 0, y: 0 };
+  let panBase = { x: 0, y: 0 };
+
+  let isPreviewDragging = false;
+  let dragStart = { x: 0, y: 0 };
+  let dragBase = { x: 0, y: 0 };
+  let dragNodeId = null;
+
+  function applyPreviewTransform(){
+    previewZoomValue = Number(previewZoomSel.value) || 1;
+
+    const pannable = previewZoomValue > 1;
+    previewViewport.classList.toggle("pannable", pannable);
+
+    // clamp pan
+    const vw = previewViewport.clientWidth;
+    const vh = previewViewport.clientHeight;
+    const iw = previewInner.offsetWidth;
+    const ih = previewInner.offsetHeight;
+
+    const scaledW = iw * previewZoomValue;
+    const scaledH = ih * previewZoomValue;
+
+    const maxX = Math.max(0, (scaledW - vw) / 2);
+    const maxY = Math.max(0, (scaledH - vh) / 2);
+
+    if(!pannable){
+      pan.x = 0; pan.y = 0;
+    }else{
+      pan.x = Math.max(-maxX, Math.min(maxX, pan.x));
+      pan.y = Math.max(-maxY, Math.min(maxY, pan.y));
+    }
+
+    previewInner.style.transform =
+      `translate(${pan.x}px, ${pan.y}px) scale(${previewZoomValue})`;
+  }
+
+  previewZoomSel.addEventListener("change", applyPreviewTransform);
+  applyPreviewTransform();
+
+  previewViewport.addEventListener("pointerdown", (e) => {
+    if(e.button !== 0) return;
+
+    const selectedNode = state.selected ? state.nodes.get(state.selected) : null;
+    const canDrag = selectedNode
+      && selectedNode.params
+      && typeof selectedNode.params.x !== "undefined"
+      && typeof selectedNode.params.y !== "undefined"
+      && previewInner.contains(e.target);
+
+    if(canDrag){
+      isPreviewDragging = true;
+      dragNodeId = selectedNode.id;
+      previewViewport.setPointerCapture(e.pointerId);
+      dragStart.x = e.clientX; dragStart.y = e.clientY;
+      dragBase.x = Number(selectedNode.params.x) || 0;
+      dragBase.y = Number(selectedNode.params.y) || 0;
+      return;
+    }
+
+    if(previewZoomValue <= 1) return;
+    isPreviewPanning = true;
+    previewViewport.classList.add("panning");
+    previewViewport.setPointerCapture(e.pointerId);
+
+    panStart.x = e.clientX; panStart.y = e.clientY;
+    panBase.x = pan.x; panBase.y = pan.y;
+  });
+
+
+  previewViewport.addEventListener("pointermove", (e) => {
+    if(isPreviewDragging){
+      const node = dragNodeId ? state.nodes.get(dragNodeId) : null;
+      if(!node) return;
+      const dx = (e.clientX - dragStart.x) / previewZoomValue;
+      const dy = (e.clientY - dragStart.y) / previewZoomValue;
+      node.params.x = dragBase.x + dx;
+      node.params.y = dragBase.y + dy;
+
+      // sync inspector inputs if present
+      inspectorBody.querySelectorAll('[data-k="x"]').forEach(inp => inp.value = node.params.x);
+      inspectorBody.querySelectorAll('[data-k="y"]').forEach(inp => inp.value = node.params.y);
+
+      evaluateAndRender();
+      return;
+    }
+
+    if(!isPreviewPanning) return;
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    pan.x = panBase.x + dx;
+    pan.y = panBase.y + dy;
+    applyPreviewTransform();
+  });
+
+
+  previewViewport.addEventListener("pointerup", () => {
+    isPreviewDragging = false;
+    dragNodeId = null;
+    isPreviewPanning = false;
+    previewViewport.classList.remove("panning");
+  });
+
+  previewViewport.addEventListener("pointercancel", () => {
+    isPreviewDragging = false;
+    dragNodeId = null;
+    isPreviewPanning = false;
+    previewViewport.classList.remove("panning");
+  });
+
+
+  
+
+
+
+  // -----------------------------
+  // Toast
+  // -----------------------------
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
+  }
+
+const INDEX_KEY = "visual-node-app:saves:index";
+
+function getSaveIndex(){
+  try { return JSON.parse(localStorage.getItem(INDEX_KEY) || "[]"); }
+  catch { return []; }
+}
+function setSaveIndex(list){
+  localStorage.setItem(INDEX_KEY, JSON.stringify(list));
+}
+
+function keyFor(name){
+  return `visual-node-app:save:${name}`;
+}
+
+function refreshProjectList(){
+  const sel = document.getElementById("projectList");
+  if(!sel) return;
+
+  const list = getSaveIndex();
+  sel.innerHTML = "";
+  for(const name of list){
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}
+
+function saveNamed(name){
+  name = (name || "").trim();
+  if(!name){ toast("Name your project first."); return; }
+
+  const payload = serializeGraph();
+  payload.name = name;
+  payload.savedAt = new Date().toISOString();
+
+  localStorage.setItem(keyFor(name), JSON.stringify(payload));
+
+  const list = getSaveIndex();
+  if(!list.includes(name)){
+    list.unshift(name); // newest first
+    setSaveIndex(list);
+  }
+  refreshProjectList();
+  toast(`Saved: ${name} ✅`);
+}
+
+function loadNamed(name){
+  name = (name || "").trim();
+  if(!name){ toast("Pick a project to load."); return; }
+
+  const raw = localStorage.getItem(keyFor(name));
+  if(!raw){ toast("Not found."); return; }
+
+  try{
+    loadGraph(JSON.parse(raw));
+    toast(`Loaded: ${name} ✅`);
+  }catch(e){
+    console.error(e);
+    toast("Load failed.");
+  }
+}
+
+function deleteNamed(name){
+  name = (name || "").trim();
+  if(!name){ toast("Pick a project to delete."); return; }
+
+  localStorage.removeItem(keyFor(name));
+  const list = getSaveIndex().filter(n => n !== name);
+  setSaveIndex(list);
+  refreshProjectList();
+  toast(`Deleted: ${name}`);
+}
+
+// Wire UI
+document.getElementById("btnSaveNamed")?.addEventListener("click", () => {
+  const name = document.getElementById("projectName")?.value;
+  saveNamed(name);
+});
+
+document.getElementById("btnLoadNamed")?.addEventListener("click", () => {
+  const sel = document.getElementById("projectList");
+  loadNamed(sel?.value);
+});
+
+document.getElementById("btnDeleteProject")?.addEventListener("click", () => {
+  const sel = document.getElementById("projectList");
+  deleteNamed(sel?.value);
+});
+
+function exportProject(name = "project"){
+  const payload = serializeGraph();
+  payload.name = name;
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name.replace(/[^\w\-]+/g, "_")}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+
+  toast("Exported JSON ✅");
+}
+
+function importProjectFromFile(){
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = "application/json";
+
+  inp.onchange = async () => {
+    const file = inp.files?.[0];
+    if(!file) return;
+
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      loadGraph(data);
+      toast(`Imported: ${file.name} ✅`);
+    }catch(e){
+      console.error(e);
+      toast("Import failed (invalid JSON).");
+    }
+  };
+
+  inp.click();
+}
+
+
+// Init list on startup
+refreshProjectList();
+
+
+  // -----------------------------
+  // Node definitions
+  // -----------------------------
+  const NODE_DEFS = {
+    Color: {
+      inputs: [],
+      outputs: ["layer"],
+      defaults: { color:"#1e293b" },
+      icon: "🟦",
+      run: (node) => {
+        const el = document.createElement("div");
+        el.style.position = "absolute";
+        el.style.inset = "0";
+        el.style.background = node.params.color;
+        return { el };
+      },
+      inspector: () => ([
+        {k:"color", type:"color", label:"Color"}
+      ])
+    },
+    Gradient: {
+      inputs: [],
+      outputs: ["layer"],
+      defaults: { a:"#0ea5e9", b:"#22c55e", angle:45 },
+      icon: "🌈",
+      run: (node) => {
+        const el = document.createElement("div");
+        el.style.position = "absolute";
+        el.style.inset = "0";
+        el.style.background = `linear-gradient(${Number(node.params.angle)||0}deg, ${node.params.a}, ${node.params.b})`;
+        return { el };
+      },
+      inspector: () => ([
+        {k:"a", type:"color", label:"Color A"},
+        {k:"b", type:"color", label:"Color B"},
+        {k:"angle", type:"number", label:"Angle"}
+      ])
+    },
+    Text: {
+      inputs: ["bg"],
+      outputs: ["layer"],
+      defaults: { text:"Hello 👋", size:44, color:"#ffffff", x:40, y:60, weight:700 },
+      icon: "🔤",
+      run: (node, inputs) => {
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+
+        if(inputs.bg?.el) wrap.appendChild(inputs.bg.el);
+
+        const t = document.createElement("div");
+        t.textContent = node.params.text ?? "";
+        t.style.position = "absolute";
+        t.style.left = (Number(node.params.x)||0) + "px";
+        t.style.top  = (Number(node.params.y)||0) + "px";
+        t.style.color = node.params.color;
+        t.style.fontSize = (Number(node.params.size)||32) + "px";
+        t.style.fontWeight = String(node.params.weight||700);
+        t.style.textShadow = "0 10px 30px rgba(0,0,0,.45)";
+        t.style.whiteSpace = "pre-wrap"; /* keep line breaks */
+        t.style.overflowWrap = "break-word";
+        t.style.maxWidth = "calc(100% - 40px)"; /* don't overflow the preview */
+        wrap.appendChild(t);
+
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"text", type:"textarea", label:"Text"},
+        {k:"size", type:"number", label:"Size"},
+        {k:"color", type:"color", label:"Color"},
+        {k:"x", type:"range", label:"X", min:0, max:1200, step:1},
+        {k:"y", type:"range", label:"Y", min:0, max:1200, step:1},
+        {k:"weight", type:"number", label:"Weight"}
+      ])
+    },
+    Transform: {
+      inputs: ["in"],
+      outputs: ["layer"],
+      defaults: { x:0, y:0, scale:1, rot:0, originX:0, originY:0 },
+      icon: "🧲",
+      run: (node, inputs) => {
+        const src = inputs.in;
+        if(!src?.el) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        wrap.appendChild(src.el);
+
+        const x = Number(node.params.x) || 0;
+        const y = Number(node.params.y) || 0;
+        const s = Number(node.params.scale) || 1;
+        const r = Number(node.params.rot) || 0;
+        const ox = Number(node.params.originX) ?? 0;
+        const oy = Number(node.params.originY) ?? 0;
+
+        // Convert -100 to +100 range to 0-100% for CSS
+        // -100 = 0%, 0 = 50%, +100 = 100%
+        const oxPercent = (ox + 100) / 2;
+        const oyPercent = (oy + 100) / 2;
+
+        src.el.style.transformOrigin = `${oxPercent}% ${oyPercent}%`;
+        src.el.style.transform = `translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
+
+        // Pivot indicator - only show when this Transform node is selected
+        if(state.selected === node.id){
+          const pivot = document.createElement("div");
+          pivot.style.position = "absolute";
+          pivot.style.left = `calc(${oxPercent}% + ${x}px)`;
+          pivot.style.top = `calc(${oyPercent}% + ${y}px)`;
+          pivot.style.width = "32px";
+          pivot.style.height = "32px";
+          pivot.style.marginLeft = "-16px";
+          pivot.style.marginTop = "-16px";
+          pivot.style.pointerEvents = "none";
+          pivot.style.zIndex = "9999";
+          
+          // Crosshair + arrows (bigger)
+          pivot.innerHTML = `
+            <svg width="32" height="32" style="display:block;">
+              <circle cx="16" cy="16" r="6" fill="none" stroke="rgba(122,167,255,0.8)" stroke-width="1.5"/>
+              <line x1="16" y1="0" x2="16" y2="32" stroke="rgba(122,167,255,0.6)" stroke-width="1"/>
+              <line x1="0" y1="16" x2="32" y2="16" stroke="rgba(122,167,255,0.6)" stroke-width="1"/>
+              <line x1="16" y1="3" x2="16" y2="9" stroke="rgba(255,255,255,0.85)" stroke-width="1.2"/>
+              <polyline points="13,6 16,3 19,6" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <line x1="23" y1="16" x2="29" y2="16" stroke="rgba(255,255,255,0.85)" stroke-width="1.2"/>
+              <polyline points="26,13 29,16 26,19" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          `;
+          wrap.appendChild(pivot);
+        }
+
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"x", type:"range", label:"X", min:-600, max:600, step:1},
+        {k:"y", type:"range", label:"Y", min:-600, max:600, step:1},
+        {k:"scale", type:"number", label:"Scale"},
+        {k:"rot", type:"number", label:"Rotate°"},
+        {k:"originX", type:"range", label:"Pivot X", min:-100, max:100, step:0.5},
+        {k:"originY", type:"range", label:"Pivot Y", min:-100, max:100, step:0.5},
+      ])
+    },
+    Composite: {
+      inputs: ["a", "b"],
+      outputs: ["layer"],
+      defaults: {},
+      icon: "🧬",
+      run: (_node, inputs) => {
+        const A = inputs.a?.el || null;
+        const B = inputs.b?.el || null;
+        if(!A && !B) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        if(B) wrap.appendChild(B);
+        if(A) wrap.appendChild(A);
+        return { el: wrap };
+      },
+      inspector: () => ([])
+    },
+    Output: {
+      inputs: ["in"],
+      outputs: [],
+      icon: "🎯",
+      defaults: { ratio: "16:9" },
+
+      run: (_node, inputs) => inputs.in ?? null,
+
+      inspector: (node) => ([
+        { k: "ratio", type: "select", label: "Aspect Ratio", options: ["16:9", "1:1"] },
+        { type: "buttons", label: "Export", buttons: [
+          { label: "PNG", id: "exportPNG" },
+          { label: "JPEG", id: "exportJPEG" }
+        ]}
+      ])
+},
+
+};
+
+// =============================
+// Tab Node Search
+// =============================
+const nodeSearchEl = document.getElementById("nodeSearch");
+const nodeSearchInput = document.getElementById("nodeSearchInput");
+const nodeSearchList = document.getElementById("nodeSearchList");
+
+let nodeSearchOpen = false;
+let nodeSearchItems = [];
+let nodeSearchIndex = 0;
+let nodeSpawnEditorPos = { x: 160, y: 160 };
+
+// Simple categories (adjust anytime)
+const NODE_CATEGORIES = {
+  Color: "Generators",
+  Gradient: "Generators",
+  Text: "Generators",
+  Transform: "Operations",
+  Composite: "Operations",
+  Output: "Output",
+};
+
+function getAllNodesForSearch(){
+  return Object.keys(NODE_DEFS).map(type => {
+    const def = NODE_DEFS[type];
+    return {
+      type,
+      icon: def.icon || "⬛",
+      category: NODE_CATEGORIES[type] || "Other",
+      haystack: `${type} ${(NODE_CATEGORIES[type]||"")}`.toLowerCase()
+    };
+  }).sort((a,b) => (a.category + a.type).localeCompare(b.category + b.type));
+}
+
+function openNodeSearch(atEditorX, atEditorY){
+  nodeSpawnEditorPos = { x: atEditorX, y: atEditorY };
+
+  // Position the box near cursor but keep on-screen
+  const pad = 14;
+  const boxW = 360;
+  const boxH = 420; // rough max
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  const left = clamp(atEditorX + 16, pad, vw - boxW - pad);
+  const top  = clamp(atEditorY + 16, pad, vh - boxH - pad);
+
+  nodeSearchEl.classList.remove("hidden");
+  nodeSearchEl.style.placeItems = "start";
+  nodeSearchEl.style.paddingLeft = left + "px";
+  nodeSearchEl.style.paddingTop  = top + "px";
+  nodeSearchEl.setAttribute("aria-hidden", "false");
+
+  nodeSearchOpen = true;
+  nodeSearchInput.value = "";
+  nodeSearchIndex = 0;
+
+  renderNodeSearchList();
+  nodeSearchInput.focus();
+  nodeSearchInput.select();
+}
+
+function closeNodeSearch(){
+  nodeSearchEl.classList.add("hidden");
+  nodeSearchEl.setAttribute("aria-hidden", "true");
+  nodeSearchOpen = false;
+}
+
+function filterNodes(query){
+  const q = (query || "").trim().toLowerCase();
+  const all = getAllNodesForSearch();
+  if(!q) return all;
+
+  // basic contains filter + prioritize prefix matches
+  const scored = [];
+  for(const n of all){
+    const name = n.type.toLowerCase();
+    let score = 0;
+    if(name.startsWith(q)) score += 100;
+    if(n.haystack.includes(q)) score += 10;
+    // small bonus if query matches category
+    if((n.category || "").toLowerCase().includes(q)) score += 5;
+    if(score > 0) scored.push({ n, score });
+  }
+  scored.sort((a,b) => b.score - a.score || a.n.type.localeCompare(b.n.type));
+  return scored.map(s => s.n);
+}
+
+function renderNodeSearchList(){
+  nodeSearchItems = filterNodes(nodeSearchInput.value);
+  if(nodeSearchIndex >= nodeSearchItems.length) nodeSearchIndex = Math.max(0, nodeSearchItems.length - 1);
+
+  nodeSearchList.innerHTML = "";
+
+  if(nodeSearchItems.length === 0){
+    const empty = document.createElement("div");
+    empty.className = "nodeItem";
+    empty.style.opacity = "0.6";
+    empty.style.cursor = "default";
+    empty.innerHTML = `<div class="nodeLeft"><div class="nodeIcon">🙃</div><div class="nodeText"><div class="nodeName">No results</div><div class="nodeCat">Try another keyword</div></div></div><div class="nodeHint">Esc</div>`;
+    nodeSearchList.appendChild(empty);
+    return;
+  }
+
+  nodeSearchItems.forEach((item, idx) => {
+    const row = document.createElement("div");
+    row.className = "nodeItem" + (idx === nodeSearchIndex ? " active" : "");
+    row.innerHTML = `
+      <div class="nodeLeft">
+        <div class="nodeIcon">${item.icon}</div>
+        <div class="nodeText">
+          <div class="nodeName">${item.type}</div>
+          <div class="nodeCat">${item.category}</div>
+        </div>
+      </div>
+      <div class="nodeHint">Enter</div>
+    `;
+    row.addEventListener("mouseenter", () => {
+      nodeSearchIndex = idx;
+      syncActiveRow();
+    });
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // prevent focus loss weirdness
+    });
+    row.addEventListener("click", () => {
+      addNodeFromSearch(item.type);
+    });
+    nodeSearchList.appendChild(row);
+  });
+
+  scrollActiveIntoView();
+}
+
+function syncActiveRow(){
+  const rows = nodeSearchList.querySelectorAll(".nodeItem");
+  rows.forEach((r,i) => r.classList.toggle("active", i === nodeSearchIndex));
+  scrollActiveIntoView();
+}
+
+function scrollActiveIntoView(){
+  const rows = nodeSearchList.querySelectorAll(".nodeItem");
+  const active = rows[nodeSearchIndex];
+  if(active) active.scrollIntoView({ block: "nearest" });
+}
+
+function addNodeFromSearch(type){
+  // spawn at cursor in WORLD coords
+  const world = editorToWorld(nodeSpawnEditorPos.x, nodeSpawnEditorPos.y);
+  addNode(type, { x: world.x, y: world.y });
+  closeNodeSearch();
+  toast(`Added: ${type}`);
+}
+
+// Input events
+nodeSearchInput.addEventListener("input", () => {
+  nodeSearchIndex = 0;
+  renderNodeSearchList();
+});
+
+// Click outside box closes
+nodeSearchEl.addEventListener("mousedown", (e) => {
+  if(e.target === nodeSearchEl) closeNodeSearch();
+});
+
+// Keyboard handling while open
+window.addEventListener("keydown", (e) => {
+  if(!nodeSearchOpen) return;
+
+  if(e.key === "Escape"){
+    e.preventDefault();
+    closeNodeSearch();
+    return;
+  }
+
+  if(e.key === "ArrowDown"){
+    e.preventDefault();
+    nodeSearchIndex = clamp(nodeSearchIndex + 1, 0, nodeSearchItems.length - 1);
+    syncActiveRow();
+    return;
+  }
+
+  if(e.key === "ArrowUp"){
+    e.preventDefault();
+    nodeSearchIndex = clamp(nodeSearchIndex - 1, 0, nodeSearchItems.length - 1);
+    syncActiveRow();
+    return;
+  }
+
+  if(e.key === "Enter"){
+    e.preventDefault();
+    const item = nodeSearchItems[nodeSearchIndex];
+    if(item) addNodeFromSearch(item.type);
+    return;
+  }
+}, true);
+
+// Global Tab to open
+window.addEventListener("keydown", (e) => {
+  if(e.code !== "Tab") return;
+
+  // allow normal tab behavior in inputs
+  if(isTypingTarget(e.target)) return;
+
+  e.preventDefault();
+
+  // open at current mouse position (fallback center)
+  const rect = editorEl.getBoundingClientRect();
+  const mx = state.mouse?.x ?? rect.width * 0.5;
+  const my = state.mouse?.y ?? rect.height * 0.5;
+
+  openNodeSearch(mx, my);
+});
+
+  // -----------------------------
+  // Graph evaluation
+  // -----------------------------
+  function findWireToInput(nodeId, inPort){
+    return state.wires.find(w => w.to.nodeId === nodeId && w.to.port === inPort);
+  }
+
+  function topoSortNodeIds(){
+  const ids = Array.from(state.nodes.keys());
+  const indeg = new Map(ids.map(id => [id, 0]));
+  const adj = new Map(ids.map(id => [id, []]));
+
+  // Edge: from -> to
+  for(const w of state.wires){
+    const a = String(w.from.nodeId);
+    const b = String(w.to.nodeId);
+    if(!adj.has(a) || !adj.has(b)) continue;
+    adj.get(a).push(b);
+    indeg.set(b, (indeg.get(b) || 0) + 1);
+  }
+
+  const q = [];
+  for(const [id, d] of indeg.entries()) if(d === 0) q.push(id);
+
+  const out = [];
+  while(q.length){
+    const id = q.shift();
+    out.push(id);
+    for(const nb of adj.get(id) || []){
+      indeg.set(nb, indeg.get(nb) - 1);
+      if(indeg.get(nb) === 0) q.push(nb);
+    }
+  }
+
+  const hasCycle = out.length !== ids.length;
+  if(hasCycle){
+    // Append remaining nodes (best-effort) so app still runs
+    for(const id of ids) if(!out.includes(id)) out.push(id);
+  }
+
+  return { order: out, hasCycle };
+}
+
+function evaluate(){
+  const cache = new Map(); // nodeId -> outputMap
+
+  const { order, hasCycle } = topoSortNodeIds();
+  if(hasCycle){
+    toast("⚠️ Cycle detected. Eval is best-effort (break the loop).");
+  }
+
+  for(const nodeId of order){
+    const node = state.nodes.get(nodeId);
+    if(!node) continue;
+
+    const def = NODE_DEFS[node.type];
+    const inputValues = {};
+
+    for(const p of def.inputs){
+      const w = findWireToInput(nodeId, p);
+      if(w){
+        const upstream = cache.get(String(w.from.nodeId));
+        inputValues[p] = upstream?.[w.from.port] ?? null;
+      }else{
+        inputValues[p] = null;
+      }
+    }
+
+    let outVal = null;
+    try { outVal = def.run(node, inputValues); }
+    catch(e){ console.error(e); outVal = null; }
+
+    const outMap = {};
+    for(const op of def.outputs) outMap[op] = outVal;
+    cache.set(nodeId, outMap);
+  }
+
+  return cache;
+}
+
+
+
+  function evaluateAndRender(){
+    renderRoot.innerHTML = "";
+
+    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output") || null;
+    if(!outNode){
+      const msg = document.createElement("div");
+      msg.style.position="absolute";
+      msg.style.inset="0";
+      msg.style.display="grid";
+      msg.style.placeItems="center";
+      msg.style.color="rgba(255,255,255,.55)";
+      msg.style.fontFamily="var(--mono)";
+      msg.style.fontSize="12px";
+      msg.textContent="Add an Output node and connect something into it.";
+      renderRoot.appendChild(msg);
+      return;
+    }
+
+    // ✅ Apply Output Ratio to Preview Screen
+    if(outNode?.params?.ratio){
+      applyOutputRatio(outNode.params.ratio);
+    }
+
+
+    const cache = evaluate();
+    const wire = findWireToInput(outNode.id, "in");
+    const inVal = wire ? cache.get(wire.from.nodeId)?.[wire.from.port] : null;
+    const finalLayer = NODE_DEFS.Output.run(outNode, { in: inVal });
+
+    if(finalLayer?.el){
+      renderRoot.appendChild(finalLayer.el);
+    }else{
+      const msg = document.createElement("div");
+      msg.style.position="absolute";
+      msg.style.inset="0";
+      msg.style.display="grid";
+      msg.style.placeItems="center";
+      msg.style.color="rgba(255,255,255,.55)";
+      msg.style.fontFamily="var(--mono)";
+      msg.style.fontSize="12px";
+      msg.textContent="Output is not connected (or upstream is empty).";
+      renderRoot.appendChild(msg);
+    }
+  }
+
+  // -----------------------------
+  // Editor utilities
+  // -----------------------------
+  function portKey(nodeId, kind, port){ return `${nodeId}:${kind}:${port}`; }
+
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function editorMouse(e){
+    const er = editorEl.getBoundingClientRect();
+    return { x: e.clientX - er.left, y: e.clientY - er.top };
+  }
+
+  function editorToWorld(x, y){
+    return { x: (x - state.panX) / state.zoom, y: (y - state.panY) / state.zoom };
+  }
+
+  function applyEditorTransform(){
+    document.documentElement.style.setProperty("--nx", state.panX + "px");
+    document.documentElement.style.setProperty("--ny", state.panY + "px");
+    document.documentElement.style.setProperty("--nz", state.zoom);
+    requestWireDraw();
+  }
+
+  // -----------------------------
+  // Wires drawing (throttled)
+  // -----------------------------
+  let portElByKey = new Map();
+  let wireDrawQueued = false;
+
+  function rebuildPortCache(){
+    portElByKey = new Map();
+    document.querySelectorAll(".dot[data-port]").forEach(el => {
+      portElByKey.set(el.getAttribute("data-port"), el);
+    });
+  }
+
+  function getDotCenter(dotEl){
+    const r = dotEl.getBoundingClientRect();
+    const er = editorEl.getBoundingClientRect();
+    return { x: (r.left + r.right)/2 - er.left, y: (r.top + r.bottom)/2 - er.top };
+  }
+
+  function requestWireDraw(){
+    if(wireDrawQueued) return;
+    wireDrawQueued = true;
+    requestAnimationFrame(() => {
+      wireDrawQueued = false;
+      drawWires();
+});
+  }
+
+  function drawWires(){
+  const w = editorEl.clientWidth;
+  const h = editorEl.clientHeight;
+  wiresSvg.setAttribute("width", w);
+  wiresSvg.setAttribute("height", h);
+  wiresSvg.innerHTML = "";
+
+  const makePath = (a, b) => {
+    const dx = Math.max(40, Math.abs(b.x - a.x) * 0.35);
+    const c1 = { x: a.x + dx, y: a.y };
+    const c2 = { x: b.x - dx, y: b.y };
+    return `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
+  };
+
+  for(const w0 of state.wires){
+    const fromDot = portElByKey.get(portKey(w0.from.nodeId,"out",w0.from.port));
+    const toDot   = portElByKey.get(portKey(w0.to.nodeId,"in",w0.to.port));
+    if(!fromDot || !toDot) continue;
+
+    const a = getDotCenter(fromDot);
+    const b = getDotCenter(toDot);
+
+    const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d", makePath(a,b));
+    p.setAttribute("fill","none");
+    p.setAttribute("stroke","rgba(138,242,201,.75)");
+    p.setAttribute("stroke-width","2");
+    p.setAttribute("stroke-linecap","round");
+    p.setAttribute("opacity","0.9");
+    p.setAttribute("vector-effect","non-scaling-stroke");
+
+    // ✅ glow here (NOW p exists)
+    p.style.filter = "drop-shadow(0 0 4px rgba(0,0,0,.55))";
+
+    wiresSvg.appendChild(p);
+  }
+
+  if(state.connecting && state.mouse){
+    const fromDot = portElByKey.get(portKey(state.connecting.nodeId,"out",state.connecting.port));
+    if(fromDot){
+      const a = getDotCenter(fromDot);
+      const b = state.mouse;
+
+      const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+      p.setAttribute("d", makePath(a,b));
+      p.setAttribute("fill","none");
+      p.setAttribute("stroke","rgba(122,167,255,.75)");
+      p.setAttribute("stroke-width","2");
+      p.setAttribute("stroke-dasharray","5 6");
+      p.setAttribute("stroke-linecap","round");
+      p.setAttribute("opacity","0.9");
+      p.setAttribute("vector-effect","non-scaling-stroke");
+
+      // ✅ glow for live wire too
+      p.style.filter = "drop-shadow(0 0 4px rgba(0,0,0,.55))";
+
+      wiresSvg.appendChild(p);
+    }
+  }
+}
+
+
+  // -----------------------------
+  // Rendering nodes
+  // -----------------------------
+  function render(){
+    nodesEl.innerHTML = "";
+
+    for(const node of state.nodes.values()){
+      const def = NODE_DEFS[node.type];
+      if(!def) continue;
+
+      const el = document.createElement("div");
+      el.className = "node" + (state.selected === node.id ? " selected" : "");
+      el.style.left = node.pos.x + "px";
+      el.style.top  = node.pos.y + "px";
+      el.dataset.id = node.id;
+
+      el.innerHTML = `
+        <div class="nh" title="Drag node. Click body to select.">
+          <div class="nname">${def.icon} ${node.type}</div>
+          <div class="ntype">${node.id}</div>
+        </div>
+        <div class="nbody">
+          <div class="ports">
+            <div class="portcol">
+              ${def.inputs.map(p => `
+                <div class="port">
+                  <div class="dot in" data-io="in" data-port="${portKey(node.id,"in",p)}" data-node="${node.id}" data-name="${p}"></div>
+                  <span>${p}</span>
+                </div>
+              `).join("")}
+            </div>
+            <div class="portcol" style="justify-self:end;">
+              ${def.outputs.map(p => `
+                <div class="port" style="justify-content:flex-end;">
+                  <span>${p}</span>
+                  <div class="dot out" data-io="out" data-port="${portKey(node.id,"out",p)}" data-node="${node.id}" data-name="${p}"></div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Node selection
+      el.addEventListener("mousedown", (ev) => {
+        if(!ev.target.classList.contains("dot")){
+          selectNode(node.id);
+        }
+      });
+
+      // Drag node header (respects zoom)
+      const header = el.querySelector(".nh");
+      header.addEventListener("mousedown", (ev) => {
+        if(ev.button !== 0) return;
+        ev.stopPropagation();
+
+        selectNode(node.id);
+
+        const m = editorMouse(ev);
+        const mWorld = editorToWorld(m.x, m.y);
+
+        state.draggingNode = {
+          id: node.id,
+          ox: mWorld.x - node.pos.x,
+          oy: mWorld.y - node.pos.y
+        };
+      });
+
+      // Port clicks
+      el.querySelectorAll(".dot").forEach(dot => {
+        dot.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const io = dot.getAttribute("data-io");
+          const nodeId = dot.getAttribute("data-node");
+          const port = dot.getAttribute("data-name");
+
+          if(io === "out"){
+            state.connecting = { nodeId, port };
+            toast(`Connecting from ${nodeId}.${port}`);
+            renderActiveDots();
+            requestWireDraw();
+            return;
+          }
+
+          // input click
+          if(!state.connecting){
+            const existing = findWireToInput(nodeId, port);
+            if(existing){
+              state.wires = state.wires.filter(w => w !== existing);
+              toast(`Removed wire into ${nodeId}.${port}`);
+              evaluateAndRender();
+              requestWireDraw();
+            }
+            return;
+          }
+
+          const from = state.connecting;
+          const to = { nodeId, port };
+
+          // one wire per input
+          state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
+          state.wires.push({ from, to });
+          state.connecting = null;
+          toast(`Connected → ${to.nodeId}.${to.port}`);
+
+          evaluateAndRender();
+          renderActiveDots();
+          requestWireDraw();
+        });
+      });
+
+      nodesEl.appendChild(el);
+    }
+
+    rebuildPortCache();
+    renderActiveDots();
+    requestWireDraw();
+  }
+
+  function renderActiveDots(){
+    document.querySelectorAll(".dot").forEach(d => d.classList.remove("active"));
+    if(state.connecting){
+      const key = portKey(state.connecting.nodeId,"out",state.connecting.port);
+      const dot = portElByKey.get(key) || document.querySelector(`[data-port="${key}"]`);
+      if(dot) dot.classList.add("active");
+    }
+  }
+
+  // -----------------------------
+  // Inspector
+  // -----------------------------
+  function selectNode(nodeId){
+    state.selected = nodeId;
+    render(); // update highlight + port cache
+    renderInspector();
+  }
+
+  function renderInspector(){
+    const node = state.selected ? state.nodes.get(state.selected) : null;
+    if(!node){
+      inspectorBody.innerHTML = `
+        <div class="emptyNote">
+          Click a node to edit its parameters here.
+          <br><br>
+          Red panel can later become:
+          <br>• advanced params
+          <br>• notes / metadata
+          <br>• node help / docs
+        </div>`;
+      return;
+    }
+
+    const def = NODE_DEFS[node.type];
+    const fields = def?.inspector ? def.inspector(node) : [];
+
+    const header = `
+      <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+        <div class="pill">${def.icon} ${node.type}</div>
+        <div class="pill">id: ${node.id}</div>
+      </div>
+    `;
+
+    if(fields.length === 0){
+      inspectorBody.innerHTML = header + `<div class="emptyNote">No parameters for this node (yet).</div>`;
+      return;
+    }
+
+    inspectorBody.innerHTML = header + `
+      <div class="kv">
+        ${fields.map(f => `
+           <div class="row">
+              <label>${f.label}</label>
+
+              ${f.type === "buttons"
+                ? `<div style="display:flex; gap:8px;">${f.buttons.map(btn => `<button data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`
+                : f.type === "select"
+                  ? `
+                    <select data-k="${f.k}">
+                      ${f.options.map(opt => `
+                        <option value="${opt}" ${node.params[f.k] === opt ? "selected" : ""}>
+                          ${opt}
+                        </option>
+                      `).join("")}
+                    </select>
+                  `
+                  : f.type === "range"
+                    ? (() => {
+                        let min = (typeof f.min !== 'undefined') ? f.min : 0;
+                        let max = (typeof f.max !== 'undefined') ? f.max : 100;
+                        
+                        // Only use preview dimensions for position sliders (x/y), not for pivot/origin
+                        if ((f.k === 'x' || f.k === 'y') && !f.k.includes('origin')) {
+                          const previewEl = document.getElementById('previewInner') || document.querySelector('.screen');
+                          const maxX = previewEl ? Math.max(0, (previewEl.clientWidth || previewEl.offsetWidth) - 1) : (f.max ?? 1200);
+                          const maxY = previewEl ? Math.max(0, (previewEl.clientHeight || previewEl.offsetHeight) - 1) : (f.max ?? 800);
+                          max = (f.k === 'y') ? maxY : maxX;
+                        }
+                        
+                        const step = (typeof f.step !== 'undefined') ? f.step : 1;
+                        const val = escapeAttr(node.params[f.k] ?? '');
+                        return `
+                          <div style="display:flex; gap:8px; align-items:center;">
+                            <input data-k="${f.k}" type="range" min="${min}" max="${max}" step="${step}" value="${val}" style="flex:1;" />
+                            <input data-k="${f.k}" type="number" min="${min}" max="${max}" step="${step}" value="${val}" style="width:80px;" />
+                          </div>
+                        `
+                      })()
+                    : f.type === "textarea"
+                      ? (() => {
+                          const val = escapeAttr(node.params[f.k] ?? '');
+                          return `
+                            <textarea data-k="${f.k}" style="width:100%; min-height:64px; resize:vertical; padding:8px;">${val}</textarea>
+                          `
+                        })()
+                    : `
+                    <input
+                      data-k="${f.k}"
+                      type="${f.type}"
+                      value="${escapeAttr(node.params[f.k] ?? "")}"
+                    />
+                  `
+              }
+
+            </div>
+        `).join("")}
+      </div>
+    `;
+
+    // Handle export buttons
+    inspectorBody.querySelectorAll('[data-export-btn]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const exportType = btn.getAttribute('data-export-btn');
+        exportCanvasAsImage(exportType);
+      });
+    });
+
+    inspectorBody.querySelectorAll('input[data-k], textarea[data-k], select[data-k]').forEach(inp => {
+      const handler = () => {
+        const k = inp.getAttribute("data-k");
+        let v = inp.value;
+
+        // coerce numeric types when appropriate
+        if(inp.type === 'number' || inp.type === 'range') v = Number(v);
+
+        node.params[k] = v;
+
+        // Sync all inspector controls with the same data-k
+        inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(el => {
+          if(el !== inp) el.value = v;
+        });
+
+        evaluateAndRender();
+
+        // ✅ Update preview screen when ratio changes
+        if(node.type === "Output" && k === "ratio"){
+          applyOutputRatio(v);
+        }
+      };
+
+      // Use change for selects, input for inputs/textarea
+      inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", handler);
+    });
+
+    // Auto-resize textarea fields and initialize their height
+    inspectorBody.querySelectorAll('textarea[data-k]').forEach(tx => {
+      const resize = () => {
+        tx.style.height = 'auto';
+        tx.style.height = (tx.scrollHeight) + 'px';
+      };
+      // Initialize
+      resize();
+      tx.addEventListener('input', resize);
+    });
+
+
+  }
+
+  function applyOutputRatio(ratio){
+    const screen = document.querySelector(".screen");
+
+    if(ratio === "1:1"){
+      screen.style.aspectRatio = "1 / 1";
+    } else {
+      screen.style.aspectRatio = "16 / 9";
+    }
+
+    // reset pan + zoom bounds
+    pan.x = 0;
+    pan.y = 0;
+    applyPreviewTransform();
+  }
+
+  function exportCanvasAsImage(format){
+    // Use html2canvas to capture the preview element
+    const previewInner = document.getElementById("previewInner");
+    if(!previewInner) {
+      toast("No preview to export.");
+      return;
+    }
+
+    // Dynamic import of html2canvas
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = () => {
+      html2canvas(previewInner, {
+        backgroundColor: null,
+        scale: 2,
+        logging: false
+      }).then(canvas => {
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        const mimeType = format === 'exportPNG' ? 'image/png' : 'image/jpeg';
+        const ext = format === 'exportPNG' ? 'png' : 'jpg';
+        const quality = format === 'exportPNG' ? undefined : 0.95;
+
+        canvas.toBlob(blob => {
+          link.href = URL.createObjectURL(blob);
+          link.download = `export_${timestamp}.${ext}`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(link.href);
+          toast(`Exported as ${ext.toUpperCase()} ✅`);
+        }, mimeType, quality);
+      }).catch(err => {
+        console.error(err);
+        toast(`Export failed: ${err.message}`);
+      });
+    };
+    document.head.appendChild(script);
+  }
+
+  function escapeAttr(s){
+    return String(s).replaceAll('"','&quot;');
+  }
+
+  // -----------------------------
+  // Pan + Zoom controls for editor
+  // -----------------------------
+  function isTypingTarget(el){
+    if(!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if(e.code !== "Space") return;
+
+    // ✅ allow space to be typed inside inputs/textareas/contenteditable
+    if(isTypingTarget(e.target)) return;
+
+    state.spaceDown = true;
+    editorEl.style.cursor = "grab";
+    e.preventDefault();
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if(e.code !== "Space") return;
+
+    // ✅ same rule here, but harmless either way
+    if(isTypingTarget(e.target)) return;
+
+    state.spaceDown = false;
+    state.isPanning = false;
+    state.panStart = null;
+    editorEl.style.cursor = "default";
+  });
+
+  editorEl.addEventListener("mousedown", (e) => {
+    // Middle mouse OR (left mouse + space) starts panning
+    const isMiddle = (e.button === 1);
+    const isSpaceLeft = (e.button === 0 && state.spaceDown);
+
+    if(!isMiddle && !isSpaceLeft) return;
+
+    const m = editorMouse(e);
+    state.isPanning = true;
+    state.panStart = { x: m.x, y: m.y, panX: state.panX, panY: state.panY };
+
+    editorEl.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+
+  editorEl.addEventListener("auxclick", (e) => {
+    // prevent browser autoscroll on middle click
+    if(e.button === 1) e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    const m = editorMouse(e);
+    state.mouse = m;
+
+    // Panning
+    if(state.isPanning && state.panStart){
+      const dx = m.x - state.panStart.x;
+      const dy = m.y - state.panStart.y;
+      state.panX = state.panStart.panX + dx;
+      state.panY = state.panStart.panY + dy;
+      applyEditorTransform();
+    }
+
+    // Dragging node (world coords)
+    if(state.draggingNode){
+      const mw = editorToWorld(m.x, m.y);
+      const n = state.nodes.get(state.draggingNode.id);
+      if(n){
+        n.pos.x = mw.x - state.draggingNode.ox;
+        n.pos.y = mw.y - state.draggingNode.oy;
+
+        const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+        if(nodeEl){
+          nodeEl.style.left = n.pos.x + "px";
+          nodeEl.style.top  = n.pos.y + "px";
+        }
+        requestWireDraw();
+      }
+    }
+
+    if(state.connecting) requestWireDraw();
+  });
+
+  window.addEventListener("mouseup", () => {
+    state.draggingNode = null;
+
+    if(state.isPanning){
+      state.isPanning = false;
+      state.panStart = null;
+
+      // If space still held, stay in grab mode, else default
+      editorEl.style.cursor = state.spaceDown ? "grab" : "default";
+    }
+  });
+
+  // Wheel zoom (zoom to cursor)
+  editorEl.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const m = editorMouse(e);
+
+    // world point under cursor BEFORE zoom
+    const beforeWorld = editorToWorld(m.x, m.y);
+
+    const delta = -e.deltaY;
+    const factor = Math.exp(delta * 0.0012);
+    const nextZoom = clamp(state.zoom * factor, 0.25, 2.5);
+
+    state.zoom = nextZoom;
+
+    // keep beforeWorld under cursor: cursor = world*zoom + pan
+    state.panX = m.x - beforeWorld.x * state.zoom;
+    state.panY = m.y - beforeWorld.y * state.zoom;
+
+    applyEditorTransform();
+  }, { passive:false });
+
+  // Click background cancels connection
+  editorEl.addEventListener("click", (e) => {
+    const isDot = e.target.classList?.contains("dot");
+    const isNode = e.target.closest?.(".node");
+    if(!isDot && !isNode && state.connecting){
+      state.connecting = null;
+      renderActiveDots();
+      requestWireDraw();
+      toast("Cancelled connection.");
+    }
+  });
+
+
+function serializeGraph(){
+  return {
+    version: "0.1",
+    nextId: state.nextId,
+    panX: state.panX,
+    panY: state.panY,
+    zoom: state.zoom,
+    nodes: Array.from(state.nodes.values()).map(n => ({
+      id: String(n.id),
+      type: n.type,
+      pos: { x: n.pos.x, y: n.pos.y },
+      params: n.params
+    })),
+    wires: state.wires.map(w => ({
+      from: { nodeId: String(w.from.nodeId), port: w.from.port },
+      to: { nodeId: String(w.to.nodeId), port: w.to.port }
+    }))
+  };
+}
+
+function deleteSelectedNode(){
+  const id = state.selected;
+  if(!id) return;
+
+  // Remove the node
+  state.nodes.delete(String(id));
+
+  // Remove any wires connected to it
+  state.wires = state.wires.filter(w =>
+    String(w.from.nodeId) !== String(id) &&
+    String(w.to.nodeId)   !== String(id)
+  );
+
+  // Clear selection + connecting
+  state.selected = null;
+  state.connecting = null;
+
+  render();
+  renderInspector();
+  evaluateAndRender();
+  requestWireDraw();
+  toast(`Deleted node ${id}`);
+}
+
+// Delete / Backspace key handler
+window.addEventListener("keydown", (e) => {
+  // Don't delete when typing in inputs/fields
+  if(isTypingTarget(e.target)) return;
+
+  if(e.key === "Delete" || e.key === "Backspace"){
+    // prevent browser back navigation from Backspace (some browsers)
+    e.preventDefault();
+    deleteSelectedNode();
+  }
+});
+
+
+
+function loadGraph(data){
+  if(!data || !Array.isArray(data.nodes)) {
+    toast("Load failed: invalid data.");
+    return;
+  }
+
+  state.nodes.clear();
+  state.wires = [];
+  state.connecting = null;
+  state.selected = null;
+
+  state.nextId = Number(data.nextId) || 1;
+  state.panX = Number(data.panX) || 0;
+  state.panY = Number(data.panY) || 0;
+  state.zoom = Number(data.zoom) || 1;
+
+  // Rebuild nodes
+  for(const n of data.nodes){
+    if(!NODE_DEFS[n.type]) continue;
+    state.nodes.set(String(n.id), {
+      id: String(n.id),
+      type: n.type,
+      pos: { x: Number(n.pos?.x) || 0, y: Number(n.pos?.y) || 0 },
+      params: { ...(n.params || {}) }
+    });
+  }
+
+  // Rebuild wires (only if both nodes exist)
+  for(const w of (data.wires || [])){
+    const a = String(w.from?.nodeId);
+    const b = String(w.to?.nodeId);
+    if(state.nodes.has(a) && state.nodes.has(b)){
+      state.wires.push({
+        from: { nodeId: a, port: w.from.port },
+        to:   { nodeId: b, port: w.to.port }
+      });
+    }
+  }
+
+  applyEditorTransform();
+  render();
+  evaluateAndRender();
+  renderInspector();
+  toast("Loaded ✅");
+}
+
+
+  // -----------------------------
+  // Commands
+  // -----------------------------
+  document.getElementById("btnAdd").addEventListener("click", () => {
+    const t = document.getElementById("nodeType").value;
+    addNode(t);
+  });
+
+  document.getElementById("btnClearWires").addEventListener("click", () => {
+    state.wires = [];
+    state.connecting = null;
+    renderActiveDots();
+    evaluateAndRender();
+    requestWireDraw();
+    toast("Cleared all wires.");
+  });
+
+  document.getElementById("btnResetGraph").addEventListener("click", () => {
+    resetGraph();
+    toast("Reset graph.");
+  });
+
+  document.getElementById("btnClearSel").addEventListener("click", () => {
+    state.selected = null;
+    render();
+    renderInspector();
+  });
+
+  document.getElementById("btnNew").addEventListener("click", () => {
+    resetGraph();
+    toast("New project (graph reset).");
+  });
+
+  document.getElementById("btnImport").addEventListener("click", () => {
+    importProjectFromFile();
+  });
+
+  document.getElementById("btnExport").addEventListener("click", () => {
+    const projectName = document.getElementById("projectName")?.value || "project";
+    exportProject(projectName);
+  });
+
+  window.addEventListener("resize", () => {
+    requestWireDraw();
+    try{ renderInspector(); }catch(e){/* ignore */}
+  });
+
+  // -----------------------------
+  // Node creation
+  // -----------------------------
+  function uid(){ return String(state.nextId++); }
+
+  function addNode(type, pos){
+    const def = NODE_DEFS[type];
+    if(!def) return null;
+
+    const id = uid();
+    const node = {
+      id,
+      type,
+      pos: pos || { x: 60 + Math.random()*420, y: 60 + Math.random()*220 },
+      params: { ...(def.defaults || {}) }
+    };
+
+    state.nodes.set(id, node);
+    selectNode(id);
+    evaluateAndRender();
+    return node;
+  }
+
+  function resetGraph(){
+    state.nodes.clear();
+    state.wires = [];
+    state.connecting = null;
+    state.selected = null;
+    state.nextId = 1;
+  
+    // Reset editor view
+    state.panX = 0;
+    state.panY = 0;
+    state.zoom = 1;
+    applyEditorTransform();
+
+    // Starter: Gradient -> Text -> Output
+    const g = addNode("Gradient", {x: 60,  y: 80});
+    const t = addNode("Text",     {x: 360, y: 105});
+    const o = addNode("Output",   {x: 660, y: 130});
+
+    // Auto wires
+    state.wires.push({ from:{nodeId:g.id, port:"layer"}, to:{nodeId:t.id, port:"bg"} });
+    state.wires.push({ from:{nodeId:t.id, port:"layer"}, to:{nodeId:o.id, port:"in"} });
+
+    render();
+    evaluateAndRender();
+    renderInspector();
+  }
+
+  // Init
+  resetGraph();
+
+
+})();
+</script>
+</body>
+</html>

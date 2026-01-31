@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    circle {
+      fill: white;
+      opacity: 0.9;
+    }
+
+    path {
+      stroke: white;
+      stroke-width: 3;
+      stroke-linecap: round;
+      fill: none;
+      opacity: 0.55;
+
+      stroke-dasharray: 40;
+      stroke-dashoffset: 40;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    path.second {
+      animation-delay: 0.18s;
+      opacity: 0.4;
+    }
+
+    @keyframes pulse {
+      0%   { stroke-dashoffset: 40; opacity: 0.15; }
+      40%  { opacity: 0.75; }
+      100% { stroke-dashoffset: 0; opacity: 0.15; }
+    }
+  </style>
+</head>
+
+<body>
+  <svg viewBox="0 0 48 48">
+    <!-- Nodes -->
+    <circle cx="12" cy="24" r="4"/>
+    <circle cx="36" cy="12" r="4"/>
+    <circle cx="36" cy="36" r="4"/>
+
+    <!-- Wires -->
+    <path d="M16 22 L32 14"/>
+    <path class="second" d="M16 26 L32 34"/>
+  </svg>
+</body>
+</html>
