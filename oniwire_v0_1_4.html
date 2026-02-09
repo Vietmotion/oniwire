@@ -115,32 +115,6 @@ body{
   padding: var(--gap);
   min-height:0;
   min-width:0;
-  position: relative;
-}
-
-.rowSplitter{
-  position: absolute;
-  left: calc(var(--leftW) + var(--gap));
-  right: var(--gap);
-  height: 8px;
-  top: calc(var(--gap) + var(--topH) + (var(--gap) / 2));
-  transform: translateY(-50%);
-  cursor: row-resize;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-}
-
-.rowSplitter::before{
-  content: "";
-  width: 140px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.10);
-  border: 1px solid rgba(255,255,255,.16);
-  box-shadow: 0 2px 10px rgba(0,0,0,.35);
 }
 
 /* Panels */
@@ -285,7 +259,7 @@ select option{
 .menuTile:hover{ background: rgba(255,255,255,.12); }
 
 /* Preview (center top) */
-.preview{ grid-column: 2; grid-row: 1; min-height: 280px; }
+.preview{ grid-column: 2; grid-row: 1; }
 .panel.preview{ min-height:0; }
 
 .previewInner{
@@ -417,12 +391,7 @@ select option{
 #previewViewport.panning { cursor: grabbing; }
 
 #previewInner{
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 1280px;
-  height: 720px;
-  transform-origin: 0 0;
+  transform-origin: 50% 50%;
   will-change: transform;
 }
 
@@ -751,7 +720,6 @@ select optgroup{
   .preview{ grid-row: 2; grid-column:1; }
   .inspector{ grid-row: 3; grid-column:1; }
   .editorWrap{ grid-row: 4; grid-column:1; height: 650px; }
-  .rowSplitter{ display:none; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -864,8 +832,6 @@ select optgroup{
       </div>
     </section>
 
-    <div id="rowSplitter" class="rowSplitter" aria-hidden="true"></div>
-
     <!-- NODE EDITOR (Bottom spans Center+Right) -->
     <section class="panel editorWrap">
       <div class="hdr">
@@ -966,14 +932,8 @@ select optgroup{
     mouse: null,
   };
 
-  let copyBuffer = null;
-  let pasteOffsetCount = 0;
-
   const renderRoot = document.getElementById("renderRoot");
   const inspectorBody = document.getElementById("inspectorBody");
-
-  const appEl = document.querySelector(".app");
-  const rowSplitter = document.getElementById("rowSplitter");
 
   const editorEl = document.getElementById("editor");
   const nodesEl  = document.getElementById("nodes");
@@ -1056,10 +1016,7 @@ select optgroup{
   const previewViewport = document.getElementById("previewViewport");
   const previewInner = document.getElementById("previewInner"); // or previewScale if you kept that id
 
-  let previewBase = { w: 1280, h: 720 };
-
   let previewZoomValue = Number(previewZoomSel.value) || 1;
-  let previewScale = 1;
   let pan = { x: 0, y: 0 };
 
   let isPreviewPanning = false;
@@ -1077,14 +1034,14 @@ select optgroup{
     const pannable = previewZoomValue > 1;
     previewViewport.classList.toggle("pannable", pannable);
 
-    // clamp pan based on fixed design size
+    // clamp pan
     const vw = previewViewport.clientWidth;
     const vh = previewViewport.clientHeight;
-    const fitScale = Math.min(vw / previewBase.w, vh / previewBase.h);
-    const scale = fitScale * previewZoomValue;
-    previewScale = scale;
-    const scaledW = previewBase.w * scale;
-    const scaledH = previewBase.h * scale;
+    const iw = previewInner.offsetWidth;
+    const ih = previewInner.offsetHeight;
+
+    const scaledW = iw * previewZoomValue;
+    const scaledH = ih * previewZoomValue;
 
     const maxX = Math.max(0, (scaledW - vw) / 2);
     const maxY = Math.max(0, (scaledH - vh) / 2);
@@ -1096,10 +1053,8 @@ select optgroup{
       pan.y = Math.max(-maxY, Math.min(maxY, pan.y));
     }
 
-    const offsetX = (vw - scaledW) / 2;
-    const offsetY = (vh - scaledH) / 2;
     previewInner.style.transform =
-      `translate(${offsetX + pan.x}px, ${offsetY + pan.y}px) scale(${scale})`;
+      `translate(${pan.x}px, ${pan.y}px) scale(${previewZoomValue})`;
   }
 
   previewZoomSel.addEventListener("change", applyPreviewTransform);
@@ -1140,8 +1095,8 @@ select optgroup{
     if(isPreviewDragging){
       const node = dragNodeId ? state.nodes.get(dragNodeId) : null;
       if(!node) return;
-      const dx = (e.clientX - dragStart.x) / previewScale;
-      const dy = (e.clientY - dragStart.y) / previewScale;
+      const dx = (e.clientX - dragStart.x) / previewZoomValue;
+      const dy = (e.clientY - dragStart.y) / previewZoomValue;
       node.params.x = dragBase.x + dx;
       node.params.y = dragBase.y + dy;
 
@@ -1605,26 +1560,6 @@ refreshProjectList();
         if(!source) return null;
         if(!mask) return { el: source };
 
-        const resolveMaskMeta = (maskEl) => {
-          if(!maskEl) return null;
-          const direct = maskEl.dataset?.maskShape ? maskEl : null;
-          const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape]");
-          const target = direct || nested;
-          if(!target) return null;
-
-          return {
-            shapeType: target.dataset.maskShape || "circle",
-            size: Number(target.dataset.maskSize || 120),
-            x: Number(target.dataset.maskX || 100),
-            y: Number(target.dataset.maskY || 100)
-          };
-        };
-
-        const meta = resolveMaskMeta(mask);
-        if(!meta) return { el: source };
-
-        const { shapeType, size, x, y } = meta;
-
         const wrap = document.createElement("div");
         wrap.style.position = "absolute";
         wrap.style.inset = "0";
@@ -1632,32 +1567,80 @@ refreshProjectList();
         const w = renderRoot?.clientWidth || 800;
         const h = renderRoot?.clientHeight || 600;
 
-        const baseFill = node.params.invert ? "white" : "black";
+        const shapeType = mask.dataset.maskShape || "circle";
+        const size = Number(mask.dataset.maskSize || 120);
+        const x = Number(mask.dataset.maskX || 100);
+        const y = Number(mask.dataset.maskY || 100);
+
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", "100%");
+        svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+        svg.style.position = "absolute";
+        svg.style.inset = "0";
+
+        const defs = document.createElementNS(svgNS, "defs");
+        const maskEl = document.createElementNS(svgNS, "mask");
+        const maskId = `mask-${node.id}-${Date.now()}`;
+        maskEl.setAttribute("id", maskId);
+        maskEl.setAttribute("x", "0");
+        maskEl.setAttribute("y", "0");
+        maskEl.setAttribute("width", String(w));
+        maskEl.setAttribute("height", String(h));
+        maskEl.setAttribute("maskUnits", "userSpaceOnUse");
+        maskEl.setAttribute("maskContentUnits", "userSpaceOnUse");
+        maskEl.setAttribute("mask-type", "alpha");
+
+        const baseRect = document.createElementNS(svgNS, "rect");
+        baseRect.setAttribute("x", "0");
+        baseRect.setAttribute("y", "0");
+        baseRect.setAttribute("width", String(w));
+        baseRect.setAttribute("height", String(h));
+        baseRect.setAttribute("fill", node.params.invert ? "white" : "black");
+        maskEl.appendChild(baseRect);
+
         const shapeFill = node.params.invert ? "black" : "white";
         const r = size / 2;
 
-        let shapeSvg = "";
+        const makePolygon = (pts) => {
+          const poly = document.createElementNS(svgNS, "polygon");
+          poly.setAttribute("points", pts.map(p => p.join(",")).join(" "));
+          poly.setAttribute("fill", shapeFill);
+          return poly;
+        };
+
+        let shapeEl = null;
         switch(shapeType){
           case "circle":
-            shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+            shapeEl = document.createElementNS(svgNS, "circle");
+            shapeEl.setAttribute("cx", String(x));
+            shapeEl.setAttribute("cy", String(y));
+            shapeEl.setAttribute("r", String(r));
+            shapeEl.setAttribute("fill", shapeFill);
             break;
           case "square":
-            shapeSvg = `<rect x="${x - r}" y="${y - r}" width="${size}" height="${size}" fill="${shapeFill}" />`;
+            shapeEl = document.createElementNS(svgNS, "rect");
+            shapeEl.setAttribute("x", String(x - r));
+            shapeEl.setAttribute("y", String(y - r));
+            shapeEl.setAttribute("width", String(size));
+            shapeEl.setAttribute("height", String(size));
+            shapeEl.setAttribute("fill", shapeFill);
             break;
           case "triangle":
-            shapeSvg = `<polygon points="${[
+            shapeEl = makePolygon([
               [x, y - r],
               [x + r, y + r],
               [x - r, y + r]
-            ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+            ]);
             break;
           case "diamond":
-            shapeSvg = `<polygon points="${[
+            shapeEl = makePolygon([
               [x, y - r],
               [x + r, y],
               [x, y + r],
               [x - r, y]
-            ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+            ]);
             break;
           case "hexagon": {
             const pts = [];
@@ -1665,7 +1648,7 @@ refreshProjectList();
               const a = (Math.PI/3)*i - Math.PI/6;
               pts.push([x + r*Math.cos(a), y + r*Math.sin(a)]);
             }
-            shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+            shapeEl = makePolygon(pts);
             break;
           }
           case "star": {
@@ -1677,42 +1660,42 @@ refreshProjectList();
               const rr = i % 2 === 0 ? r1 : r2;
               pts.push([x + rr*Math.cos(a), y + rr*Math.sin(a)]);
             }
-            shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+            shapeEl = makePolygon(pts);
             break;
           }
           default:
-            shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+            shapeEl = document.createElementNS(svgNS, "circle");
+            shapeEl.setAttribute("cx", String(x));
+            shapeEl.setAttribute("cy", String(y));
+            shapeEl.setAttribute("r", String(r));
+            shapeEl.setAttribute("fill", shapeFill);
         }
 
-        const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
-          `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
-            `<rect x="0" y="0" width="${w}" height="${h}" fill="${baseFill}" />` +
-            shapeSvg +
-          `</svg>`;
+        maskEl.appendChild(shapeEl);
+        defs.appendChild(maskEl);
+        svg.appendChild(defs);
 
-        const maskUrl = `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
+        const sourceFO = document.createElementNS(svgNS, "foreignObject");
+        sourceFO.setAttribute("x", "0");
+        sourceFO.setAttribute("y", "0");
+        sourceFO.setAttribute("width", String(w));
+        sourceFO.setAttribute("height", String(h));
+        sourceFO.setAttribute("mask", `url(#${maskId})`);
 
-        const layerContainer = document.createElement("div");
-        layerContainer.style.position = "absolute";
-        layerContainer.style.inset = "0";
-        layerContainer.style.maskImage = maskUrl;
-        layerContainer.style.webkitMaskImage = maskUrl;
-        layerContainer.style.maskMode = "luminance";
-        layerContainer.style.webkitMaskMode = "luminance";
-        layerContainer.style.webkitMaskComposite = "source-over";
-        layerContainer.style.maskRepeat = "no-repeat";
-        layerContainer.style.webkitMaskRepeat = "no-repeat";
-        layerContainer.style.maskPosition = "0 0";
-        layerContainer.style.webkitMaskPosition = "0 0";
-        layerContainer.style.maskSize = "100% 100%";
-        layerContainer.style.webkitMaskSize = "100% 100%";
+        const sourceWrap = document.createElement("div");
+        sourceWrap.style.width = "100%";
+        sourceWrap.style.height = "100%";
+        sourceWrap.style.position = "relative";
 
         const sourceClone = source.cloneNode(true);
         sourceClone.style.position = "absolute";
         sourceClone.style.inset = "0";
-        layerContainer.appendChild(sourceClone);
+        sourceWrap.appendChild(sourceClone);
 
-        wrap.appendChild(layerContainer);
+        sourceFO.appendChild(sourceWrap);
+        svg.appendChild(sourceFO);
+
+        wrap.appendChild(svg);
         return { el: wrap };
       },
       inspector: () => ([
@@ -2110,54 +2093,6 @@ async function evaluate(){
   }
 
   // -----------------------------
-  // Row splitter (preview vs editor)
-  // -----------------------------
-  let splitDragging = false;
-  let splitStartY = 0;
-  let splitStartTop = 0;
-
-  function topHToPx(value, appHeight){
-    const v = String(value || "").trim();
-    if(v.endsWith("vh")) return appHeight * (parseFloat(v) / 100);
-    if(v.endsWith("px")) return parseFloat(v);
-    return parseFloat(v) || appHeight * 0.5;
-  }
-
-  if(rowSplitter && appEl){
-    rowSplitter.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      splitDragging = true;
-      splitStartY = e.clientY;
-
-      const appRect = appEl.getBoundingClientRect();
-      const cssTopH = getComputedStyle(document.documentElement).getPropertyValue("--topH");
-      splitStartTop = topHToPx(cssTopH, appRect.height);
-
-      document.body.style.cursor = "row-resize";
-      document.body.style.userSelect = "none";
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if(!splitDragging) return;
-      const appRect = appEl.getBoundingClientRect();
-      const dy = e.clientY - splitStartY;
-      let newTop = splitStartTop + dy;
-      const minTop = 280;
-      const maxTop = Math.max(minTop + 60, appRect.height - 220);
-      newTop = clamp(newTop, minTop, maxTop);
-      document.documentElement.style.setProperty("--topH", `${newTop}px`);
-      applyPreviewTransform();
-    });
-
-    window.addEventListener("mouseup", () => {
-      if(!splitDragging) return;
-      splitDragging = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    });
-  }
-
-  // -----------------------------
   // Wires drawing (throttled)
   // -----------------------------
   let portElByKey = new Map();
@@ -2472,64 +2407,6 @@ async function evaluate(){
     renderInspector();
   }
 
-  function renderInspectorField(node, f){
-    let controlHtml = "";
-
-    if(f.type === "buttons"){
-      controlHtml = `<div style="display:flex; gap:8px;">${f.buttons.map(btn => `<button data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`;
-    } else if(f.type === "select"){
-      controlHtml = `
-        <select data-k="${f.k}">
-          ${f.options.map(opt => `
-            <option value="${opt}" ${node.params[f.k] === opt ? "selected" : ""}>
-              ${opt}
-            </option>
-          `).join("")}
-        </select>
-      `;
-    } else if(f.type === "range"){
-      let min = (typeof f.min !== 'undefined') ? f.min : 0;
-      let max = (typeof f.max !== 'undefined') ? f.max : 100;
-
-      // Only use preview dimensions for position sliders (x/y), not for pivot/origin
-      if((f.k === 'x' || f.k === 'y') && !f.k.includes('origin')){
-        const previewEl = document.getElementById('previewInner') || document.querySelector('.screen');
-        const maxX = previewEl ? Math.max(0, (previewEl.clientWidth || previewEl.offsetWidth) - 1) : (f.max ?? 1200);
-        const maxY = previewEl ? Math.max(0, (previewEl.clientHeight || previewEl.offsetHeight) - 1) : (f.max ?? 800);
-        max = (f.k === 'y') ? maxY : maxX;
-      }
-
-      const step = (typeof f.step !== 'undefined') ? f.step : 1;
-      const val = escapeAttr(node.params[f.k] ?? '');
-      controlHtml = `
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input data-k="${f.k}" type="range" min="${min}" max="${max}" step="${step}" value="${val}" style="flex:1;" />
-          <input data-k="${f.k}" type="number" min="${min}" max="${max}" step="${step}" value="${val}" style="width:80px;" />
-        </div>
-      `;
-    } else if(f.type === "textarea"){
-      const val = escapeAttr(node.params[f.k] ?? '');
-      controlHtml = `
-        <textarea data-k="${f.k}" style="width:100%; min-height:64px; resize:vertical; padding:8px;">${val}</textarea>
-      `;
-    } else if(f.type === "checkbox"){
-      controlHtml = `
-        <input data-k="${f.k}" type="checkbox" ${node.params[f.k] ? "checked" : ""} />
-      `;
-    } else {
-      controlHtml = `
-        <input data-k="${f.k}" type="${f.type}" value="${escapeAttr(node.params[f.k] ?? "")}" />
-      `;
-    }
-
-    return `
-      <div class="row">
-        <label>${f.label}</label>
-        ${controlHtml}
-      </div>
-    `;
-  }
-
   function renderInspector(){
     const node = state.selected ? state.nodes.get(state.selected) : null;
     
@@ -2571,9 +2448,69 @@ async function evaluate(){
       </div>
     `;
 
+    if(fields.length === 0){
+      inspectorBody.innerHTML = header + `<div class="emptyNote">No parameters for this node (yet).</div>`;
+      return;
+    }
+
     inspectorBody.innerHTML = header + `
       <div class="kv">
-        ${fields.map(f => renderInspectorField(node, f)).join("")}
+        ${fields.map(f => `
+           <div class="row">
+              <label>${f.label}</label>
+
+              ${f.type === "buttons"
+                ? `<div style="display:flex; gap:8px;">${f.buttons.map(btn => `<button data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`
+                : f.type === "select"
+                  ? `
+                    <select data-k="${f.k}">
+                      ${f.options.map(opt => `
+                        <option value="${opt}" ${node.params[f.k] === opt ? "selected" : ""}>
+                          ${opt}
+                        </option>
+                      `).join("")}
+                    </select>
+                  `
+                  : f.type === "range"
+                    ? (() => {
+                        let min = (typeof f.min !== 'undefined') ? f.min : 0;
+                        let max = (typeof f.max !== 'undefined') ? f.max : 100;
+                        
+                        // Only use preview dimensions for position sliders (x/y), not for pivot/origin
+                        if ((f.k === 'x' || f.k === 'y') && !f.k.includes('origin')) {
+                          const previewEl = document.getElementById('previewInner') || document.querySelector('.screen');
+                          const maxX = previewEl ? Math.max(0, (previewEl.clientWidth || previewEl.offsetWidth) - 1) : (f.max ?? 1200);
+                          const maxY = previewEl ? Math.max(0, (previewEl.clientHeight || previewEl.offsetHeight) - 1) : (f.max ?? 800);
+                          max = (f.k === 'y') ? maxY : maxX;
+                        }
+                        
+                        const step = (typeof f.step !== 'undefined') ? f.step : 1;
+                        const val = escapeAttr(node.params[f.k] ?? '');
+                        return `
+                          <div style="display:flex; gap:8px; align-items:center;">
+                            <input data-k="${f.k}" type="range" min="${min}" max="${max}" step="${step}" value="${val}" style="flex:1;" />
+                            <input data-k="${f.k}" type="number" min="${min}" max="${max}" step="${step}" value="${val}" style="width:80px;" />
+                          </div>
+                        `
+                      })()
+                    : f.type === "textarea"
+                      ? (() => {
+                          const val = escapeAttr(node.params[f.k] ?? '');
+                          return `
+                            <textarea data-k="${f.k}" style="width:100%; min-height:64px; resize:vertical; padding:8px;">${val}</textarea>
+                          `
+                        })()
+                    : `
+                    <input
+                      data-k="${f.k}"
+                      type="${f.type}"
+                      value="${escapeAttr(node.params[f.k] ?? "")}"
+                    />
+                  `
+              }
+
+            </div>
+        `).join("")}
       </div>
     `;
 
@@ -2591,8 +2528,6 @@ async function evaluate(){
         const k = inp.getAttribute("data-k");
         let v = inp.value;
 
-        if(inp.type === "checkbox") v = inp.checked;
-
         // coerce numeric types when appropriate
         if(inp.type === 'number' || inp.type === 'range') v = Number(v);
 
@@ -2600,12 +2535,7 @@ async function evaluate(){
 
         // Sync all inspector controls with the same data-k
         inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(el => {
-          if(el === inp) return;
-          if(el.type === "checkbox"){
-            el.checked = Boolean(v);
-          } else {
-            el.value = v;
-          }
+          if(el !== inp) el.value = v;
         });
 
         evaluateAndRender();
@@ -2613,7 +2543,6 @@ async function evaluate(){
         // ✅ Update preview screen when ratio changes
         if(node.type === "Output" && k === "ratio"){
           applyOutputRatio(v);
-          renderInspector();
         }
       };
 
@@ -2637,19 +2566,11 @@ async function evaluate(){
 
   function applyOutputRatio(ratio){
     const screen = document.querySelector(".screen");
-    const previewInner = document.getElementById("previewInner");
 
     if(ratio === "1:1"){
       screen.style.aspectRatio = "1 / 1";
-      previewBase = { w: 720, h: 720 };
     } else {
       screen.style.aspectRatio = "16 / 9";
-      previewBase = { w: 1280, h: 720 };
-    }
-
-    if(previewInner){
-      previewInner.style.width = previewBase.w + "px";
-      previewInner.style.height = previewBase.h + "px";
     }
 
     // reset pan + zoom bounds
@@ -2658,277 +2579,7 @@ async function evaluate(){
     applyPreviewTransform();
   }
 
-  function graphUsesBlendModes(){
-    for(const node of state.nodes.values()){
-      if(node.type === "Composite" && node.params?.blend && node.params.blend !== "normal"){
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function exportCanvasWithBlend(format){
-    const exportScale = 2;
-    const w = previewBase.w;
-    const h = previewBase.h;
-
-    const createCanvas = () => {
-      const c = document.createElement("canvas");
-      c.width = Math.max(1, Math.round(w));
-      c.height = Math.max(1, Math.round(h));
-      const ctx = c.getContext("2d");
-      return { c, ctx };
-    };
-
-    const blendMap = {
-      "normal": "source-over",
-      "multiply": "multiply",
-      "screen": "screen",
-      "overlay": "overlay",
-      "darken": "darken",
-      "lighten": "lighten",
-      "color-dodge": "color-dodge",
-      "color-burn": "color-burn",
-      "hard-light": "hard-light",
-      "soft-light": "soft-light",
-      "difference": "difference",
-      "exclusion": "exclusion",
-      "hue": "hue",
-      "saturation": "saturation",
-      "color": "color",
-      "luminosity": "luminosity"
-    };
-
-    const cache = new Map();
-
-    const renderNodeToCanvas = (nodeId) => {
-      if(cache.has(nodeId)) return cache.get(nodeId);
-      const node = state.nodes.get(nodeId);
-      if(!node) return null;
-
-      const def = NODE_DEFS[node.type];
-      if(!def) return null;
-
-      const getInputCanvas = (port) => {
-        const w = findWireToInput(nodeId, port);
-        if(!w) return null;
-        return renderNodeToCanvas(String(w.from.nodeId));
-      };
-
-      let result = null;
-
-      if(node.type === "Color"){
-        const { c, ctx } = createCanvas();
-        ctx.fillStyle = node.params.color || "#000000";
-        ctx.fillRect(0, 0, w, h);
-        result = c;
-      }
-
-      if(node.type === "Gradient"){
-        const { c, ctx } = createCanvas();
-        const angle = Number(node.params.angle) || 0;
-        const rad = (angle - 90) * Math.PI / 180;
-        const cx = w / 2;
-        const cy = h / 2;
-        const len = Math.hypot(w, h);
-        const dx = Math.cos(rad) * (len / 2);
-        const dy = Math.sin(rad) * (len / 2);
-        const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-        grad.addColorStop(0, node.params.a || "#000000");
-        grad.addColorStop(1, node.params.b || "#ffffff");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-        result = c;
-      }
-
-      if(node.type === "Shape"){
-        const { c, ctx } = createCanvas();
-        const size = Number(node.params.size) || 100;
-        const x = Number(node.params.x) || 0;
-        const y = Number(node.params.y) || 0;
-        const color = node.params.color || "#000000";
-        const shapeType = node.params.shape || "circle";
-        const r = size / 2;
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        if(shapeType === "circle"){
-          ctx.arc(x, y, r, 0, Math.PI * 2);
-        }else if(shapeType === "square"){
-          ctx.rect(x - r, y - r, size, size);
-        }else if(shapeType === "triangle"){
-          ctx.moveTo(x, y - r);
-          ctx.lineTo(x + r, y + r);
-          ctx.lineTo(x - r, y + r);
-          ctx.closePath();
-        }else if(shapeType === "diamond"){
-          ctx.moveTo(x, y - r);
-          ctx.lineTo(x + r, y);
-          ctx.lineTo(x, y + r);
-          ctx.lineTo(x - r, y);
-          ctx.closePath();
-        }else if(shapeType === "hexagon"){
-          for(let i = 0; i < 6; i++){
-            const a = (Math.PI / 3) * i - Math.PI / 6;
-            const px = x + r * Math.cos(a);
-            const py = y + r * Math.sin(a);
-            if(i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-        }else if(shapeType === "star"){
-          const r1 = r;
-          const r2 = r * 0.5;
-          for(let i = 0; i < 10; i++){
-            const a = (Math.PI / 5) * i - Math.PI / 2;
-            const rr = (i % 2 === 0) ? r1 : r2;
-            const px = x + rr * Math.cos(a);
-            const py = y + rr * Math.sin(a);
-            if(i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-        }
-        ctx.fill();
-        result = c;
-      }
-
-      if(node.type === "Text"){
-        const { c, ctx } = createCanvas();
-        const text = String(node.params.text ?? "");
-        const size = Number(node.params.size) || 32;
-        const x = Number(node.params.x) || 0;
-        const y = Number(node.params.y) || 0;
-        const weight = String(node.params.weight || 700);
-        const font = node.params.font || "Inter";
-        const color = node.params.color || "#ffffff";
-        ctx.fillStyle = color;
-        ctx.font = `${weight} ${size}px ${font}`;
-        ctx.textBaseline = "top";
-        const lines = text.split("\n");
-        const lineH = size * 1.1;
-        lines.forEach((line, i) => {
-          ctx.fillText(line, x, y + i * lineH);
-        });
-        result = c;
-      }
-
-      if(node.type === "Transform"){
-        const src = getInputCanvas("in");
-        if(src){
-          const { c, ctx } = createCanvas();
-          const x = Number(node.params.x) || 0;
-          const y = Number(node.params.y) || 0;
-          const s = Number(node.params.scale) || 1;
-          const r = (Number(node.params.rot) || 0) * Math.PI / 180;
-          const ox = ((Number(node.params.originX) ?? 0) + 100) / 2;
-          const oy = ((Number(node.params.originY) ?? 0) + 100) / 2;
-          const px = (ox / 100) * w;
-          const py = (oy / 100) * h;
-
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.translate(px, py);
-          ctx.scale(s, s);
-          ctx.rotate(r);
-          ctx.translate(-px, -py);
-          ctx.drawImage(src, 0, 0);
-          ctx.restore();
-          result = c;
-        }
-      }
-
-      if(node.type === "Mask"){
-        const source = getInputCanvas("source");
-        const mask = getInputCanvas("mask");
-        if(source){
-          const { c, ctx } = createCanvas();
-          ctx.drawImage(source, 0, 0);
-          if(mask){
-            ctx.globalCompositeOperation = node.params.invert ? "destination-out" : "destination-in";
-            ctx.drawImage(mask, 0, 0);
-            ctx.globalCompositeOperation = "source-over";
-          }
-          result = c;
-        }
-      }
-
-      if(node.type === "Composite"){
-        const A = getInputCanvas("a");
-        const B = getInputCanvas("b");
-        if(A || B){
-          const { c, ctx } = createCanvas();
-          if(B) ctx.drawImage(B, 0, 0);
-          if(A){
-            const blend = String(node.params.blend || "normal").toLowerCase();
-            ctx.globalCompositeOperation = blendMap[blend] || "source-over";
-            ctx.globalAlpha = Number(node.params.opacity ?? 100) / 100;
-            ctx.drawImage(A, 0, 0);
-            ctx.globalAlpha = 1;
-            ctx.globalCompositeOperation = "source-over";
-          }
-          result = c;
-        }
-      }
-
-      if(node.type === "Output"){
-        const input = getInputCanvas("in");
-        result = input;
-      }
-
-      cache.set(nodeId, result);
-      return result;
-    };
-
-    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output") || null;
-    if(!outNode){
-      toast("No Output node to export.");
-      return;
-    }
-    const wire = findWireToInput(outNode.id, "in");
-    if(!wire){
-      toast("Output is not connected.");
-      return;
-    }
-
-    const canvas = renderNodeToCanvas(String(wire.from.nodeId));
-    if(!canvas){
-      toast("Nothing to export.");
-      return;
-    }
-
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = Math.max(1, Math.round(w * exportScale));
-    exportCanvas.height = Math.max(1, Math.round(h * exportScale));
-    const exportCtx = exportCanvas.getContext("2d");
-    exportCtx.imageSmoothingEnabled = true;
-    exportCtx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
-
-    exportCanvas.toBlob(blob => {
-      const link = document.createElement("a");
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
-      const mimeType = format === "exportPNG" ? "image/png" : "image/jpeg";
-      const ext = format === "exportPNG" ? "png" : "jpg";
-      const quality = format === "exportPNG" ? undefined : 0.95;
-      if(!blob){
-        toast("Export failed.");
-        return;
-      }
-      link.href = URL.createObjectURL(blob);
-      link.download = `export_${timestamp}.${ext}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-      toast(`Exported as ${ext.toUpperCase()} ✅`);
-    }, format === "exportPNG" ? "image/png" : "image/jpeg", format === "exportPNG" ? undefined : 0.95);
-  }
-
   function exportCanvasAsImage(format){
-    if(graphUsesBlendModes()){
-      exportCanvasWithBlend(format);
-      return;
-    }
     // Use html2canvas to capture the preview element
     const previewInner = document.getElementById("previewInner");
     if(!previewInner) {
@@ -2936,34 +2587,14 @@ async function evaluate(){
       return;
     }
 
-    const exportHost = document.createElement("div");
-    exportHost.style.position = "fixed";
-    exportHost.style.left = "-100000px";
-    exportHost.style.top = "0";
-    exportHost.style.width = previewBase.w + "px";
-    exportHost.style.height = previewBase.h + "px";
-    exportHost.style.pointerEvents = "none";
-
-    const exportClone = previewInner.cloneNode(true);
-    exportClone.style.transform = "none";
-    exportClone.style.left = "0";
-    exportClone.style.top = "0";
-    exportClone.style.width = previewBase.w + "px";
-    exportClone.style.height = previewBase.h + "px";
-
-    exportHost.appendChild(exportClone);
-    document.body.appendChild(exportHost);
-
     // Dynamic import of html2canvas
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     script.onload = () => {
-      html2canvas(exportClone, {
+      html2canvas(previewInner, {
         backgroundColor: null,
         scale: 2,
-        logging: false,
-        useCORS: true,
-        allowTaint: true
+        logging: false
       }).then(canvas => {
         const link = document.createElement('a');
         const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
@@ -2979,12 +2610,10 @@ async function evaluate(){
           document.body.removeChild(link);
           URL.revokeObjectURL(link.href);
           toast(`Exported as ${ext.toUpperCase()} ✅`);
-          exportHost.remove();
         }, mimeType, quality);
       }).catch(err => {
         console.error(err);
         toast(`Export failed: ${err.message}`);
-        exportHost.remove();
       });
     };
     document.head.appendChild(script);
@@ -3092,24 +2721,6 @@ async function evaluate(){
       restoreSnapshot(snap);
       evaluateAndRender();
       return;
-    }
-
-    if((e.ctrlKey || e.metaKey) && !e.shiftKey){
-      const key = e.key.toLowerCase();
-
-      if(key === "c"){
-        if(isTypingTarget(e.target)) return;
-        e.preventDefault();
-        copySelectedNodes();
-        return;
-      }
-
-      if(key === "v"){
-        if(isTypingTarget(e.target)) return;
-        e.preventDefault();
-        pasteCopiedNodes();
-        return;
-      }
     }
 
     if(e.code !== "Space") return;
@@ -3351,107 +2962,6 @@ function serializeGraph(){
   };
 }
 
-function getSelectedNodeIds(){
-  return state.selectedNodes.size > 0
-    ? Array.from(state.selectedNodes)
-    : (state.selected ? [state.selected] : []);
-}
-
-function copySelectedNodes(){
-  const ids = getSelectedNodeIds();
-  if(ids.length === 0){
-    toast("No nodes selected to copy.");
-    return;
-  }
-
-  const nodes = [];
-  const idSet = new Set(ids.map(id => String(id)));
-  let minX = Infinity;
-  let minY = Infinity;
-
-  for(const id of ids){
-    const node = state.nodes.get(String(id));
-    if(!node) continue;
-    minX = Math.min(minX, node.pos.x);
-    minY = Math.min(minY, node.pos.y);
-  }
-
-  for(const id of ids){
-    const node = state.nodes.get(String(id));
-    if(!node) continue;
-    nodes.push({
-      id: String(node.id),
-      type: node.type,
-      pos: { x: node.pos.x - minX, y: node.pos.y - minY },
-      params: JSON.parse(JSON.stringify(node.params || {}))
-    });
-  }
-
-  const wires = state.wires
-    .filter(w => idSet.has(String(w.from.nodeId)) && idSet.has(String(w.to.nodeId)))
-    .map(w => ({
-      from: { nodeId: String(w.from.nodeId), port: w.from.port },
-      to: { nodeId: String(w.to.nodeId), port: w.to.port }
-    }));
-
-  copyBuffer = { nodes, wires };
-  pasteOffsetCount = 0;
-  toast(`Copied ${nodes.length} node${nodes.length > 1 ? "s" : ""}.`);
-}
-
-function pasteCopiedNodes(){
-  if(!copyBuffer || copyBuffer.nodes.length === 0){
-    toast("Clipboard is empty.");
-    return;
-  }
-
-  pushHistory();
-
-  const base = state.mouse
-    ? editorToWorld(state.mouse.x, state.mouse.y)
-    : { x: 80, y: 80 };
-
-  const offset = 20 * pasteOffsetCount;
-  const idMap = new Map();
-  const newIds = [];
-
-  for(const n of copyBuffer.nodes){
-    const id = uid();
-    idMap.set(n.id, id);
-    newIds.push(id);
-
-    state.nodes.set(id, {
-      id,
-      type: n.type,
-      pos: { x: base.x + n.pos.x + offset, y: base.y + n.pos.y + offset },
-      params: JSON.parse(JSON.stringify(n.params || {}))
-    });
-  }
-
-  for(const w of copyBuffer.wires){
-    const fromId = idMap.get(String(w.from.nodeId));
-    const toId = idMap.get(String(w.to.nodeId));
-    if(fromId && toId){
-      state.wires.push({
-        from: { nodeId: fromId, port: w.from.port },
-        to: { nodeId: toId, port: w.to.port }
-      });
-    }
-  }
-
-  pasteOffsetCount += 1;
-
-  state.selectedNodes = new Set(newIds);
-  state.selected = newIds[newIds.length - 1] || null;
-
-  render();
-  evaluateAndRender();
-  renderInspector();
-  requestWireDraw();
-
-  toast(`Pasted ${newIds.length} node${newIds.length > 1 ? "s" : ""}.`);
-}
-
 function deleteSelectedNode(){
   // Delete all selected nodes
   const nodesToDelete = state.selectedNodes.size > 0 
@@ -3604,7 +3114,6 @@ function loadGraph(data){
   window.addEventListener("resize", () => {
     requestWireDraw();
     try{ renderInspector(); }catch(e){/* ignore */}
-    try{ applyPreviewTransform(); }catch(e){/* ignore */}
   });
 
   // -----------------------------

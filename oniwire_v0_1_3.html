@@ -422,7 +422,13 @@ input[type="text"], input[type="number"], input[type="color"]{
   font-size:12px;
   outline:none;
 }
-input[type="color"]{ padding:0; height:34px; }
+input[type="color"]{
+  padding:0;
+  width:46px;
+  height:46px;
+  border-radius: 12px;
+  cursor: pointer;
+}
 
 .emptyNote{
   color: rgba(255,255,255,.55);
@@ -595,6 +601,12 @@ select optgroup{
   outline-offset: 2px;
 }
 
+.node.multiselected{
+  outline: 2px solid rgba(180,142,255,.55);
+  outline-offset: 2px;
+  background: rgba(180,142,255,.03);
+}
+
 .nh{
   padding:10px 12px;
   display:flex;
@@ -628,12 +640,40 @@ select optgroup{
   border:1px solid rgba(255,255,255,.25);
   background: rgba(255,255,255,.06);
   cursor:pointer;
+  transition: all 0.15s ease;
 }
-.dot.out{ border-color: rgba(138,242,201,.55); }
-.dot.in{ border-color: rgba(122,167,255,.55); }
+.dot.out{ 
+  border-color: rgba(138,242,201,.55);
+  cursor: crosshair;
+}
+.dot.out:hover{
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px rgba(138,242,201,.14);
+  background: rgba(138,242,201,.15);
+}
+.dot.in{ 
+  border-color: rgba(122,167,255,.55);
+}
+.dot.in:hover{
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px rgba(122,167,255,.14);
+  background: rgba(122,167,255,.15);
+}
 .dot.active{
   box-shadow: 0 0 0 6px rgba(122,167,255,.14);
   background: rgba(122,167,255,.20);
+  transform: scale(1.2);
+}
+
+/* Selection Rectangle */
+.selectionRect{
+  position: absolute;
+  border: 2px solid rgba(122,167,255,.65);
+  background: rgba(122,167,255,.08);
+  pointer-events: none;
+  z-index: 10000;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(122,167,255,.3);
 }
 
 .toast{
@@ -682,6 +722,7 @@ select optgroup{
   .editorWrap{ grid-row: 4; grid-column:1; height: 650px; }
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
   <div class="app">
@@ -698,6 +739,7 @@ select optgroup{
           <div class="menuTile" id="btnImport">Import</div>
           <div class="menuTile" id="btnExport">Export</div>
           <div class="menuTile">Help</div>
+          <div class="menuTile" id="btnClearCache">Clear Cache</div>
         </div>
 
         <div style="display:grid; gap:10px;">
@@ -801,6 +843,7 @@ select optgroup{
               <optgroup label="Generators">
                 <option value="Color">Color</option>
                 <option value="Gradient">Gradient</option>
+                <option value="Shape">Shape</option>
                 <option value="Text">Text</option>
               </optgroup>
 
@@ -808,6 +851,7 @@ select optgroup{
               <optgroup label="Operations">
                 <option value="Transform">Transform</option>
                 <option value="Composite">Composite</option>
+                <option value="Mask">Mask</option>
               </optgroup>
 
               <!-- Final Nodes -->
@@ -815,13 +859,8 @@ select optgroup{
                 <option value="Output">Output</option>
               </optgroup>
             </select>
-            <button id="btnAdd">Add Node</button>
         </div>
       </div>
-
-        <div class="btns">
-          <button id="btnClearWires" class="danger">Clear Wires</button>
-          </div>
       </div>
 
       <div class="editor" id="editor">
@@ -835,6 +874,9 @@ select optgroup{
           <div class="stage" id="stage">
             <div class="nodes" id="nodes"></div>
           </div>
+
+          <!-- Selection rectangle (NOT transformed) -->
+          <div class="selectionRect" id="selectionRect" style="display:none;"></div>
       </div>
     </section>
 
@@ -860,10 +902,21 @@ select optgroup{
     wires: [],
     nextId: 1,
 
-    draggingNode: null,   // {id, ox, oy}
+    draggingNode: null,   // {id, ox, oy} or {ids: Set, offsets: Map}
     connecting: null,     // {nodeId, port}
-    selected: null,       // nodeId
+    selected: null,       // nodeId (for single selection)
+    selectedNodes: new Set(), // Set of selected node IDs for multi-select
     toastTimer: null,
+
+    // Selection rectangle
+    selecting: false,
+    selectStart: null,    // {x, y} in editor coords
+    selectCurrent: null,  // {x, y} in editor coords
+    justFinishedSelection: false, // Prevent click from clearing selection right after drag
+
+    // Undo stack
+    history: [],
+    historyMax: 40,
 
     // Editor transform
     panX: 0,
@@ -886,6 +939,75 @@ select optgroup{
   const nodesEl  = document.getElementById("nodes");
   const wiresSvg = document.getElementById("wires");
   const toastEl  = document.getElementById("toast");
+  const selectionRectEl = document.getElementById("selectionRect");
+
+  function cloneGraphSnapshot(){
+    return {
+      nextId: state.nextId,
+      panX: state.panX,
+      panY: state.panY,
+      zoom: state.zoom,
+      selected: state.selected,
+      selectedNodes: Array.from(state.selectedNodes),
+      nodes: Array.from(state.nodes.values()).map(n => ({
+        id: String(n.id),
+        type: n.type,
+        pos: { x: n.pos.x, y: n.pos.y },
+        params: JSON.parse(JSON.stringify(n.params || {}))
+      })),
+      wires: state.wires.map(w => ({
+        from: { nodeId: String(w.from.nodeId), port: w.from.port },
+        to: { nodeId: String(w.to.nodeId), port: w.to.port }
+      }))
+    };
+  }
+
+  function pushHistory(){
+    state.history.push(cloneGraphSnapshot());
+    if(state.history.length > state.historyMax){
+      state.history.shift();
+    }
+  }
+
+  function restoreSnapshot(snapshot){
+    if(!snapshot) return;
+    state.nodes.clear();
+    state.wires = [];
+    state.connecting = null;
+    state.selected = snapshot.selected || null;
+    state.selectedNodes = new Set(snapshot.selectedNodes || []);
+
+    state.nextId = Number(snapshot.nextId) || 1;
+    state.panX = Number(snapshot.panX) || 0;
+    state.panY = Number(snapshot.panY) || 0;
+    state.zoom = Number(snapshot.zoom) || 1;
+
+    for(const n of snapshot.nodes){
+      if(!NODE_DEFS[n.type]) continue;
+      state.nodes.set(String(n.id), {
+        id: String(n.id),
+        type: n.type,
+        pos: { x: Number(n.pos?.x) || 0, y: Number(n.pos?.y) || 0 },
+        params: { ...(n.params || {}) }
+      });
+    }
+
+    for(const w of (snapshot.wires || [])){
+      const a = String(w.from?.nodeId);
+      const b = String(w.to?.nodeId);
+      if(state.nodes.has(a) && state.nodes.has(b)){
+        state.wires.push({
+          from: { nodeId: a, port: w.from.port },
+          to:   { nodeId: b, port: w.to.port }
+        });
+      }
+    }
+
+    applyEditorTransform();
+    render();
+    evaluateAndRender();
+    renderInspector();
+  }
 
   // -----------------------------
   // Preview zoom + pan
@@ -949,6 +1071,7 @@ select optgroup{
       && previewInner.contains(e.target);
 
     if(canDrag){
+      pushHistory();
       isPreviewDragging = true;
       dragNodeId = selectedNode.id;
       previewViewport.setPointerCapture(e.pointerId);
@@ -1195,17 +1318,83 @@ refreshProjectList();
         {k:"angle", type:"number", label:"Angle"}
       ])
     },
-    Text: {
-      inputs: ["bg"],
+    Shape: {
+      inputs: [],
       outputs: ["layer"],
-      defaults: { text:"Hello 👋", size:44, color:"#ffffff", x:40, y:60, weight:700 },
+      defaults: { shape:"circle", size:120, color:"#3b82f6", x:100, y:100 },
+      icon: "🔷",
+      run: (node) => {
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+
+        const shape = document.createElement("div");
+        shape.style.position = "absolute";
+        
+        const size = Number(node.params.size) || 100;
+        const x = Number(node.params.x) || 0;
+        const y = Number(node.params.y) || 0;
+        const color = node.params.color || "#3b82f6";
+        const shapeType = node.params.shape || "circle";
+
+        // Position so that (x, y) is the center of the shape
+        shape.style.left = (x - size/2) + "px";
+        shape.style.top = (y - size/2) + "px";
+        shape.style.width = size + "px";
+        shape.style.height = size + "px";
+        shape.style.backgroundColor = color;
+
+        // Apply shape-specific styles
+        switch(shapeType){
+          case "circle":
+            shape.style.borderRadius = "50%";
+            break;
+          case "square":
+            shape.style.borderRadius = "0";
+            break;
+          case "triangle":
+            // Use CSS triangle trick
+            shape.style.width = "0";
+            shape.style.height = "0";
+            shape.style.backgroundColor = "transparent";
+            shape.style.borderLeft = (size/2) + "px solid transparent";
+            shape.style.borderRight = (size/2) + "px solid transparent";
+            shape.style.borderBottom = size + "px solid " + color;
+            break;
+          case "diamond":
+            shape.style.transform = "rotate(45deg)";
+            shape.style.transformOrigin = "center";
+            break;
+          case "hexagon":
+            // Create hexagon using clip-path
+            shape.style.clipPath = "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)";
+            break;
+          case "star":
+            // Create star using clip-path
+            shape.style.clipPath = "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)";
+            break;
+        }
+
+        wrap.appendChild(shape);
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"shape", type:"select", label:"Shape", options:["circle","square","triangle","diamond","hexagon","star"]},
+        {k:"size", type:"range", label:"Size", min:10, max:400, step:1},
+        {k:"color", type:"color", label:"Color"},
+        {k:"x", type:"range", label:"X", min:0, max:1200, step:1},
+        {k:"y", type:"range", label:"Y", min:0, max:1200, step:1}
+      ])
+    },
+    Text: {
+      inputs: [],
+      outputs: ["layer"],
+      defaults: { text:"Hello 👋", size:44, color:"#ffffff", x:40, y:60, weight:700, font:"Inter" },
       icon: "🔤",
       run: (node, inputs) => {
         const wrap = document.createElement("div");
         wrap.style.position = "absolute";
         wrap.style.inset = "0";
-
-        if(inputs.bg?.el) wrap.appendChild(inputs.bg.el);
 
         const t = document.createElement("div");
         t.textContent = node.params.text ?? "";
@@ -1215,7 +1404,7 @@ refreshProjectList();
         t.style.color = node.params.color;
         t.style.fontSize = (Number(node.params.size)||32) + "px";
         t.style.fontWeight = String(node.params.weight||700);
-        t.style.textShadow = "0 10px 30px rgba(0,0,0,.45)";
+        t.style.fontFamily = node.params.font || "Inter";
         t.style.whiteSpace = "pre-wrap"; /* keep line breaks */
         t.style.overflowWrap = "break-word";
         t.style.maxWidth = "calc(100% - 40px)"; /* don't overflow the preview */
@@ -1225,6 +1414,7 @@ refreshProjectList();
       },
       inspector: () => ([
         {k:"text", type:"textarea", label:"Text"},
+        {k:"font", type:"select", label:"Font", options:["Inter","Poppins","Montserrat","Roboto","Arial","Georgia","Times New Roman","Courier New"]},
         {k:"size", type:"number", label:"Size"},
         {k:"color", type:"color", label:"Color"},
         {k:"x", type:"range", label:"X", min:0, max:1200, step:1},
@@ -1236,7 +1426,7 @@ refreshProjectList();
       inputs: ["in"],
       outputs: ["layer"],
       defaults: { x:0, y:0, scale:1, rot:0, originX:0, originY:0 },
-      icon: "🧲",
+      icon: "↔️",
       run: (node, inputs) => {
         const src = inputs.in;
         if(!src?.el) return null;
@@ -1303,9 +1493,9 @@ refreshProjectList();
     Composite: {
       inputs: ["a", "b"],
       outputs: ["layer"],
-      defaults: {},
+      defaults: { blend: "normal", opacity: 100 },
       icon: "🧬",
-      run: (_node, inputs) => {
+      run: (node, inputs) => {
         const A = inputs.a?.el || null;
         const B = inputs.b?.el || null;
         if(!A && !B) return null;
@@ -1313,11 +1503,205 @@ refreshProjectList();
         const wrap = document.createElement("div");
         wrap.style.position = "absolute";
         wrap.style.inset = "0";
+        
+        const blendMode = node.params.blend || "normal";
+        const opacity = Number(node.params.opacity ?? 100) / 100;
+        
+        // Bottom layer (B)
         if(B) wrap.appendChild(B);
-        if(A) wrap.appendChild(A);
+        
+        // Top layer (A)
+        if(A) {
+          A.style.opacity = String(opacity);
+          A.style.mixBlendMode = blendMode;
+          wrap.appendChild(A);
+        }
+        
         return { el: wrap };
       },
-      inspector: () => ([])
+      inspector: () => ([
+        {k:"blend", type:"select", label:"Blend Mode", options:[
+          "normal",
+          "multiply",
+          "screen",
+          "overlay",
+          "darken",
+          "lighten",
+          "color-dodge",
+          "color-burn",
+          "hard-light",
+          "soft-light",
+          "difference",
+          "exclusion",
+          "hue",
+          "saturation",
+          "color",
+          "luminosity"
+        ]},
+        {k:"opacity", type:"range", label:"Opacity %", min:0, max:100, step:1}
+      ])
+    },
+    Mask: {
+      inputs: ["layer", "mask"],
+      outputs: ["layer"],
+      defaults: { mode: "alpha" },
+      icon: "🎭",
+      run: (node, inputs) => {
+        const layer = inputs.layer?.el || null;
+        const mask = inputs.mask?.el || null;
+        
+        if(!layer) return null;
+        if(!mask) return { el: layer };
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        
+        const mode = node.params.mode || "alpha";
+        
+        // Use SVG mask for proper alpha masking
+        const container = document.createElement("div");
+        container.style.position = "absolute";
+        container.style.inset = "0";
+        
+        // Create unique ID for this mask
+        const maskId = `mask-${node.id}-${Date.now()}`;
+        
+        // Create SVG with mask definition
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("width", "0");
+        svg.setAttribute("height", "0");
+        svg.style.position = "absolute";
+        
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        const maskElement = document.createElementNS("http://www.w3.org/2000/svg", "mask");
+        maskElement.setAttribute("id", maskId);
+        
+        // Create a white rect as base
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", "0");
+        rect.setAttribute("y", "0");
+        rect.setAttribute("width", "100%");
+        rect.setAttribute("height", "100%");
+        rect.setAttribute("fill", mode === "inverted" ? "white" : "black");
+        maskElement.appendChild(rect);
+        
+        // Add the mask shape as foreignObject
+        const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+        foreignObject.setAttribute("x", "0");
+        foreignObject.setAttribute("y", "0");
+        foreignObject.setAttribute("width", "100%");
+        foreignObject.setAttribute("height", "100%");
+        
+        const maskDiv = document.createElement("div");
+        maskDiv.style.width = "100%";
+        maskDiv.style.height = "100%";
+        if(mode === "inverted") {
+          maskDiv.style.filter = "invert(1)";
+        }
+        maskDiv.appendChild(mask.cloneNode(true));
+        
+        foreignObject.appendChild(maskDiv);
+        maskElement.appendChild(foreignObject);
+        
+        defs.appendChild(maskElement);
+        svg.appendChild(defs);
+        
+        container.appendChild(svg);
+        
+        // Apply mask to layer using CSS
+        const layerContainer = document.createElement("div");
+        layerContainer.style.position = "absolute";
+        layerContainer.style.inset = "0";
+        layerContainer.style.mask = `url(#${maskId})`;
+        layerContainer.style.webkitMask = `url(#${maskId})`;
+        layerContainer.appendChild(layer.cloneNode(true));
+        
+        container.appendChild(layerContainer);
+        wrap.appendChild(container);
+        
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"mode", type:"select", label:"Mask Mode", options:[
+          "alpha",
+          "inverted"
+        ]}
+      ])
+    },
+    Mask2: {
+      inputs: ["layer", "mask"],
+      outputs: ["layer"],
+      defaults: { mode: "alpha" },
+      icon: "✂️",
+      run: async (node, inputs) => {
+        const layer = inputs.layer?.el || null;
+        const mask = inputs.mask?.el || null;
+        
+        if(!layer) return null;
+        if(!mask) return { el: layer };
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+        
+        const mode = node.params.mode || "alpha";
+        
+        // Create canvas for output
+        const canvas = document.createElement("canvas");
+        canvas.width = 800;
+        canvas.height = 600;
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+        canvas.style.position = "absolute";
+        canvas.style.inset = "0";
+        
+        const ctx = canvas.getContext("2d");
+        
+        try {
+          // Convert layer DOM to canvas using html2canvas
+          const layerCanvas = await html2canvas(layer, {
+            width: 800,
+            height: 600,
+            backgroundColor: null,
+            scale: 1
+          });
+          
+          // Convert mask DOM to canvas
+          const maskCanvas = await html2canvas(mask, {
+            width: 800,
+            height: 600,
+            backgroundColor: null,
+            scale: 1
+          });
+          
+          // Draw layer first
+          ctx.drawImage(layerCanvas, 0, 0, 800, 600);
+          
+          // Apply mask using composite operation
+          if(mode === "alpha") {
+            // destination-in: keep layer only where mask is opaque (white)
+            ctx.globalCompositeOperation = "destination-in";
+          } else {
+            // destination-out: remove layer where mask is opaque (inverted)
+            ctx.globalCompositeOperation = "destination-out";
+          }
+          
+          ctx.drawImage(maskCanvas, 0, 0, 800, 600);
+          
+        } catch(err) {
+          console.error("Mask2 error:", err);
+        }
+        
+        wrap.appendChild(canvas);
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"mode", type:"select", label:"Mask Mode", options:[
+          "alpha",
+          "inverted"
+        ]}
+      ])
     },
     Output: {
       inputs: ["in"],
@@ -1354,9 +1738,12 @@ let nodeSpawnEditorPos = { x: 160, y: 160 };
 const NODE_CATEGORIES = {
   Color: "Generators",
   Gradient: "Generators",
+  Shape: "Generators",
   Text: "Generators",
   Transform: "Operations",
   Composite: "Operations",
+  Mask: "Operations",
+  Mask2: "Operations",
   Output: "Output",
 };
 
@@ -1802,7 +2189,9 @@ function evaluate(){
       if(!def) continue;
 
       const el = document.createElement("div");
-      el.className = "node" + (state.selected === node.id ? " selected" : "");
+      const isSelected = state.selected === node.id;
+      const isMultiSelected = state.selectedNodes.has(node.id);
+      el.className = "node" + (isSelected ? " selected" : "") + (isMultiSelected && !isSelected ? " multiselected" : "");
       el.style.left = node.pos.x + "px";
       el.style.top  = node.pos.y + "px";
       el.dataset.id = node.id;
@@ -1837,7 +2226,7 @@ function evaluate(){
       // Node selection
       el.addEventListener("mousedown", (ev) => {
         if(!ev.target.classList.contains("dot")){
-          selectNode(node.id);
+          selectNode(node.id, ev.ctrlKey || ev.metaKey, ev.shiftKey);
         }
       });
 
@@ -1847,36 +2236,61 @@ function evaluate(){
         if(ev.button !== 0) return;
         ev.stopPropagation();
 
-        selectNode(node.id);
+        // If clicking on a node that's already in the multi-selection, drag all selected
+        const isInMultiSelect = state.selectedNodes.has(node.id);
+        
+        if(!isInMultiSelect){
+          selectNode(node.id, ev.ctrlKey || ev.metaKey, ev.shiftKey);
+        }
 
         const m = editorMouse(ev);
         const mWorld = editorToWorld(m.x, m.y);
 
-        state.draggingNode = {
-          id: node.id,
-          ox: mWorld.x - node.pos.x,
-          oy: mWorld.y - node.pos.y
-        };
+        // Check if we should drag multiple nodes
+        if(state.selectedNodes.size > 1 && state.selectedNodes.has(node.id)){
+          // Drag all selected nodes
+          const offsets = new Map();
+          for(const nid of state.selectedNodes){
+            const n = state.nodes.get(nid);
+            if(n){
+              offsets.set(nid, {
+                ox: mWorld.x - n.pos.x,
+                oy: mWorld.y - n.pos.y
+              });
+            }
+          }
+          state.draggingNode = {
+            ids: new Set(state.selectedNodes),
+            offsets: offsets
+          };
+        } else {
+          // Drag single node
+          state.draggingNode = {
+            id: node.id,
+            ox: mWorld.x - node.pos.x,
+            oy: mWorld.y - node.pos.y
+          };
+        }
       });
 
-      // Port clicks
+      // Port drag-to-connect
       el.querySelectorAll(".dot").forEach(dot => {
-        dot.addEventListener("click", (ev) => {
+        // Start dragging connection from output port
+        dot.addEventListener("mousedown", (ev) => {
           ev.stopPropagation();
           const io = dot.getAttribute("data-io");
           const nodeId = dot.getAttribute("data-node");
           const port = dot.getAttribute("data-name");
 
           if(io === "out"){
+            // Start dragging a connection
             state.connecting = { nodeId, port };
             toast(`Connecting from ${nodeId}.${port}`);
             renderActiveDots();
             requestWireDraw();
-            return;
-          }
-
-          // input click
-          if(!state.connecting){
+            ev.preventDefault();
+          } else if(io === "in"){
+            // Click input to remove existing wire
             const existing = findWireToInput(nodeId, port);
             if(existing){
               state.wires = state.wires.filter(w => w !== existing);
@@ -1884,21 +2298,56 @@ function evaluate(){
               evaluateAndRender();
               requestWireDraw();
             }
-            return;
           }
+        });
 
-          const from = state.connecting;
-          const to = { nodeId, port };
+        // Complete connection on mouse up over input port
+        dot.addEventListener("mouseup", (ev) => {
+          if(!state.connecting) return;
+          
+          ev.stopPropagation();
+          const io = dot.getAttribute("data-io");
+          const nodeId = dot.getAttribute("data-node");
+          const port = dot.getAttribute("data-name");
 
-          // one wire per input
-          state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
-          state.wires.push({ from, to });
-          state.connecting = null;
-          toast(`Connected → ${to.nodeId}.${to.port}`);
+          if(io === "in"){
+            const from = state.connecting;
+            const to = { nodeId, port };
 
-          evaluateAndRender();
-          renderActiveDots();
-          requestWireDraw();
+            // one wire per input
+            state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
+            state.wires.push({ from, to });
+            state.connecting = null;
+            toast(`Connected → ${to.nodeId}.${to.port}`);
+
+            evaluateAndRender();
+            renderActiveDots();
+            requestWireDraw();
+          }
+        });
+
+        // Visual feedback on hover while connecting
+        dot.addEventListener("mouseenter", (ev) => {
+          if(!state.connecting) return;
+          const io = dot.getAttribute("data-io");
+          if(io === "in"){
+            dot.classList.add("active");
+          }
+        });
+
+        dot.addEventListener("mouseleave", (ev) => {
+          if(!state.connecting) return;
+          const io = dot.getAttribute("data-io");
+          if(io === "in"){
+            // Only remove active if it's not the actual connecting source
+            const nodeId = dot.getAttribute("data-node");
+            const port = dot.getAttribute("data-name");
+            const key = portKey(nodeId, "in", port);
+            const sourceKey = portKey(state.connecting.nodeId, "out", state.connecting.port);
+            if(key !== sourceKey){
+              dot.classList.remove("active");
+            }
+          }
         });
       });
 
@@ -1922,15 +2371,57 @@ function evaluate(){
   // -----------------------------
   // Inspector
   // -----------------------------
-  function selectNode(nodeId){
-    state.selected = nodeId;
+  function selectNode(nodeId, additive = false, range = false){
+    if(additive){
+      // Ctrl/Cmd+click: toggle selection
+      if(state.selectedNodes.has(nodeId)){
+        state.selectedNodes.delete(nodeId);
+        if(state.selected === nodeId) state.selected = null;
+      } else {
+        state.selectedNodes.add(nodeId);
+        state.selected = nodeId;
+      }
+    } else if(range){
+      // Shift+click: add to selection
+      state.selectedNodes.add(nodeId);
+      state.selected = nodeId;
+    } else {
+      // Normal click: single selection
+      state.selectedNodes.clear();
+      state.selectedNodes.add(nodeId);
+      state.selected = nodeId;
+    }
+    
     render(); // update highlight + port cache
+    renderInspector();
+  }
+
+  function clearSelection(){
+    state.selected = null;
+    state.selectedNodes.clear();
+    render();
     renderInspector();
   }
 
   function renderInspector(){
     const node = state.selected ? state.nodes.get(state.selected) : null;
+    
     if(!node){
+      const count = state.selectedNodes.size;
+      if(count > 1){
+        inspectorBody.innerHTML = `
+          <div class="emptyNote">
+            <strong>${count} nodes selected</strong>
+            <br><br>
+            • Drag to move them together
+            <br>• Delete/Backspace to remove
+            <br>• Click background to deselect
+            <br><br>
+            Click a single node to edit its parameters.
+          </div>`;
+        return;
+      }
+      
       inspectorBody.innerHTML = `
         <div class="emptyNote">
           Click a node to edit its parameters here.
@@ -2029,6 +2520,7 @@ function evaluate(){
 
     inspectorBody.querySelectorAll('input[data-k], textarea[data-k], select[data-k]').forEach(inp => {
       const handler = () => {
+        pushHistory();
         const k = inp.getAttribute("data-k");
         let v = inp.value;
 
@@ -2128,6 +2620,86 @@ function evaluate(){
   }
 
   // -----------------------------
+  // Selection Rectangle
+  // -----------------------------
+  function updateSelectionRect(){
+    if(!state.selectStart || !state.selectCurrent){
+      selectionRectEl.style.display = "none";
+      return;
+    }
+
+    const x1 = Math.min(state.selectStart.x, state.selectCurrent.x);
+    const y1 = Math.min(state.selectStart.y, state.selectCurrent.y);
+    const x2 = Math.max(state.selectStart.x, state.selectCurrent.x);
+    const y2 = Math.max(state.selectStart.y, state.selectCurrent.y);
+
+    selectionRectEl.style.display = "block";
+    selectionRectEl.style.left = x1 + "px";
+    selectionRectEl.style.top = y1 + "px";
+    selectionRectEl.style.width = (x2 - x1) + "px";
+    selectionRectEl.style.height = (y2 - y1) + "px";
+  }
+
+  function finalizeSelection(){
+    if(!state.selectStart || !state.selectCurrent) return;
+
+    const x1 = Math.min(state.selectStart.x, state.selectCurrent.x);
+    const y1 = Math.min(state.selectStart.y, state.selectCurrent.y);
+    const x2 = Math.max(state.selectStart.x, state.selectCurrent.x);
+    const y2 = Math.max(state.selectStart.y, state.selectCurrent.y);
+
+    // Convert to world coordinates
+    const topLeft = editorToWorld(x1, y1);
+    const bottomRight = editorToWorld(x2, y2);
+
+    console.log("Selection rect (screen):", {x1, y1, x2, y2});
+    console.log("Selection rect (world):", topLeft, bottomRight);
+    console.log("Zoom:", state.zoom);
+
+    // Find nodes within the rectangle
+    let selectedAny = false;
+    for(const node of state.nodes.values()){
+      const nodeEl = document.querySelector(`.node[data-id="${node.id}"]`);
+      if(!nodeEl) continue;
+
+      // Get node bounds in world coords
+      // Node dimensions are in screen pixels but positioned in world coords
+      const nodeWidth = nodeEl.offsetWidth / state.zoom;
+      const nodeHeight = nodeEl.offsetHeight / state.zoom;
+      const nodeLeft = node.pos.x;
+      const nodeTop = node.pos.y;
+      const nodeRight = nodeLeft + nodeWidth;
+      const nodeBottom = nodeTop + nodeHeight;
+
+      console.log(`Node ${node.id} bounds (world):`, {
+        left: nodeLeft, top: nodeTop, right: nodeRight, bottom: nodeBottom,
+        width: nodeWidth, height: nodeHeight
+      });
+
+      // Check if node overlaps with selection rectangle
+      const overlaps = !(nodeRight < topLeft.x || 
+                         nodeLeft > bottomRight.x || 
+                         nodeBottom < topLeft.y || 
+                         nodeTop > bottomRight.y);
+
+      console.log(`Node ${node.id} overlaps:`, overlaps);
+
+      if(overlaps){
+        state.selectedNodes.add(node.id);
+        state.selected = node.id; // Keep last selected as primary
+        selectedAny = true;
+      }
+    }
+
+    console.log("Selected nodes:", Array.from(state.selectedNodes));
+
+    if(selectedAny){
+      render();
+      renderInspector();
+    }
+  }
+
+  // -----------------------------
   // Pan + Zoom controls for editor
   // -----------------------------
   function isTypingTarget(el){
@@ -2137,6 +2709,16 @@ function evaluate(){
   }
 
   window.addEventListener("keydown", (e) => {
+    // Undo (Ctrl+Z / Cmd+Z)
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z"){
+      e.preventDefault();
+      const snap = state.history.pop();
+      console.log("Undo pressed. History length:", state.history.length, "Snapshot:", snap);
+      restoreSnapshot(snap);
+      evaluateAndRender();
+      return;
+    }
+
     if(e.code !== "Space") return;
 
     // ✅ allow space to be typed inside inputs/textareas/contenteditable
@@ -2164,14 +2746,44 @@ function evaluate(){
     const isMiddle = (e.button === 1);
     const isSpaceLeft = (e.button === 0 && state.spaceDown);
 
-    if(!isMiddle && !isSpaceLeft) return;
+    if(isMiddle || isSpaceLeft){
+      const m = editorMouse(e);
+      state.isPanning = true;
+      state.panStart = { x: m.x, y: m.y, panX: state.panX, panY: state.panY };
+      editorEl.style.cursor = "grabbing";
+      e.preventDefault();
+      return;
+    }
 
-    const m = editorMouse(e);
-    state.isPanning = true;
-    state.panStart = { x: m.x, y: m.y, panX: state.panX, panY: state.panY };
-
-    editorEl.style.cursor = "grabbing";
-    e.preventDefault();
+    // Left click on background (not on nodes or dots) starts selection rectangle
+    if(e.button === 0){
+      const isDot = e.target.classList?.contains("dot");
+      const isNode = e.target.closest?.(".node");
+      const isNodeHeader = e.target.closest?.(".nh");
+      
+      // Don't start selection if clicking on a node or dot
+      if(isDot || isNodeHeader || isNode) return;
+      
+      // Allow selection on editor, stage, wires, or nodes container
+      const isEditorArea = e.target === editorEl || 
+                           e.target.id === 'stage' || 
+                           e.target.id === 'wires' || 
+                           e.target.id === 'nodes';
+      
+      if(isEditorArea){
+        const m = editorMouse(e);
+        state.selecting = true;
+        state.selectStart = m;
+        state.selectCurrent = m;
+        
+        // Clear selection unless Shift/Ctrl is held
+        if(!e.shiftKey && !e.ctrlKey && !e.metaKey){
+          clearSelection();
+        }
+        
+        e.preventDefault();
+      }
+    }
   });
 
   editorEl.addEventListener("auxclick", (e) => {
@@ -2192,28 +2804,85 @@ function evaluate(){
       applyEditorTransform();
     }
 
+    // Selection rectangle
+    if(state.selecting && state.selectStart){
+      state.selectCurrent = m;
+      updateSelectionRect();
+      return;
+    }
+
     // Dragging node (world coords)
     if(state.draggingNode){
       const mw = editorToWorld(m.x, m.y);
-      const n = state.nodes.get(state.draggingNode.id);
-      if(n){
-        n.pos.x = mw.x - state.draggingNode.ox;
-        n.pos.y = mw.y - state.draggingNode.oy;
+      
+      if(state.draggingNode.ids){
+        // Drag multiple nodes
+        for(const nid of state.draggingNode.ids){
+          const n = state.nodes.get(nid);
+          const offset = state.draggingNode.offsets.get(nid);
+          if(n && offset){
+            n.pos.x = mw.x - offset.ox;
+            n.pos.y = mw.y - offset.oy;
 
-        const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
-        if(nodeEl){
-          nodeEl.style.left = n.pos.x + "px";
-          nodeEl.style.top  = n.pos.y + "px";
+            const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+            if(nodeEl){
+              nodeEl.style.left = n.pos.x + "px";
+              nodeEl.style.top  = n.pos.y + "px";
+            }
+          }
         }
         requestWireDraw();
+      } else {
+        // Drag single node
+        const n = state.nodes.get(state.draggingNode.id);
+        if(n){
+          n.pos.x = mw.x - state.draggingNode.ox;
+          n.pos.y = mw.y - state.draggingNode.oy;
+
+          const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+          if(nodeEl){
+            nodeEl.style.left = n.pos.x + "px";
+            nodeEl.style.top  = n.pos.y + "px";
+          }
+          requestWireDraw();
+        }
       }
     }
 
     if(state.connecting) requestWireDraw();
   });
 
-  window.addEventListener("mouseup", () => {
+  window.addEventListener("mouseup", (e) => {
     state.draggingNode = null;
+
+    // Finalize selection rectangle
+    if(state.selecting){
+      finalizeSelection();
+      state.selecting = false;
+      state.selectStart = null;
+      state.selectCurrent = null;
+      selectionRectEl.style.display = "none";
+      
+      // Prevent the click event from clearing selection
+      state.justFinishedSelection = true;
+      setTimeout(() => {
+        state.justFinishedSelection = false;
+      }, 50);
+    }
+
+    // Cancel connection if releasing outside of a port
+    if(state.connecting){
+      const target = e.target;
+      const isDot = target?.classList?.contains("dot");
+      const isInputDot = isDot && target.getAttribute("data-io") === "in";
+      
+      if(!isInputDot){
+        state.connecting = null;
+        renderActiveDots();
+        requestWireDraw();
+        toast("Cancelled connection.");
+      }
+    }
 
     if(state.isPanning){
       state.isPanning = false;
@@ -2245,15 +2914,26 @@ function evaluate(){
     applyEditorTransform();
   }, { passive:false });
 
-  // Click background cancels connection
+  // Click background cancels connection and clears selection
   editorEl.addEventListener("click", (e) => {
+    // Don't clear selection if we just finished a drag selection
+    if(state.justFinishedSelection) return;
+    
     const isDot = e.target.classList?.contains("dot");
     const isNode = e.target.closest?.(".node");
-    if(!isDot && !isNode && state.connecting){
-      state.connecting = null;
-      renderActiveDots();
-      requestWireDraw();
-      toast("Cancelled connection.");
+    
+    if(!isDot && !isNode){
+      if(state.connecting){
+        state.connecting = null;
+        renderActiveDots();
+        requestWireDraw();
+        toast("Cancelled connection.");
+      }
+      
+      // Clear selection when clicking background (unless Ctrl/Cmd held)
+      if(!e.ctrlKey && !e.metaKey && (state.selected || state.selectedNodes.size > 0)){
+        clearSelection();
+      }
     }
   });
 
@@ -2279,27 +2959,40 @@ function serializeGraph(){
 }
 
 function deleteSelectedNode(){
-  const id = state.selected;
-  if(!id) return;
+  // Delete all selected nodes
+  const nodesToDelete = state.selectedNodes.size > 0 
+    ? Array.from(state.selectedNodes) 
+    : (state.selected ? [state.selected] : []);
+  
+  if(nodesToDelete.length === 0) return;
 
-  // Remove the node
-  state.nodes.delete(String(id));
+  // Save state for undo
+  pushHistory();
 
-  // Remove any wires connected to it
-  state.wires = state.wires.filter(w =>
-    String(w.from.nodeId) !== String(id) &&
-    String(w.to.nodeId)   !== String(id)
-  );
+  // Remove the nodes
+  for(const id of nodesToDelete){
+    state.nodes.delete(String(id));
+  }
+
+  // Remove any wires connected to deleted nodes
+  state.wires = state.wires.filter(w => {
+    const fromId = String(w.from.nodeId);
+    const toId = String(w.to.nodeId);
+    return !nodesToDelete.some(id => String(id) === fromId || String(id) === toId);
+  });
 
   // Clear selection + connecting
   state.selected = null;
+  state.selectedNodes.clear();
   state.connecting = null;
 
   render();
   renderInspector();
   evaluateAndRender();
   requestWireDraw();
-  toast(`Deleted node ${id}`);
+  
+  const count = nodesToDelete.length;
+  toast(`Deleted ${count} node${count > 1 ? 's' : ''}`);
 }
 
 // Delete / Backspace key handler
@@ -2366,18 +3059,11 @@ function loadGraph(data){
   // -----------------------------
   // Commands
   // -----------------------------
-  document.getElementById("btnAdd").addEventListener("click", () => {
-    const t = document.getElementById("nodeType").value;
+  document.getElementById("nodeType").addEventListener("change", (e) => {
+    const t = e.target.value;
     addNode(t);
-  });
-
-  document.getElementById("btnClearWires").addEventListener("click", () => {
-    state.wires = [];
-    state.connecting = null;
-    renderActiveDots();
-    evaluateAndRender();
-    requestWireDraw();
-    toast("Cleared all wires.");
+    // keep select showing the last choice
+    e.target.blur();
   });
 
   document.getElementById("btnResetGraph").addEventListener("click", () => {
@@ -2403,6 +3089,22 @@ function loadGraph(data){
   document.getElementById("btnExport").addEventListener("click", () => {
     const projectName = document.getElementById("projectName")?.value || "project";
     exportProject(projectName);
+  });
+
+  document.getElementById("btnClearCache").addEventListener("click", () => {
+    if(confirm("Clear all saved projects from browser storage?\n\nThis will:\n• Delete all saved projects\n• Clear undo history\n• Keep your current work\n\nContinue?")){
+      // Clear localStorage
+      localStorage.clear();
+      
+      // Clear undo history to free memory
+      state.history = [];
+      
+      // Refresh the project list dropdown to remove deleted projects
+      refreshProjectList();
+      
+      toast("✅ Cache cleared! All saved projects deleted.");
+      console.log("Browser cache cleared: localStorage emptied, undo history reset");
+    }
   });
 
   window.addEventListener("resize", () => {
@@ -2446,14 +3148,16 @@ function loadGraph(data){
     state.zoom = 1;
     applyEditorTransform();
 
-    // Starter: Gradient -> Text -> Output
-    const g = addNode("Gradient", {x: 60,  y: 80});
-    const t = addNode("Text",     {x: 360, y: 105});
-    const o = addNode("Output",   {x: 660, y: 130});
+    // Starter: Gradient + Text -> Composite -> Output
+    const g = addNode("Gradient", {x: 80,  y: 260});
+    const t = addNode("Text",     {x: 80,  y: 60});
+    const c = addNode("Composite",{x: 520, y: 170});
+    const o = addNode("Output",   {x: 900, y: 150});
 
     // Auto wires
-    state.wires.push({ from:{nodeId:g.id, port:"layer"}, to:{nodeId:t.id, port:"bg"} });
-    state.wires.push({ from:{nodeId:t.id, port:"layer"}, to:{nodeId:o.id, port:"in"} });
+    state.wires.push({ from:{nodeId:g.id, port:"layer"}, to:{nodeId:c.id, port:"b"} });
+    state.wires.push({ from:{nodeId:t.id, port:"layer"}, to:{nodeId:c.id, port:"a"} });
+    state.wires.push({ from:{nodeId:c.id, port:"layer"}, to:{nodeId:o.id, port:"in"} });
 
     render();
     evaluateAndRender();

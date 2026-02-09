@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mask Node Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1e1e1e;
+            color: white;
+        }
+        
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .nodes-area {
+            flex: 1;
+            position: relative;
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 600px;
+        }
+        
+        .preview-area {
+            width: 400px;
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .node {
+            position: absolute;
+            background: #3d3d3d;
+            border: 2px solid #555;
+            border-radius: 8px;
+            padding: 15px;
+            min-width: 180px;
+            cursor: move;
+        }
+        
+        .node-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+        
+        .node-input, .node-output {
+            margin: 8px 0;
+            padding: 5px;
+            background: #2d2d2d;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .node-input {
+            border-left: 3px solid #4CAF50;
+        }
+        
+        .node-output {
+            border-left: 3px solid #2196F3;
+        }
+        
+        .param {
+            margin: 8px 0;
+        }
+        
+        .param label {
+            display: block;
+            font-size: 12px;
+            margin-bottom: 4px;
+            color: #aaa;
+        }
+        
+        .param input[type="color"] {
+            width: 100%;
+            height: 30px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .param input[type="range"] {
+            width: 100%;
+        }
+        
+        .param input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: white;
+        }
+        
+        .preview-canvas {
+            width: 100%;
+            border: 2px solid #555;
+            border-radius: 4px;
+            background: #000;
+        }
+        
+        .info {
+            margin-top: 15px;
+            padding: 10px;
+            background: #3d3d3d;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        
+        .connect-btn {
+            padding: 5px 10px;
+            background: #4CAF50;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        .connect-btn:hover {
+            background: #45a049;
+        }
+        
+        .disconnect-btn {
+            padding: 5px 10px;
+            background: #f44336;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        .connection-status {
+            font-size: 11px;
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>Mask Node Test</h1>
+    <div class="container">
+        <div class="nodes-area" id="nodesArea">
+            <!-- Nodes will be created here -->
+        </div>
+        
+        <div class="preview-area">
+            <h3>Preview</h3>
+            <canvas id="previewCanvas" class="preview-canvas" width="360" height="360"></canvas>
+            <div class="info">
+                <strong>How it works:</strong><br>
+                • Shape 1 (Rectangle) = Source<br>
+                • Shape 2 (Circle) = Mask<br>
+                • Mask Node combines them<br>
+                • White in mask = visible<br>
+                • Black in mask = invisible
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Node system
+        const nodes = [];
+        
+        class Node {
+            constructor(id, type, x, y) {
+                this.id = id;
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.inputs = {};
+                this.params = {};
+                this.element = null;
+            }
+            
+            createDOM() {
+                const node = document.createElement('div');
+                node.className = 'node';
+                node.style.left = this.x + 'px';
+                node.style.top = this.y + 'px';
+                node.id = `node-${this.id}`;
+                
+                let html = `<div class="node-title">${this.type}</div>`;
+                
+                if (this.type === 'Rectangle') {
+                    html += `
+                        <div class="param">
+                            <label>Color</label>
+                            <input type="color" id="rect-color" value="#ff6b6b">
+                        </div>
+                        <div class="param">
+                            <label>Width: <span id="rect-width-val">200</span></label>
+                            <input type="range" id="rect-width" min="50" max="300" value="200">
+                        </div>
+                        <div class="param">
+                            <label>Height: <span id="rect-height-val">150</span></label>
+                            <input type="range" id="rect-height" min="50" max="300" value="150">
+                        </div>
+                        <div class="node-output">
+                            <span>Output →</span>
+                        </div>
+                    `;
+                    this.params = { color: '#ff6b6b', width: 200, height: 150 };
+                }
+                
+                if (this.type === 'Circle') {
+                    html += `
+                        <div class="param">
+                            <label>Color</label>
+                            <input type="color" id="circle-color" value="#ffffff">
+                        </div>
+                        <div class="param">
+                            <label>Radius: <span id="circle-radius-val">80</span></label>
+                            <input type="range" id="circle-radius" min="30" max="150" value="80">
+                        </div>
+                        <div class="param">
+                            <label>X Position: <span id="circle-x-val">180</span></label>
+                            <input type="range" id="circle-x" min="0" max="360" value="180">
+                        </div>
+                        <div class="param">
+                            <label>Y Position: <span id="circle-y-val">180</span></label>
+                            <input type="range" id="circle-y" min="0" max="360" value="180">
+                        </div>
+                        <div class="node-output">
+                            <span>Output →</span>
+                        </div>
+                    `;
+                    this.params = { color: '#ffffff', radius: 80, x: 180, y: 180 };
+                }
+                
+                if (this.type === 'Mask') {
+                    html += `
+                        <div class="node-input">
+                            <span>← Source</span>
+                            <button class="connect-btn" onclick="connectSource()">Connect</button>
+                            <span class="connection-status" id="source-status"></span>
+                        </div>
+                        <div class="node-input">
+                            <span>← Mask</span>
+                            <button class="connect-btn" onclick="connectMask()">Connect</button>
+                            <span class="connection-status" id="mask-status"></span>
+                        </div>
+                        <div class="param">
+                            <label>Invert Mask</label>
+                            <input type="checkbox" id="invert-mask">
+                        </div>
+                        <div class="node-output">
+                            <span>Result →</span>
+                        </div>
+                    `;
+                    this.params = { invert: false };
+                }
+                
+                node.innerHTML = html;
+                this.element = node;
+                return node;
+            }
+        }
+        
+        // Create nodes
+        const rectNode = new Node(1, 'Rectangle', 50, 50);
+        const circleNode = new Node(2, 'Circle', 50, 300);
+        const maskNode = new Node(3, 'Mask', 400, 150);
+        
+        nodes.push(rectNode, circleNode, maskNode);
+        
+        const nodesArea = document.getElementById('nodesArea');
+        nodes.forEach(node => {
+            nodesArea.appendChild(node.createDOM());
+        });
+        
+        // Canvas setup
+        const canvas = document.getElementById('previewCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Connections
+        let connections = {
+            source: null,
+            mask: null
+        };
+        
+        window.connectSource = function() {
+            connections.source = rectNode;
+            document.getElementById('source-status').textContent = '✓ Rectangle';
+            render();
+        }
+        
+        window.connectMask = function() {
+            connections.mask = circleNode;
+            document.getElementById('mask-status').textContent = '✓ Circle';
+            render();
+        }
+        
+        // Event listeners for parameters
+        function setupListeners() {
+            // Rectangle
+            const rectColor = document.getElementById('rect-color');
+            const rectWidth = document.getElementById('rect-width');
+            const rectHeight = document.getElementById('rect-height');
+            
+            if (rectColor) {
+                rectColor.addEventListener('input', (e) => {
+                    rectNode.params.color = e.target.value;
+                    render();
+                });
+            }
+            
+            if (rectWidth) {
+                rectWidth.addEventListener('input', (e) => {
+                    rectNode.params.width = parseInt(e.target.value);
+                    document.getElementById('rect-width-val').textContent = e.target.value;
+                    render();
+                });
+            }
+            
+            if (rectHeight) {
+                rectHeight.addEventListener('input', (e) => {
+                    rectNode.params.height = parseInt(e.target.value);
+                    document.getElementById('rect-height-val').textContent = e.target.value;
+                    render();
+                });
+            }
+            
+            // Circle
+            const circleColor = document.getElementById('circle-color');
+            const circleRadius = document.getElementById('circle-radius');
+            const circleX = document.getElementById('circle-x');
+            const circleY = document.getElementById('circle-y');
+            
+            if (circleColor) {
+                circleColor.addEventListener('input', (e) => {
+                    circleNode.params.color = e.target.value;
+                    render();
+                });
+            }
+            
+            if (circleRadius) {
+                circleRadius.addEventListener('input', (e) => {
+                    circleNode.params.radius = parseInt(e.target.value);
+                    document.getElementById('circle-radius-val').textContent = e.target.value;
+                    render();
+                });
+            }
+            
+            if (circleX) {
+                circleX.addEventListener('input', (e) => {
+                    circleNode.params.x = parseInt(e.target.value);
+                    document.getElementById('circle-x-val').textContent = e.target.value;
+                    render();
+                });
+            }
+            
+            if (circleY) {
+                circleY.addEventListener('input', (e) => {
+                    circleNode.params.y = parseInt(e.target.value);
+                    document.getElementById('circle-y-val').textContent = e.target.value;
+                    render();
+                });
+            }
+            
+            // Mask
+            const invertMask = document.getElementById('invert-mask');
+            if (invertMask) {
+                invertMask.addEventListener('change', (e) => {
+                    maskNode.params.invert = e.target.checked;
+                    render();
+                });
+            }
+        }
+        
+        setupListeners();
+        
+        // Render function using Canvas Masking
+        function render() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (!connections.source || !connections.mask) {
+                // Show shapes separately if not connected
+                ctx.fillStyle = '#333';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.font = '14px Arial';
+                ctx.fillStyle = '#888';
+                ctx.textAlign = 'center';
+                ctx.fillText('Connect nodes to see masking effect', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+            
+            // Draw background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // THE MASKING MAGIC HAPPENS HERE:
+            // Step 1: Draw the mask shape to create the clipping region
+            ctx.save();
+            
+            // Create mask path (circle in this case)
+            ctx.beginPath();
+            
+            if (maskNode.params.invert) {
+                // For inverted mask: draw outer rectangle, then circle counterclockwise
+                ctx.rect(0, 0, canvas.width, canvas.height);
+                ctx.arc(
+                    circleNode.params.x, 
+                    circleNode.params.y, 
+                    circleNode.params.radius, 
+                    0, 
+                    Math.PI * 2,
+                    true  // counterclockwise = subtract from path
+                );
+            } else {
+                // Normal mask: just the circle
+                ctx.arc(
+                    circleNode.params.x, 
+                    circleNode.params.y, 
+                    circleNode.params.radius, 
+                    0, 
+                    Math.PI * 2
+                );
+            }
+            
+            ctx.closePath();
+            
+            // Use the mask as a clipping path
+            ctx.clip();
+            
+            // Step 2: Draw the source shape (only visible inside the mask)
+            ctx.fillStyle = rectNode.params.color;
+            const rectX = (canvas.width - rectNode.params.width) / 2;
+            const rectY = (canvas.height - rectNode.params.height) / 2;
+            ctx.fillRect(rectX, rectY, rectNode.params.width, rectNode.params.height);
+            
+            ctx.restore();
+            
+            // Optional: Draw outline of mask for reference
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.arc(
+                circleNode.params.x, 
+                circleNode.params.y, 
+                circleNode.params.radius, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        
+        // Initial render
+        render();
+        
+        // Simple drag functionality
+        let draggedNode = null;
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        nodesArea.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.node')) {
+                draggedNode = e.target.closest('.node');
+                const rect = draggedNode.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+            }
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (draggedNode) {
+                const containerRect = nodesArea.getBoundingClientRect();
+                draggedNode.style.left = (e.clientX - containerRect.left - offsetX) + 'px';
+                draggedNode.style.top = (e.clientY - containerRect.top - offsetY) + 'px';
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            draggedNode = null;
+        });
+    </script>
+</body>
+</html>
