@@ -1,0 +1,8 @@
+{
+  "name": "oniwire",
+  "version": "0.1.5",
+  "private": true,
+  "scripts": {
+    "sync-index": "powershell -ExecutionPolicy Bypass -File scripts/sync-index.ps1"
+  }
+}
