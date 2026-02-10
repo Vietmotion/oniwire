@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Landing Test - Oniwire Animation</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      color: #e8efff;
+      background: radial-gradient(1200px 600px at 20% -10%, #273756 0%, #0f1626 45%, #0b0f18 100%);
+    }
+    .wrap {
+      width: min(1200px, 92vw);
+      margin: 0 auto;
+      padding: 52px 0 40px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 28px;
+      align-items: stretch;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border: 1px solid rgba(122,167,255,.28);
+      border-radius: 20px;
+      box-shadow: 0 16px 48px rgba(0,0,0,.35);
+      backdrop-filter: blur(6px);
+    }
+    .content {
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 16px;
+    }
+    .tag {
+      width: fit-content;
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #b8cdf9;
+      border: 1px solid rgba(184,205,249,.35);
+      border-radius: 999px;
+      padding: 6px 12px;
+      background: rgba(19,28,49,.45);
+    }
+    h1 {
+      margin: 0;
+      line-height: 1.06;
+      font-size: clamp(32px, 4.2vw, 56px);
+    }
+    p {
+      margin: 0;
+      color: #c6d3ee;
+      line-height: 1.6;
+      max-width: 48ch;
+    }
+    .list {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: #c6d3ee;
+      line-height: 1.7;
+    }
+    .hero-media {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .media-frame {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(122,167,255,.22);
+      background: #0f1626;
+      position: relative;
+    }
+    #heroCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #0f1626;
+    }
+    .status {
+      font-size: 13px;
+      color: #ffe082;
+      min-height: 18px;
+      padding: 0 4px;
+    }
+    @media (max-width: 920px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <article class="card content">
+        <div class="tag">Landing Page Test</div>
+        <h1>Compact JSON Animation in a Real Web Hero</h1>
+        <p>This page is a simple landing layout to verify that exported Oniwire compact JSON can run directly on a normal webpage.</p>
+        <ul class="list">
+          <li>Autoloads one exported JSON from your project.</li>
+          <li>Renders inside this hero media area.</li>
+          <li>Loops playback so it behaves like a live hero visual.</li>
+        </ul>
+      </article>
+
+      <aside class="card hero-media">
+        <div class="media-frame">
+          <canvas id="heroCanvas" width="1280" height="720"></canvas>
+        </div>
+        <div id="status" class="status">Loading animation...</div>
+      </aside>
+    </section>
+  </div>
+
+  <script>
+    const ANIMATION_URL = "../export-json/animation_animation (5).json";
+    const statusEl = document.getElementById("status");
+    const canvas = document.getElementById("heroCanvas");
+
+    const toNumber = (value, fallback = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const hexToRgba = (hex, alpha = 1) => {
+      const raw = String(hex || "#ffffff").replace("#", "").trim();
+      const full = raw.length === 3 ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}` : raw;
+      const r = parseInt(full.slice(0, 2), 16) || 255;
+      const g = parseInt(full.slice(2, 4), 16) || 255;
+      const b = parseInt(full.slice(4, 6), 16) || 255;
+      return `rgba(${r}, ${g}, ${b}, ${clamp(alpha, 0, 1)})`;
+    };
+
+    class CompactGraphPlayer {
+      constructor(targetCanvas, data) {
+        this.canvas = targetCanvas;
+        this.data = data;
+        this.metadata = data.metadata || {};
+        this.project = data.project || { nodes: [], wires: [] };
+        this.nodes = new Map((this.project.nodes || []).map(n => [n.id, n]));
+        this.wires = this.project.wires || [];
+
+        this.canvas.width = Math.max(1, Math.round(toNumber(this.metadata.width, 1280)));
+        this.canvas.height = Math.max(1, Math.round(toNumber(this.metadata.height, 720)));
+        this.ctx = this.canvas.getContext("2d");
+
+        this.duration = Math.max(0.001, toNumber(this.metadata.duration, 5));
+        this.currentTime = 0;
+        this.startTime = null;
+        this.isPlaying = false;
+        this.rafId = null;
+      }
+
+      play() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        const tick = (now) => {
+          if (!this.isPlaying) return;
+          if (this.startTime === null) this.startTime = now - this.currentTime * 1000;
+          const elapsed = (now - this.startTime) / 1000;
+          this.currentTime = elapsed % this.duration;
+          this.renderAtTime(this.currentTime);
+          this.rafId = requestAnimationFrame(tick);
+        };
+        this.rafId = requestAnimationFrame(tick);
+      }
+
+      createLayer() {
+        const c = document.createElement("canvas");
+        c.width = this.canvas.width;
+        c.height = this.canvas.height;
+        return { canvas: c, ctx: c.getContext("2d") };
+      }
+
+      getInput(nodeId, ports, timeSec, cache) {
+        const list = Array.isArray(ports) ? ports : [ports];
+        for (const port of list) {
+          const wire = this.wires.find(w => w.to && w.to.nodeId === nodeId && w.to.port === port);
+          if (wire && wire.from) return this.renderNode(wire.from.nodeId, timeSec, cache);
+        }
+        return null;
+      }
+
+      drawShape(ctx2d, shapeType, x, y, size) {
+        const r = size / 2;
+        ctx2d.beginPath();
+        if (shapeType === "square") return ctx2d.rect(x - r, y - r, size, size);
+        if (shapeType === "triangle") {
+          ctx2d.moveTo(x, y - r); ctx2d.lineTo(x + r, y + r); ctx2d.lineTo(x - r, y + r); ctx2d.closePath(); return;
+        }
+        if (shapeType === "diamond") {
+          ctx2d.moveTo(x, y - r); ctx2d.lineTo(x + r, y); ctx2d.lineTo(x, y + r); ctx2d.lineTo(x - r, y); ctx2d.closePath(); return;
+        }
+        if (shapeType === "hexagon") {
+          for (let i = 0; i < 6; i++) {
+            const a = (Math.PI / 3) * i - Math.PI / 2;
+            const px = x + Math.cos(a) * r;
+            const py = y + Math.sin(a) * r;
+            if (i === 0) ctx2d.moveTo(px, py); else ctx2d.lineTo(px, py);
+          }
+          ctx2d.closePath(); return;
+        }
+        if (shapeType === "star") {
+          const r2 = r * 0.5;
+          for (let i = 0; i < 10; i++) {
+            const a = (Math.PI / 5) * i - Math.PI / 2;
+            const rr = i % 2 === 0 ? r : r2;
+            const px = x + Math.cos(a) * rr;
+            const py = y + Math.sin(a) * rr;
+            if (i === 0) ctx2d.moveTo(px, py); else ctx2d.lineTo(px, py);
+          }
+          ctx2d.closePath(); return;
+        }
+        ctx2d.arc(x, y, r, 0, Math.PI * 2);
+      }
+
+      renderNode(nodeId, timeSec, cache) {
+        if (cache.has(nodeId)) return cache.get(nodeId);
+        const node = this.nodes.get(nodeId);
+        if (!node) return null;
+
+        const params = node.params || {};
+        let result = null;
+
+        if (node.type === "Ramp") {
+          result = {
+            stops: (Array.isArray(params.stops) ? params.stops : [])
+              .map(s => ({ pos: clamp(toNumber(s.pos, 0), 0, 100), color: s.color || "#ffffff" }))
+              .sort((a, b) => a.pos - b.pos)
+          };
+          cache.set(nodeId, result);
+          return result;
+        }
+
+        if (node.type === "Color") {
+          const { canvas, ctx } = this.createLayer();
+          ctx.fillStyle = params.color || "#000";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          result = { canvas };
+        } else if (node.type === "Gradient") {
+          const { canvas, ctx } = this.createLayer();
+          const ramp = this.getInput(nodeId, "ramp", timeSec, cache);
+          const stops = (ramp && ramp.stops && ramp.stops.length)
+            ? ramp.stops
+            : [{ pos: 0, color: params.a || "#000" }, { pos: 100, color: params.b || "#fff" }];
+          if ((params.type || "linear") === "radial") {
+            const cx = (toNumber(params.cx, 50) / 100) * canvas.width;
+            const cy = (toNumber(params.cy, 50) / 100) * canvas.height;
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.hypot(canvas.width, canvas.height) / 2);
+            stops.forEach(s => grad.addColorStop(clamp(s.pos / 100, 0, 1), s.color));
+            ctx.fillStyle = grad;
+          } else {
+            const angle = (toNumber(params.angle, 45) - 90) * (Math.PI / 180);
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const len = Math.hypot(canvas.width, canvas.height);
+            const dx = Math.cos(angle) * (len / 2);
+            const dy = Math.sin(angle) * (len / 2);
+            const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+            stops.forEach(s => grad.addColorStop(clamp(s.pos / 100, 0, 1), s.color));
+            ctx.fillStyle = grad;
+          }
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          result = { canvas };
+        } else if (node.type === "Shape") {
+          const { canvas, ctx } = this.createLayer();
+          const size = Math.max(1, toNumber(params.size, 100));
+          const x = toNumber(params.x, canvas.width / 2);
+          const y = toNumber(params.y, canvas.height / 2);
+          ctx.fillStyle = params.color || "#3b82f6";
+          this.drawShape(ctx, params.shape || "circle", x, y, size);
+          ctx.fill();
+          result = { canvas };
+        } else if (node.type === "Transform") {
+          const src = this.getInput(nodeId, ["in", "layer", "source"], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const x = toNumber(params.x, 0);
+            const y = toNumber(params.y, 0);
+            const scale = toNumber(params.scale, 1);
+            const rot = toNumber(params.rot, 0) * (Math.PI / 180);
+            const ox = ((toNumber(params.originX, 0) + 100) / 2) / 100;
+            const oy = ((toNumber(params.originY, 0) + 100) / 2) / 100;
+            const px = canvas.width * ox;
+            const py = canvas.height * oy;
+            ctx.save();
+            ctx.translate(px + x, py + y);
+            ctx.rotate(rot);
+            ctx.scale(scale, scale);
+            ctx.translate(-px, -py);
+            ctx.drawImage(src.canvas, 0, 0);
+            ctx.restore();
+            result = { canvas };
+          }
+        } else if (node.type === "Motion") {
+          const src = this.getInput(nodeId, ["in", "source"], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const amount = clamp(toNumber(params.amount, 0.08), 0, 0.5);
+            const speed = Math.max(0.2, toNumber(params.speed, 2));
+            const minScale = Math.max(0.01, 1 - amount);
+            const maxScale = 1 + amount;
+            const wave = 0.5 + 0.5 * Math.sin((2 * Math.PI * timeSec) / speed);
+            const scale = minScale + (maxScale - minScale) * wave;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(scale, scale);
+            ctx.translate(-cx, -cy);
+            ctx.drawImage(src.canvas, 0, 0);
+            ctx.restore();
+            result = { canvas };
+          }
+        } else if (node.type === "Glow") {
+          const src = this.getInput(nodeId, ["in", "source"], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const blur = Math.max(0, toNumber(params.blur, 24));
+            const strength = clamp(toNumber(params.strength, 70) / 100, 0, 1);
+            const color = params.color || "#7aa7ff";
+            ctx.save();
+            ctx.shadowColor = hexToRgba(color, strength);
+            ctx.shadowBlur = blur;
+            ctx.drawImage(src.canvas, 0, 0);
+            ctx.restore();
+            ctx.drawImage(src.canvas, 0, 0);
+            result = { canvas };
+          }
+        } else if (node.type === "Composite") {
+          const a = this.getInput(nodeId, ["a", "fg", "in"], timeSec, cache);
+          const b = this.getInput(nodeId, ["b", "bg"], timeSec, cache);
+          if (a || b) {
+            const { canvas, ctx } = this.createLayer();
+            if (b && b.canvas) ctx.drawImage(b.canvas, 0, 0);
+            if (a && a.canvas) {
+              const blend = params.blend || params.mode || "normal";
+              const opacity = clamp(toNumber(params.opacity, 100) / 100, 0, 1);
+              const blendMap = { normal: "source-over", multiply: "multiply", screen: "screen", overlay: "overlay", add: "lighter" };
+              const prevA = ctx.globalAlpha;
+              const prevC = ctx.globalCompositeOperation;
+              ctx.globalAlpha = opacity;
+              ctx.globalCompositeOperation = blendMap[blend] || blend || "source-over";
+              ctx.drawImage(a.canvas, 0, 0);
+              ctx.globalAlpha = prevA;
+              ctx.globalCompositeOperation = prevC;
+            }
+            result = { canvas };
+          }
+        } else if (node.type === "Mask") {
+          const source = this.getInput(nodeId, ["source", "in", "a"], timeSec, cache);
+          const mask = this.getInput(nodeId, ["mask", "b"], timeSec, cache);
+          if (source && source.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            ctx.drawImage(source.canvas, 0, 0);
+            if (mask && mask.canvas) {
+              ctx.globalCompositeOperation = "destination-in";
+              ctx.drawImage(mask.canvas, 0, 0);
+              ctx.globalCompositeOperation = "source-over";
+            }
+            result = { canvas };
+          }
+        } else if (node.type === "Freeze") {
+          result = this.getInput(nodeId, ["in", "source"], timeSec, cache);
+        } else if (node.type === "Output") {
+          result = this.getInput(nodeId, ["in", "layer", "source", "a"], timeSec, cache);
+        }
+
+        cache.set(nodeId, result);
+        return result;
+      }
+
+      renderAtTime(timeSec) {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillStyle = "#000";
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        const output = Array.from(this.nodes.values()).find(n => n.type === "Output");
+        if (!output) return;
+        const rendered = this.renderNode(output.id, timeSec, new Map());
+        if (rendered && rendered.canvas) this.ctx.drawImage(rendered.canvas, 0, 0);
+      }
+    }
+
+    async function boot() {
+      try {
+        const response = await fetch(ANIMATION_URL);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} while loading ${ANIMATION_URL}`);
+        }
+
+        const data = await response.json();
+        if (!data || data.type !== "oniwire-animation-data" || !data.project) {
+          throw new Error("JSON is not oniwire-animation-data format.");
+        }
+
+        const player = new CompactGraphPlayer(canvas, data);
+        player.renderAtTime(0);
+        player.play();
+
+        const sizeKb = (JSON.stringify(data).length / 1024).toFixed(1);
+        statusEl.textContent = `Loaded ${data.name || "animation"} • ${sizeKb}KB • ${toNumber(data.metadata?.duration, 0)}s`;
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = `Failed to load hero animation: ${err.message}`;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

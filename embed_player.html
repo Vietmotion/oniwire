@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oniwire Player Widget</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      background: #000; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+    }
+    .player {
+      max-width: 100%;
+      max-height: 100vh;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="player" id="player"></div>
+
+  <script>
+    // ==========================================
+    // ONIWIRE WEB ANIMATION PLAYER
+    // Paste your animation JSON URL below
+    // ==========================================
+    
+    const ANIMATION_URL = "demo_animation.json";  // ⬅️ CHANGE THIS
+    const AUTO_PLAY = true;
+    const LOOP = true;
+
+    // ==========================================
+    // RENDERING ENGINE
+    // ==========================================
+    
+    class OniwirePlayer {
+      constructor(container, animationData) {
+        this.container = container;
+        this.data = animationData;
+        this.metadata = animationData.metadata;
+        this.project = animationData.project;
+        
+        this.canvas = document.createElement("canvas");
+        this.canvas.width = this.metadata.width || 1280;
+        this.canvas.height = this.metadata.height || 720;
+        this.ctx = this.canvas.getContext("2d");
+        
+        this.nodes = new Map(this.project.nodes.map(n => [n.id, n]));
+        this.wires = this.project.wires || [];
+        
+        this.isPlaying = false;
+        this.currentTime = 0;
+        this.startTime = null;
+        this.animationFrameId = null;
+        
+        container.appendChild(this.canvas);
+      }
+
+      findWire(nodeId, port) {
+        return this.wires.find(w => w.to.nodeId === nodeId && w.to.port === port);
+      }
+
+      createOffscreen() {
+        const c = document.createElement("canvas");
+        c.width = this.canvas.width;
+        c.height = this.canvas.height;
+        return { c, ctx: c.getContext("2d") };
+      }
+
+      renderNode(nodeId, cache = new Map()) {
+        if (cache.has(nodeId)) return cache.get(nodeId);
+        
+        const node = this.nodes.get(nodeId);
+        if (!node) return null;
+
+        const getInput = (port) => {
+          const wire = this.findWire(nodeId, port);
+          return wire ? this.renderNode(wire.from.nodeId, cache) : null;
+        };
+
+        let result = null;
+
+        if (node.type === "Color") {
+          const { c, ctx } = this.createOffscreen();
+          ctx.fillStyle = node.params.color || "#000";
+          ctx.fillRect(0, 0, c.width, c.height);
+          result = c;
+        }
+        else if (node.type === "Gradient") {
+          const { c, ctx } = this.createOffscreen();
+          const type = node.params.type || "linear";
+          const w = c.width, h = c.height;
+
+          if (type === "radial") {
+            const cx = (Number(node.params.cx ?? 50) / 100) * w;
+            const cy = (Number(node.params.cy ?? 50) / 100) * h;
+            const r = Math.hypot(w, h) / 2;
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            grad.addColorStop(0, node.params.a || "#000");
+            grad.addColorStop(1, node.params.b || "#fff");
+            ctx.fillStyle = grad;
+          } else {
+            const angle = Number(node.params.angle ?? 0);
+            const rad = (angle - 90) * Math.PI / 180;
+            const cx = w / 2, cy = h / 2, len = Math.hypot(w, h);
+            const dx = Math.cos(rad) * (len / 2);
+            const dy = Math.sin(rad) * (len / 2);
+            const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+            grad.addColorStop(0, node.params.a || "#000");
+            grad.addColorStop(1, node.params.b || "#fff");
+            ctx.fillStyle = grad;
+          }
+          ctx.fillRect(0, 0, w, h);
+          result = c;
+        }
+        else if (node.type === "Shape") {
+          const { c, ctx } = this.createOffscreen();
+          const size = Number(node.params.size) || 100;
+          const x = Number(node.params.x) || 0;
+          const y = Number(node.params.y) || 0;
+          const color = node.params.color || "#3b82f6";
+          const shape = node.params.shape || "circle";
+          const r = size / 2;
+
+          // Draw background if connected
+          const bg = getInput("bg");
+          if (bg) ctx.drawImage(bg, 0, 0);
+
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          if (shape === "circle") {
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+          } else if (shape === "square") {
+            ctx.rect(x - r, y - r, size, size);
+          } else if (shape === "triangle") {
+            ctx.moveTo(x, y - r);
+            ctx.lineTo(x + r, y + r);
+            ctx.lineTo(x - r, y + r);
+            ctx.closePath();
+          } else if (shape === "star") {
+            const r1 = r, r2 = r * 0.5;
+            for (let i = 0; i < 10; i++) {
+              const a = (Math.PI / 5) * i - Math.PI / 2;
+              const rr = (i % 2 === 0) ? r1 : r2;
+              const px = x + rr * Math.cos(a);
+              const py = y + rr * Math.sin(a);
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+          }
+          ctx.fill();
+          result = c;
+        }
+        else if (node.type === "Text") {
+          const { c, ctx } = this.createOffscreen();
+          const bg = getInput("bg");
+          if (bg) ctx.drawImage(bg, 0, 0);
+          
+          const text = String(node.params.text ?? "");
+          const size = Number(node.params.size) || 32;
+          const x = Number(node.params.x) || 0;
+          const y = Number(node.params.y) || 0;
+          const weight = node.params.weight || 700;
+          const font = node.params.font || "sans-serif";
+          const color = node.params.color || "#fff";
+          
+          ctx.fillStyle = color;
+          ctx.font = `${weight} ${size}px ${font}`;
+          ctx.textBaseline = "top";
+          text.split("\n").forEach((line, i) => {
+            ctx.fillText(line, x, y + i * size * 1.1);
+          });
+          result = c;
+        }
+        else if (node.type === "Transform") {
+          const src = getInput("in");
+          if (src) {
+            const { c, ctx } = this.createOffscreen();
+            const x = Number(node.params.x) || 0;
+            const y = Number(node.params.y) || 0;
+            const s = Number(node.params.scale) || 1;
+            const r = (Number(node.params.rot) || 0) * Math.PI / 180;
+            const ox = ((Number(node.params.originX) ?? 0) + 100) / 2;
+            const oy = ((Number(node.params.originY) ?? 0) + 100) / 2;
+
+            ctx.save();
+            ctx.translate(x + c.width * ox / 100, y + c.height * oy / 100);
+            ctx.rotate(r);
+            ctx.scale(s, s);
+            ctx.translate(-c.width * ox / 100, -c.height * oy / 100);
+            ctx.drawImage(src, 0, 0);
+            ctx.restore();
+            result = c;
+          }
+        }
+        else if (node.type === "Composite") {
+          const bg = getInput("bg");
+          const fg = getInput("fg");
+          if (bg || fg) {
+            const { c, ctx } = this.createOffscreen();
+            if (bg) ctx.drawImage(bg, 0, 0);
+            if (fg) {
+              const mode = node.params.mode || "normal";
+              const modes = {
+                "normal": "source-over",
+                "multiply": "multiply",
+                "screen": "screen",
+                "overlay": "overlay",
+                "add": "lighter"
+              };
+              const prev = ctx.globalCompositeOperation;
+              ctx.globalCompositeOperation = modes[mode] || "source-over";
+              ctx.drawImage(fg, 0, 0);
+              ctx.globalCompositeOperation = prev;
+            }
+            result = c;
+          }
+        }
+        else if (node.type === "Output") {
+          result = getInput("in");
+        }
+
+        cache.set(nodeId, result);
+        return result;
+      }
+
+      render() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillStyle = "#000";
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        const output = Array.from(this.nodes.values()).find(n => n.type === "Output");
+        if (output) {
+          const rendered = this.renderNode(output.id);
+          if (rendered) this.ctx.drawImage(rendered, 0, 0);
+        }
+      }
+
+      play() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        
+        const duration = this.metadata.duration;
+        const tick = (now) => {
+          if (!this.isPlaying) return;
+
+          if (this.startTime === null) {
+            this.startTime = now - (this.currentTime * 1000);
+          }
+
+          const elapsed = (now - this.startTime) / 1000;
+          this.currentTime = elapsed % duration;
+
+          this.render();
+
+          if (LOOP || this.currentTime < duration) {
+            this.animationFrameId = requestAnimationFrame(tick);
+          } else {
+            this.isPlaying = false;
+          }
+        };
+
+        this.animationFrameId = requestAnimationFrame(tick);
+      }
+
+      pause() {
+        this.isPlaying = false;
+        if (this.animationFrameId) {
+          cancelAnimationFrame(this.animationFrameId);
+        }
+      }
+
+      stop() {
+        this.pause();
+        this.currentTime = 0;
+        this.startTime = null;
+        this.render();
+      }
+    }
+
+    // ==========================================
+    // LOAD AND PLAY
+    // ==========================================
+    
+    fetch(ANIMATION_URL)
+      .then(res => res.json())
+      .then(data => {
+        const player = new OniwirePlayer(document.getElementById("player"), data);
+        player.render();
+        if (AUTO_PLAY) player.play();
+        
+        // Expose to window for manual control
+        window.oniwirePlayer = player;
+        
+        console.log(`Oniwire Player loaded: ${data.name}`);
+        console.log(`Size: ${(JSON.stringify(data).length / 1024).toFixed(1)}KB`);
+        console.log(`Duration: ${data.metadata.duration}s @ ${data.metadata.fps}fps`);
+        console.log(`Resolution: ${data.metadata.width}x${data.metadata.height}`);
+        console.log("Controls: window.oniwirePlayer.play() / .pause() / .stop()");
+      })
+      .catch(err => {
+        console.error("Failed to load animation:", err);
+        document.body.innerHTML = `<div style="color:#fff;padding:20px;">Error loading animation: ${err.message}</div>`;
+      });
+  </script>
+</body>
+</html>

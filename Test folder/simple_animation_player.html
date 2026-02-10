@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple JSON Animation Player</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    body {
+      background: #181c24;
+      color: #fff;
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+    .main-flex {
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 40px;
+      margin: 48px auto 0;
+      width: min(1320px, 96vw);
+    }
+    .panel {
+      background: rgba(24,28,36,0.98);
+      border-radius: 18px;
+      box-shadow: 0 4px 32px #0004;
+      border: 2.5px solid #4a5a7a;
+      padding: 32px 28px 28px 28px;
+      min-width: 320px;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .panel h2 {
+      margin: 0 0 8px 0;
+      font-size: 1.4em;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #7aa7ff;
+      text-align: left;
+    }
+    .panel label, .panel .status {
+      color: #bcd0ee;
+      font-size: 1em;
+      margin-bottom: 6px;
+    }
+    .panel .status {
+      min-height: 24px;
+      color: #ffe082;
+      font-size: 1em;
+      margin-top: 8px;
+    }
+    .panel input[type="file"] {
+      display: none;
+    }
+    .panel button {
+      background: linear-gradient(90deg, #3a4a6a 60%, #7aa7ff 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      cursor: pointer;
+      font-size: 1.1em;
+      font-weight: 600;
+      transition: background 0.18s, box-shadow 0.18s;
+      box-shadow: 0 2px 8px #0002;
+    }
+    .panel button:hover {
+      background: linear-gradient(90deg, #4a5a7a 60%, #7aa7ff 100%);
+      box-shadow: 0 4px 16px #7aa7ff33;
+    }
+    .panel textarea {
+      width: 100%;
+      min-height: 280px;
+      height: 36vh;
+      max-height: 56vh;
+      border-radius: 8px;
+      border: 1.5px solid #4a5a7a;
+      padding: 12px;
+      padding-right: 14px;
+      font-size: 1em;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #23293a;
+      color: #fff;
+      resize: vertical;
+      margin-bottom: 8px;
+      overflow: auto;
+    }
+    .controls {
+      display: flex;
+      gap: 14px;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .player-panel {
+      align-items: stretch;
+      justify-content: flex-start;
+      min-width: 420px;
+      max-width: 840px;
+      flex: 1 1 520px;
+    }
+    .player-panel h2 {
+      text-align: center;
+    }
+    .player {
+      width: 100%;
+      aspect-ratio: 3 / 2;
+      background: #23293a;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+      border: 2px solid #7aa7ff44;
+      box-shadow: 0 2px 16px #0003;
+    }
+    #animationCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      border-radius: 12px;
+      background: #23293a;
+    }
+    @media (max-width: 900px) {
+      .main-flex {
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      }
+      .panel, .player-panel {
+        min-width: 0;
+        max-width: 98vw;
+        width: 98vw;
+      }
+      .player {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="main-flex">
+    <div class="panel">
+      <h2>Upload & Controls</h2>
+      <label for="fileInput">Upload JSON Animation</label>
+      <button id="uploadBtn">Upload JSON</button>
+      <input type="file" id="fileInput" accept="application/json">
+      <label for="jsonInput">Or paste animation JSON</label>
+      <textarea id="jsonInput" placeholder="Paste animation JSON here..."></textarea>
+      <div class="controls">
+        <button id="loadBtn">Load</button>
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+      </div>
+      <div class="status" id="status">Ready</div>
+    </div>
+    <div class="panel player-panel">
+      <h2>Player</h2>
+      <div class="player">
+        <canvas id="animationCanvas" width="360" height="240"></canvas>
+      </div>
+    </div>
+  </div>
+  <noscript><div style="color:red;text-align:center;margin-top:16px;">JavaScript is required for this demo.</div></noscript>
+  <script>
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileInput = document.getElementById('fileInput');
+    const jsonInput = document.getElementById('jsonInput');
+    const loadBtn = document.getElementById('loadBtn');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const status = document.getElementById('status');
+    const canvas = document.getElementById('animationCanvas');
+    const playerFrame = canvas.parentElement;
+    const ctx = canvas.getContext('2d');
+
+    let animationData = null;
+    let frameIndex = 0;
+    let playing = false;
+    let lastTimestamp = null;
+    let interp = 0;
+    let playerMode = null;
+    let graphPlayer = null;
+
+    function setPlayerViewport(width, height) {
+      const safeW = Math.max(1, Math.round(toNumber(width, 360)));
+      const safeH = Math.max(1, Math.round(toNumber(height, 240)));
+      canvas.width = safeW;
+      canvas.height = safeH;
+      if (playerFrame) {
+        playerFrame.style.aspectRatio = `${safeW} / ${safeH}`;
+      }
+    }
+
+    setPlayerViewport(360, 240);
+
+    uploadBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        jsonInput.value = text;
+        status.textContent = 'JSON loaded from file.';
+      } catch (e) {
+        status.textContent = 'Failed to read file.';
+      }
+    });
+
+    loadBtn.addEventListener('click', () => {
+      try {
+        animationData = JSON.parse(jsonInput.value);
+        const hasLegacyFrames = Array.isArray(animationData.frames) && animationData.frames.length > 0;
+        const hasCompactGraph = animationData && animationData.type === 'oniwire-animation-data' && animationData.project && Array.isArray(animationData.project.nodes);
+
+        if (!hasLegacyFrames && !hasCompactGraph) {
+          status.textContent = 'Unsupported JSON format.';
+          animationData = null;
+          playerMode = null;
+          graphPlayer = null;
+          setPlayerViewport(360, 240);
+          drawFrame();
+          return;
+        }
+
+        if (hasCompactGraph) {
+          playerMode = 'compact';
+          graphPlayer = new CompactGraphPlayer(canvas, animationData);
+          graphPlayer.renderAtTime(0);
+          status.textContent = 'Compact animation loaded.';
+          return;
+        }
+
+        playerMode = 'legacy';
+        graphPlayer = null;
+        setPlayerViewport(360, 240);
+        frameIndex = 0;
+        status.textContent = 'Animation loaded.';
+        drawFrame();
+      } catch (e) {
+        status.textContent = 'Invalid JSON.';
+        animationData = null;
+        playerMode = null;
+        graphPlayer = null;
+        setPlayerViewport(360, 240);
+        drawFrame();
+      }
+    });
+
+    playBtn.addEventListener('click', () => {
+      if (playerMode === 'compact' && graphPlayer) {
+        graphPlayer.play();
+        status.textContent = 'Playing compact animation...';
+        return;
+      }
+
+      if (playerMode !== 'legacy' || !animationData || !animationData.frames) {
+        status.textContent = 'No animation loaded.';
+        return;
+      }
+      playing = true;
+      status.textContent = 'Playing...';
+      lastTimestamp = null;
+      requestAnimationFrame(runAnimationSmooth);
+    });
+
+    pauseBtn.addEventListener('click', () => {
+      playing = false;
+      if (graphPlayer) graphPlayer.pause();
+      status.textContent = 'Paused.';
+    });
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function lerpColor(a, b, t) {
+      // a, b: hex color strings
+      const ah = a.startsWith('#') ? a.substring(1) : a;
+      const bh = b.startsWith('#') ? b.substring(1) : b;
+      const ar = parseInt(ah.substring(0,2),16), ag = parseInt(ah.substring(2,4),16), ab = parseInt(ah.substring(4,6),16);
+      const br = parseInt(bh.substring(0,2),16), bg = parseInt(bh.substring(2,4),16), bb = parseInt(bh.substring(4,6),16);
+      const rr = Math.round(lerp(ar, br, t));
+      const rg = Math.round(lerp(ag, bg, t));
+      const rb = Math.round(lerp(ab, bb, t));
+      return `rgb(${rr},${rg},${rb})`;
+    }
+
+    function runAnimationSmooth(timestamp) {
+      if (!playing) return;
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      const frameDur = animationData.frameDuration || 100;
+      const dt = timestamp - lastTimestamp;
+      interp += dt / frameDur;
+      if (interp >= 1) {
+        interp = 0;
+        frameIndex = (frameIndex + 1) % animationData.frames.length;
+        lastTimestamp = timestamp;
+      }
+      drawFrame(interp);
+      requestAnimationFrame(runAnimationSmooth);
+    }
+
+    function drawFrame(t = 0) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (!animationData || !animationData.frames) {
+        ctx.fillStyle = '#888';
+        ctx.fillText('No animation loaded.', canvas.width/2, canvas.height/2);
+        return;
+      }
+      // Interpolate between current and next frame
+      const curr = animationData.frames[frameIndex];
+      const next = animationData.frames[(frameIndex+1)%animationData.frames.length];
+      if (curr && next && Array.isArray(curr.circles) && Array.isArray(next.circles) && curr.circles.length === next.circles.length) {
+        for (let i = 0; i < curr.circles.length; ++i) {
+          const c1 = curr.circles[i];
+          const c2 = next.circles[i];
+          ctx.beginPath();
+          ctx.arc(lerp(c1.x, c2.x, t), lerp(c1.y, c2.y, t), lerp(c1.r, c2.r, t), 0, 2 * Math.PI);
+          ctx.fillStyle = lerpColor(c1.color || '#fff', c2.color || '#fff', t);
+          ctx.fill();
+        }
+      } else if (curr && Array.isArray(curr.circles)) {
+        curr.circles.forEach(circle => {
+          ctx.beginPath();
+          ctx.arc(circle.x, circle.y, circle.r, 0, 2 * Math.PI);
+          ctx.fillStyle = circle.color || '#fff';
+          ctx.fill();
+        });
+      } else {
+        ctx.fillStyle = '#888';
+        ctx.fillText('No circles in this frame.', canvas.width/2, canvas.height/2);
+      }
+    }
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function toNumber(v, fallback = 0) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function hexToRgba(hex, alpha = 1) {
+      const raw = String(hex || '#ffffff').replace('#', '').trim();
+      const expanded = raw.length === 3
+        ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+        : raw;
+      const r = parseInt(expanded.slice(0, 2), 16) || 255;
+      const g = parseInt(expanded.slice(2, 4), 16) || 255;
+      const b = parseInt(expanded.slice(4, 6), 16) || 255;
+      return `rgba(${r}, ${g}, ${b}, ${clamp(alpha, 0, 1)})`;
+    }
+
+    class CompactGraphPlayer {
+      constructor(targetCanvas, data) {
+        this.canvas = targetCanvas;
+        this.data = data;
+        this.metadata = data.metadata || {};
+        this.project = data.project || { nodes: [], wires: [] };
+        this.nodes = new Map((this.project.nodes || []).map(n => [n.id, n]));
+        this.wires = this.project.wires || [];
+
+        const exportWidth = Math.max(1, Math.round(toNumber(this.metadata.width, this.canvas.width || 360)));
+        const exportHeight = Math.max(1, Math.round(toNumber(this.metadata.height, this.canvas.height || 240)));
+        setPlayerViewport(exportWidth, exportHeight);
+        this.ctx = targetCanvas.getContext('2d');
+
+        this.duration = Math.max(0.001, toNumber(this.metadata.duration, 5));
+        this.startTime = null;
+        this.currentTime = 0;
+        this.isPlaying = false;
+        this.rafId = null;
+      }
+
+      play() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+
+        const tick = (now) => {
+          if (!this.isPlaying) return;
+          if (this.startTime === null) {
+            this.startTime = now - this.currentTime * 1000;
+          }
+          const elapsed = (now - this.startTime) / 1000;
+          this.currentTime = elapsed % this.duration;
+          this.renderAtTime(this.currentTime);
+          this.rafId = requestAnimationFrame(tick);
+        };
+
+        this.rafId = requestAnimationFrame(tick);
+      }
+
+      pause() {
+        this.isPlaying = false;
+        if (this.rafId) {
+          cancelAnimationFrame(this.rafId);
+          this.rafId = null;
+        }
+      }
+
+      renderAtTime(timeSec) {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        const outputNode = Array.from(this.nodes.values()).find(n => n.type === 'Output');
+        if (!outputNode) {
+          this.ctx.fillStyle = '#888';
+          this.ctx.font = '22px sans-serif';
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'middle';
+          this.ctx.fillText('No Output node found.', this.canvas.width / 2, this.canvas.height / 2);
+          return;
+        }
+
+        const rendered = this.renderNode(outputNode.id, timeSec, new Map());
+        if (rendered && rendered.canvas) {
+          this.ctx.drawImage(rendered.canvas, 0, 0);
+        }
+      }
+
+      createLayer() {
+        const layer = document.createElement('canvas');
+        layer.width = this.canvas.width;
+        layer.height = this.canvas.height;
+        return { canvas: layer, ctx: layer.getContext('2d') };
+      }
+
+      getInput(nodeId, ports, timeSec, cache) {
+        const list = Array.isArray(ports) ? ports : [ports];
+        for (const port of list) {
+          const wire = this.wires.find(w => w.to && w.to.nodeId === nodeId && w.to.port === port);
+          if (wire && wire.from) {
+            return this.renderNode(wire.from.nodeId, timeSec, cache);
+          }
+        }
+        return null;
+      }
+
+      drawShape(ctx2d, shapeType, x, y, size) {
+        const r = size / 2;
+        ctx2d.beginPath();
+
+        if (shapeType === 'square') {
+          ctx2d.rect(x - r, y - r, size, size);
+          return;
+        }
+        if (shapeType === 'triangle') {
+          ctx2d.moveTo(x, y - r);
+          ctx2d.lineTo(x + r, y + r);
+          ctx2d.lineTo(x - r, y + r);
+          ctx2d.closePath();
+          return;
+        }
+        if (shapeType === 'diamond') {
+          ctx2d.moveTo(x, y - r);
+          ctx2d.lineTo(x + r, y);
+          ctx2d.lineTo(x, y + r);
+          ctx2d.lineTo(x - r, y);
+          ctx2d.closePath();
+          return;
+        }
+        if (shapeType === 'hexagon') {
+          for (let i = 0; i < 6; i++) {
+            const a = (Math.PI / 3) * i - Math.PI / 2;
+            const px = x + Math.cos(a) * r;
+            const py = y + Math.sin(a) * r;
+            if (i === 0) ctx2d.moveTo(px, py);
+            else ctx2d.lineTo(px, py);
+          }
+          ctx2d.closePath();
+          return;
+        }
+        if (shapeType === 'star') {
+          const r2 = r * 0.5;
+          for (let i = 0; i < 10; i++) {
+            const a = (Math.PI / 5) * i - Math.PI / 2;
+            const rr = i % 2 === 0 ? r : r2;
+            const px = x + Math.cos(a) * rr;
+            const py = y + Math.sin(a) * rr;
+            if (i === 0) ctx2d.moveTo(px, py);
+            else ctx2d.lineTo(px, py);
+          }
+          ctx2d.closePath();
+          return;
+        }
+
+        ctx2d.arc(x, y, r, 0, Math.PI * 2);
+      }
+
+      renderNode(nodeId, timeSec, cache) {
+        if (cache.has(nodeId)) return cache.get(nodeId);
+
+        const node = this.nodes.get(nodeId);
+        if (!node) return null;
+        const params = node.params || {};
+        let result = null;
+
+        if (node.type === 'Ramp') {
+          const rawStops = Array.isArray(params.stops) ? params.stops : [];
+          result = {
+            stops: rawStops
+              .map(s => ({ pos: clamp(toNumber(s.pos, 0), 0, 100), color: s.color || '#ffffff' }))
+              .sort((a, b) => a.pos - b.pos)
+          };
+          cache.set(nodeId, result);
+          return result;
+        }
+
+        if (node.type === 'Color') {
+          const { canvas, ctx } = this.createLayer();
+          ctx.fillStyle = params.color || '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          result = { canvas };
+        }
+        else if (node.type === 'Gradient') {
+          const { canvas, ctx } = this.createLayer();
+          const ramp = this.getInput(nodeId, 'ramp', timeSec, cache);
+          const stops = ramp && Array.isArray(ramp.stops) && ramp.stops.length > 0
+            ? ramp.stops
+            : [
+                { pos: 0, color: params.a || '#000000' },
+                { pos: 100, color: params.b || '#ffffff' }
+              ];
+
+          if ((params.type || 'linear') === 'radial') {
+            const cx = (toNumber(params.cx, 50) / 100) * canvas.width;
+            const cy = (toNumber(params.cy, 50) / 100) * canvas.height;
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.hypot(canvas.width, canvas.height) / 2);
+            stops.forEach(s => grad.addColorStop(clamp(s.pos / 100, 0, 1), s.color));
+            ctx.fillStyle = grad;
+          } else {
+            const angle = (toNumber(params.angle, 45) - 90) * (Math.PI / 180);
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const len = Math.hypot(canvas.width, canvas.height);
+            const dx = Math.cos(angle) * (len / 2);
+            const dy = Math.sin(angle) * (len / 2);
+            const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+            stops.forEach(s => grad.addColorStop(clamp(s.pos / 100, 0, 1), s.color));
+            ctx.fillStyle = grad;
+          }
+
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          result = { canvas };
+        }
+        else if (node.type === 'Shape') {
+          const { canvas, ctx } = this.createLayer();
+          const size = Math.max(1, toNumber(params.size, 100));
+          const x = toNumber(params.x, canvas.width / 2);
+          const y = toNumber(params.y, canvas.height / 2);
+          const color = params.color || '#3b82f6';
+          const shape = params.shape || 'circle';
+
+          ctx.fillStyle = color;
+          this.drawShape(ctx, shape, x, y, size);
+          ctx.fill();
+          result = { canvas };
+        }
+        else if (node.type === 'Text') {
+          const { canvas, ctx } = this.createLayer();
+          const text = String(params.text ?? '');
+          const size = Math.max(1, toNumber(params.size, 32));
+          const x = toNumber(params.x, 0);
+          const y = toNumber(params.y, 0);
+          const weight = toNumber(params.weight, 700);
+          const font = params.font || 'Inter';
+          const color = params.color || '#ffffff';
+
+          ctx.fillStyle = color;
+          ctx.font = `${weight} ${size}px ${font}`;
+          ctx.textBaseline = 'top';
+          text.split('\n').forEach((line, i) => {
+            ctx.fillText(line, x, y + i * size * 1.1);
+          });
+          result = { canvas };
+        }
+        else if (node.type === 'Transform') {
+          const src = this.getInput(nodeId, ['in', 'layer', 'source'], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const x = toNumber(params.x, 0);
+            const y = toNumber(params.y, 0);
+            const s = toNumber(params.scale, 1);
+            const r = toNumber(params.rot, 0) * (Math.PI / 180);
+            const ox = ((toNumber(params.originX, 0) + 100) / 2) / 100;
+            const oy = ((toNumber(params.originY, 0) + 100) / 2) / 100;
+            const px = canvas.width * ox;
+            const py = canvas.height * oy;
+
+            ctx.save();
+            ctx.translate(px + x, py + y);
+            ctx.rotate(r);
+            ctx.scale(s, s);
+            ctx.translate(-px, -py);
+            ctx.drawImage(src.canvas, 0, 0);
+            ctx.restore();
+
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Clone') {
+          const src = this.getInput(nodeId, ['in', 'source'], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const mode = params.mode || 'x';
+            const countX = Math.max(1, Math.round(toNumber(params.countX, 1)));
+            const countY = Math.max(1, Math.round(toNumber(params.countY, 1)));
+            const stepX = toNumber(params.stepX, 0);
+            const stepY = toNumber(params.stepY, 0);
+            const radialCount = Math.max(1, Math.round(toNumber(params.radialCount, 1)));
+            const radius = toNumber(params.radius, 0);
+            const angleStart = toNumber(params.angleStart, 0);
+            const angleStep = toNumber(params.angleStep, 45);
+            const centerX = toNumber(params.centerX, 0);
+            const centerY = toNumber(params.centerY, 0);
+
+            const drawAt = (dx, dy) => ctx.drawImage(src.canvas, dx, dy);
+
+            if (mode === 'radial') {
+              for (let i = 0; i < radialCount; i++) {
+                const angle = (angleStart + angleStep * i) * (Math.PI / 180);
+                drawAt(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius);
+              }
+            } else if (mode === 'xy') {
+              for (let y = 0; y < countY; y++) {
+                for (let x = 0; x < countX; x++) {
+                  drawAt(x * stepX, y * stepY);
+                }
+              }
+            } else if (mode === 'y') {
+              for (let y = 0; y < countY; y++) drawAt(0, y * stepY);
+            } else {
+              for (let x = 0; x < countX; x++) drawAt(x * stepX, 0);
+            }
+
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Motion') {
+          const src = this.getInput(nodeId, ['in', 'source'], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const mode = params.mode || 'breath';
+            const amount = clamp(toNumber(params.amount, 0.08), 0, 0.5);
+            const speed = Math.max(0.2, toNumber(params.speed, 2));
+
+            let scale = 1;
+            if (mode === 'breath') {
+              const minScale = Math.max(0.01, 1 - amount);
+              const maxScale = 1 + amount;
+              const wave = 0.5 + 0.5 * Math.sin((2 * Math.PI * timeSec) / speed);
+              scale = minScale + (maxScale - minScale) * wave;
+            }
+
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(scale, scale);
+            ctx.translate(-cx, -cy);
+            ctx.drawImage(src.canvas, 0, 0);
+            ctx.restore();
+
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Glow') {
+          const src = this.getInput(nodeId, ['in', 'source'], timeSec, cache);
+          if (src && src.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            const mode = params.mode || 'outer';
+            const blur = Math.max(0, toNumber(params.blur, 24));
+            if (mode === 'outer') {
+              const strength = clamp(toNumber(params.strength, 70) / 100, 0, 1);
+              const color = params.color || '#7aa7ff';
+              ctx.save();
+              ctx.shadowColor = hexToRgba(color, strength);
+              ctx.shadowBlur = blur;
+              ctx.drawImage(src.canvas, 0, 0);
+              ctx.restore();
+            }
+            ctx.drawImage(src.canvas, 0, 0);
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Mask') {
+          const source = this.getInput(nodeId, ['source', 'in', 'a'], timeSec, cache);
+          const mask = this.getInput(nodeId, ['mask', 'b'], timeSec, cache);
+          if (source && source.canvas) {
+            const { canvas, ctx } = this.createLayer();
+            ctx.drawImage(source.canvas, 0, 0);
+            if (mask && mask.canvas) {
+              ctx.globalCompositeOperation = 'destination-in';
+              ctx.drawImage(mask.canvas, 0, 0);
+              ctx.globalCompositeOperation = 'source-over';
+            }
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Composite') {
+          const a = this.getInput(nodeId, ['a', 'fg', 'in'], timeSec, cache);
+          const b = this.getInput(nodeId, ['b', 'bg'], timeSec, cache);
+          const mask = this.getInput(nodeId, 'mask', timeSec, cache);
+
+          if (a || b) {
+            const { canvas, ctx } = this.createLayer();
+            if (b && b.canvas) ctx.drawImage(b.canvas, 0, 0);
+
+            if (a && a.canvas) {
+              const blend = params.blend || params.mode || 'normal';
+              const opacity = clamp(toNumber(params.opacity, 100) / 100, 0, 1);
+              const blendMap = {
+                normal: 'source-over',
+                multiply: 'multiply',
+                screen: 'screen',
+                overlay: 'overlay',
+                add: 'lighter'
+              };
+              const previousAlpha = ctx.globalAlpha;
+              const previousComp = ctx.globalCompositeOperation;
+              ctx.globalAlpha = opacity;
+              ctx.globalCompositeOperation = blendMap[blend] || blend || 'source-over';
+              ctx.drawImage(a.canvas, 0, 0);
+              ctx.globalAlpha = previousAlpha;
+              ctx.globalCompositeOperation = previousComp;
+            }
+
+            if (mask && mask.canvas) {
+              ctx.globalCompositeOperation = 'destination-in';
+              ctx.drawImage(mask.canvas, 0, 0);
+              ctx.globalCompositeOperation = 'source-over';
+            }
+
+            result = { canvas };
+          }
+        }
+        else if (node.type === 'Freeze') {
+          result = this.getInput(nodeId, ['in', 'source'], timeSec, cache);
+        }
+        else if (node.type === 'Output') {
+          result = this.getInput(nodeId, ['in', 'layer', 'source', 'a'], timeSec, cache);
+        }
+
+        cache.set(nodeId, result);
+        return result;
+      }
+    }
+  </script>
+</body>
+</html>

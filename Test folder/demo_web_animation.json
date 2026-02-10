@@ -1,0 +1,70 @@
+{
+  "version": "2.0",
+  "type": "web-animation",
+  "name": "demo",
+  "metadata": {
+    "duration": 3,
+    "fps": 30,
+    "totalFrames": 90,
+    "width": 1280,
+    "height": 720,
+    "ratio": "16:9"
+  },
+  "project": {
+    "version": "0.1",
+    "nextId": 5,
+    "panX": 0,
+    "panY": 0,
+    "zoom": 1,
+    "nodes": [
+      {
+        "id": "1",
+        "type": "Color",
+        "pos": { "x": 100, "y": 100 },
+        "params": { "color": "#0f172a" }
+      },
+      {
+        "id": "2",
+        "type": "Shape",
+        "pos": { "x": 100, "y": 200 },
+        "params": {
+          "shape": "circle",
+          "size": 300,
+          "color": "#3b82f6",
+          "x": 640,
+          "y": 360
+        }
+      },
+      {
+        "id": "3",
+        "type": "Composite",
+        "pos": { "x": 300, "y": 150 },
+        "params": { "mode": "normal" }
+      },
+      {
+        "id": "4",
+        "type": "Output",
+        "pos": { "x": 500, "y": 150 },
+        "params": {
+          "ratio": "16:9",
+          "duration": 3,
+          "fps": 30
+        }
+      }
+    ],
+    "wires": [
+      {
+        "from": { "nodeId": "1", "port": "layer" },
+        "to": { "nodeId": "3", "port": "bg" }
+      },
+      {
+        "from": { "nodeId": "2", "port": "layer" },
+        "to": { "nodeId": "3", "port": "fg" }
+      },
+      {
+        "from": { "nodeId": "3", "port": "layer" },
+        "to": { "nodeId": "4", "port": "in" }
+      }
+    ]
+  }
+}

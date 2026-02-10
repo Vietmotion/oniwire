@@ -1125,8 +1125,6 @@ select optgroup{
             <div class="nodeGroups" id="nodeButtons">
               <button class="nodeCategoryBtn active" data-group="generator">Generator</button>
               <button class="nodeCategoryBtn" data-group="operation">Operation</button>
-              <button class="nodeCategoryBtn" data-group="motion">Motion</button>
-              <button class="nodeCategoryBtn" data-group="effects">Effects</button>
               <button class="nodeCategoryBtn" data-group="output">Output</button>
               <div id="nodeDropdown" class="nodeDropdown hidden" role="menu" aria-hidden="true"></div>
             </div>
@@ -2703,7 +2701,7 @@ refreshProjectList();
         {k:"invert", type:"checkbox", label:"Invert Mask"}
       ])
     },
-    Rasterize: {
+    Freeze: {
       inputs: ["in"],
       outputs: ["layer"],
       defaults: {},
@@ -2792,7 +2790,7 @@ refreshProjectList();
           return { el: wrap, dataUrl: "" };
         }
 
-        console.log("Rasterize: Starting render...");
+        console.log("Freeze: Starting render...");
 
         const dataUrl = await renderLayerToDataUrl(src.el);
 
@@ -2806,14 +2804,14 @@ refreshProjectList();
           wrap.style.backgroundSize = "contain";
           wrap.style.backgroundPosition = "center";
           wrap.style.backgroundRepeat = "no-repeat";
-          console.log("Rasterize: Successfully created frozen layer with dataUrl");
+          console.log("Freeze: Successfully created frozen layer with dataUrl");
         }else{
           wrap.dataset.frozenUrl = "";
           const fallback = src.el.cloneNode(true);
           fallback.style.position = "absolute";
           fallback.style.inset = "0";
           wrap.appendChild(fallback);
-          console.warn("Rasterize: Failed to create dataUrl, using fallback");
+          console.warn("Freeze: Failed to create dataUrl, using fallback");
         }
 
         return { el: wrap, dataUrl: dataUrl || "" };
@@ -2847,12 +2845,9 @@ const NODE_CATEGORIES = {
   Shape: "Generators",
   Text: "Generators",
   Transform: "Operations",
-  Clone: "Operations",
+  Glow: "Operations",
   Composite: "Operations",
   Mask: "Operations",
-  Rasterize: "Operations",
-  Motion: "Motion",
-  Glow: "Effects",
   Output: "Output",
 };
 
@@ -5282,9 +5277,7 @@ function loadGraph(data){
   // -----------------------------
   const NODE_GROUPS = {
     generator: ["Color", "Gradient", "Ramp", "Shape", "Text"],
-    operation: ["Transform", "Clone", "Composite", "Mask", "Rasterize"],
-    motion: ["Motion"],
-    effects: ["Glow"],
+    operation: ["Transform", "Motion", "Glow", "Composite", "Mask", "Freeze"],
     output: ["Output"]
   };
 

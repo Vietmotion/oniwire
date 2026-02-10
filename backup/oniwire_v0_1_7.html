@@ -1125,8 +1125,6 @@ select optgroup{
             <div class="nodeGroups" id="nodeButtons">
               <button class="nodeCategoryBtn active" data-group="generator">Generator</button>
               <button class="nodeCategoryBtn" data-group="operation">Operation</button>
-              <button class="nodeCategoryBtn" data-group="motion">Motion</button>
-              <button class="nodeCategoryBtn" data-group="effects">Effects</button>
               <button class="nodeCategoryBtn" data-group="output">Output</button>
               <div id="nodeDropdown" class="nodeDropdown hidden" role="menu" aria-hidden="true"></div>
             </div>
@@ -1577,6 +1575,191 @@ function exportProject(name = "project"){
   URL.revokeObjectURL(a.href);
 
   toast("Exported JSON ✅");
+}
+
+function ensureHtml2Canvas(){
+  if(window.html2canvas) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load html2canvas"));
+    document.head.appendChild(script);
+  });
+}
+
+async function exportAnimationJSON(name = "animation"){
+  const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+  if(!outNode){
+    toast("No Output node found.");
+    return;
+  }
+
+  const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
+  const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
+  const ratio = outNode.params?.ratio || "16:9";
+  const totalFrames = Math.round(duration * fps);
+
+  try{
+    await ensureHtml2Canvas();
+  }catch(err){
+    toast("Failed to load renderer: " + err.message);
+    return;
+  }
+
+  const previewInner = document.getElementById("previewInner");
+  if(!previewInner){
+    toast("No preview to export.");
+    return;
+  }
+
+  const videoScale = 1; // 1x for smaller file size
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = Math.max(1, Math.round(previewBase.w * videoScale));
+  exportCanvas.height = Math.max(1, Math.round(previewBase.h * videoScale));
+  const exportCtx = exportCanvas.getContext("2d");
+  exportCtx.imageSmoothingEnabled = true;
+
+  const exportHost = document.createElement("div");
+  exportHost.style.position = "fixed";
+  exportHost.style.left = "-100000px";
+  exportHost.style.top = "0";
+  exportHost.style.width = previewBase.w + "px";
+  exportHost.style.height = previewBase.h + "px";
+  exportHost.style.pointerEvents = "none";
+
+  const exportClone = previewInner.cloneNode(true);
+  exportClone.style.transform = "none";
+  exportClone.style.left = "0";
+  exportClone.style.top = "0";
+  exportClone.style.width = previewBase.w + "px";
+  exportClone.style.height = previewBase.h + "px";
+
+  exportHost.appendChild(exportClone);
+  document.body.appendChild(exportHost);
+
+  const animations = exportClone.getAnimations ? exportClone.getAnimations({ subtree: true }) : [];
+  
+  const setAnimationTime = (t) => {
+    if(!animations.length) return;
+    for(const anim of animations){
+      try{
+        anim.pause();
+        const timing = anim.effect?.getTiming?.() || {};
+        const dur = Number(timing.duration) || 0;
+        if(dur > 0){
+          anim.currentTime = (t * 1000) % dur;
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+  };
+
+  const renderFrame = async (t) => {
+    setAnimationTime(t);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const frameCanvas = await html2canvas(exportClone, {
+      backgroundColor: null,
+      scale: videoScale,
+      logging: false,
+      useCORS: true,
+      allowTaint: true
+    });
+    exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+    exportCtx.drawImage(frameCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    return exportCanvas.toDataURL("image/png");
+  };
+
+  toast("Rendering animation...");
+  const frames = [];
+
+  try {
+    for(let i = 0; i < totalFrames; i++){
+      const dataUrl = await renderFrame(i / fps);
+      frames.push(dataUrl);
+      
+      // Show progress every 10 frames
+      if((i + 1) % 10 === 0){
+        toast(`Rendering... ${Math.round(((i + 1) / totalFrames) * 100)}%`);
+      }
+    }
+
+    const animData = {
+      version: "1.0",
+      name: name,
+      metadata: {
+        duration: duration,
+        fps: fps,
+        totalFrames: totalFrames,
+        width: exportCanvas.width,
+        height: exportCanvas.height,
+        ratio: ratio
+      },
+      frames: frames
+    };
+
+    const blob = new Blob([JSON.stringify(animData, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${name.replace(/[^\w\-]+/g, "_")}_animation.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+
+    toast("Animation exported ✅");
+    exportHost.remove();
+
+  }catch(err){
+    console.error(err);
+    toast("Export failed");
+    exportHost.remove();
+  }
+}
+
+function exportWebAnimation(name = "animation"){
+  const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+  if(!outNode){
+    toast("No Output node found.");
+    return;
+  }
+
+  const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
+  const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
+  const ratio = outNode.params?.ratio || "16:9";
+  const totalFrames = Math.round(duration * fps);
+
+  const [w, h] = ratio.split(':').map(Number);
+  const width = 1280;
+  const height = Math.round(width * (h / w));
+
+  const payload = serializeGraph();
+  const webAnimData = {
+    version: "2.0",
+    type: "web-animation",
+    name: name,
+    metadata: {
+      duration: duration,
+      fps: fps,
+      totalFrames: totalFrames,
+      width: width,
+      height: height,
+      ratio: ratio
+    },
+    project: payload
+  };
+
+  const blob = new Blob([JSON.stringify(webAnimData, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${name.replace(/[^\w\-]+/g, "_")}_web.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+
+  toast(`Web animation exported ✅ (${(blob.size / 1024).toFixed(1)}KB)`);
 }
 
 function importProjectFromFile(){
@@ -2703,7 +2886,7 @@ refreshProjectList();
         {k:"invert", type:"checkbox", label:"Invert Mask"}
       ])
     },
-    Rasterize: {
+    Freeze: {
       inputs: ["in"],
       outputs: ["layer"],
       defaults: {},
@@ -2792,7 +2975,7 @@ refreshProjectList();
           return { el: wrap, dataUrl: "" };
         }
 
-        console.log("Rasterize: Starting render...");
+        console.log("Freeze: Starting render...");
 
         const dataUrl = await renderLayerToDataUrl(src.el);
 
@@ -2806,14 +2989,14 @@ refreshProjectList();
           wrap.style.backgroundSize = "contain";
           wrap.style.backgroundPosition = "center";
           wrap.style.backgroundRepeat = "no-repeat";
-          console.log("Rasterize: Successfully created frozen layer with dataUrl");
+          console.log("Freeze: Successfully created frozen layer with dataUrl");
         }else{
           wrap.dataset.frozenUrl = "";
           const fallback = src.el.cloneNode(true);
           fallback.style.position = "absolute";
           fallback.style.inset = "0";
           wrap.appendChild(fallback);
-          console.warn("Rasterize: Failed to create dataUrl, using fallback");
+          console.warn("Freeze: Failed to create dataUrl, using fallback");
         }
 
         return { el: wrap, dataUrl: dataUrl || "" };
@@ -2830,9 +3013,14 @@ refreshProjectList();
 
       inspector: (node) => ([
         { k: "ratio", type: "select", label: "Aspect Ratio", options: ["1:1", "4:3", "16:9", "21:9", "5:4", "3:2", "2:3", "9:16", "3:4", "4:5"] },
-        { type: "buttons", label: "Export", buttons: [
+        { type: "buttons", label: "Export Image", buttons: [
           { label: "PNG", id: "exportPNG" },
           { label: "JPEG", id: "exportJPEG" }
+        ]},
+        { type: "buttons", label: "Export Project", buttons: [
+          { label: "Project JSON", id: "exportJSON" },
+          { label: "Animation JSON", id: "exportAnimJSON" },
+          { label: "Web Animation", id: "exportWebAnim" }
         ]}
       ])
     },
@@ -2847,12 +3035,9 @@ const NODE_CATEGORIES = {
   Shape: "Generators",
   Text: "Generators",
   Transform: "Operations",
-  Clone: "Operations",
+  Glow: "Operations",
   Composite: "Operations",
   Mask: "Operations",
-  Rasterize: "Operations",
-  Motion: "Motion",
-  Glow: "Effects",
   Output: "Output",
 };
 
@@ -3844,7 +4029,18 @@ async function evaluate(){
     inspectorBody.querySelectorAll('[data-export-btn]').forEach(btn => {
       btn.addEventListener('click', () => {
         const exportType = btn.getAttribute('data-export-btn');
-        exportCanvasAsImage(exportType);
+        if(exportType === "exportJSON"){
+          const projectName = document.getElementById("projectName")?.value?.trim() || "project";
+          exportProject(projectName);
+        }else if(exportType === "exportAnimJSON"){
+          const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
+          exportAnimationJSON(projectName);
+        }else if(exportType === "exportWebAnim"){
+          const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
+          exportWebAnimation(projectName);
+        }else{
+          exportCanvasAsImage(exportType);
+        }
       });
     });
 
@@ -5282,9 +5478,7 @@ function loadGraph(data){
   // -----------------------------
   const NODE_GROUPS = {
     generator: ["Color", "Gradient", "Ramp", "Shape", "Text"],
-    operation: ["Transform", "Clone", "Composite", "Mask", "Rasterize"],
-    motion: ["Motion"],
-    effects: ["Glow"],
+    operation: ["Transform", "Motion", "Glow", "Composite", "Mask", "Freeze"],
     output: ["Output"]
   };
 
