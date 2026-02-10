@@ -60,6 +60,138 @@ select#nodeType optgroup{
   color: rgba(180,200,255,.6);
 }
 
+.hdrInlineControls{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-left: 12px;
+  flex-wrap: wrap;
+}
+
+.nodeGroups{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+
+.nodeCategoryBtn{
+  padding:6px 10px;
+  font-size:11px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+}
+
+.nodeCategoryBtn.active{
+  border-color: rgba(122,167,255,.55);
+  box-shadow: 0 0 0 3px rgba(122,167,255,.12);
+}
+
+
+.nodeDropdown{
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(12,14,20,.96);
+  box-shadow: 0 18px 40px rgba(0,0,0,.45);
+  padding: 6px;
+  z-index: 60;
+}
+
+.nodeDropdown.hidden{ display:none; }
+
+.nodeDropdownItem{
+  display:block;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  text-align: left;
+}
+
+.nodeDropdownItem:hover{
+  background: rgba(255,255,255,.08);
+}
+
+.knobWrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.knob{
+  width:46px;
+  height:46px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.10), rgba(0,0,0,.35));
+  position: relative;
+  cursor: pointer;
+}
+
+.knobIndicator{
+  position:absolute;
+  width:2px;
+  height:16px;
+  background: rgba(122,167,255,.95);
+  left:50%;
+  top:6px;
+  transform-origin: 50% 100%;
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(122,167,255,.5);
+}
+
+.rampEditor{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.rampStop{
+  display:grid;
+  grid-template-columns: 1fr 72px 46px 66px;
+  gap:8px;
+  align-items:center;
+}
+
+.rampStop input[type="range"]{
+  width:100%;
+}
+
+.rampAddBtn,
+.rampRemoveBtn{
+  padding:6px 8px;
+  font-size:11px;
+  border-radius:10px;
+}
+
+.previewSelectionBox{
+  position:absolute;
+  border: 1.5px solid rgba(122,167,255,.9);
+  pointer-events: none;
+}
+
+.previewSelectionDot{
+  position:absolute;
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background: rgba(122,167,255,.95);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: auto;
+  cursor: nwse-resize;
+}
+
+
 /* Inspector inputs (dark) */
 #inspectorBody input[data-k],
 #inspectorBody select[data-k],
@@ -834,6 +966,7 @@ select optgroup{
           <div class="hintRow">
             <span class="pill">Hi, this is an online node based visual creation app. <br> 
               - Press Tab for node searching. <br>
+              - Press Shift+O to quick connect node to Output. <br>
               - You can pan and scrool for viewport Control. 
               - More is coming. 
             </span>
@@ -872,27 +1005,12 @@ select optgroup{
         <div class="title">
           🧩 Node Editor
           <div class="hdrInlineControls">
-            <select id="nodeType">
-              <!-- Geometry / Generators -->
-              <optgroup label="Generators">
-                <option value="Color">Color</option>
-                <option value="Gradient">Gradient</option>
-                <option value="Shape">Shape</option>
-                <option value="Text">Text</option>
-              </optgroup>
-
-              <!-- Transform + Modifiers -->
-              <optgroup label="Operations">
-                <option value="Transform">Transform</option>
-                <option value="Composite">Composite</option>
-                <option value="Mask">Mask</option>
-              </optgroup>
-
-              <!-- Final Nodes -->
-              <optgroup label="Output">
-                <option value="Output">Output</option>
-              </optgroup>
-            </select>
+            <div class="nodeGroups" id="nodeButtons">
+              <button class="nodeCategoryBtn active" data-group="generator">Generator</button>
+              <button class="nodeCategoryBtn" data-group="operation">Operation</button>
+              <button class="nodeCategoryBtn" data-group="output">Output</button>
+              <div id="nodeDropdown" class="nodeDropdown hidden" role="menu" aria-hidden="true"></div>
+            </div>
         </div>
       </div>
       </div>
@@ -1328,6 +1446,211 @@ refreshProjectList();
   // -----------------------------
   // Node definitions
   // -----------------------------
+  function resolveMaskMetaFromEl(maskEl){
+    if(!maskEl) return null;
+    const direct = maskEl.dataset?.maskShape ? maskEl : null;
+    const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape]");
+    const target = direct || nested;
+    if(!target) return null;
+
+    return {
+      shapeType: target.dataset.maskShape || "circle",
+      size: Number(target.dataset.maskSize || 120),
+      x: Number(target.dataset.maskX || 100),
+      y: Number(target.dataset.maskY || 100)
+    };
+  }
+
+  function buildShapeMaskUrl(meta, invert){
+    if(!meta) return null;
+    const { shapeType, size, x, y } = meta;
+
+    const w = renderRoot?.clientWidth || 800;
+    const h = renderRoot?.clientHeight || 600;
+
+    const baseFill = invert ? "white" : "black";
+    const shapeFill = invert ? "black" : "white";
+    const r = size / 2;
+
+    let shapeSvg = "";
+    switch(shapeType){
+      case "circle":
+        shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+        break;
+      case "square":
+        shapeSvg = `<rect x="${x - r}" y="${y - r}" width="${size}" height="${size}" fill="${shapeFill}" />`;
+        break;
+      case "triangle":
+        shapeSvg = `<polygon points="${[
+          [x, y - r],
+          [x + r, y + r],
+          [x - r, y + r]
+        ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+        break;
+      case "diamond":
+        shapeSvg = `<polygon points="${[
+          [x, y - r],
+          [x + r, y],
+          [x, y + r],
+          [x - r, y]
+        ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+        break;
+      case "hexagon": {
+        const pts = [];
+        for(let i=0;i<6;i++){
+          const a = (Math.PI/3)*i - Math.PI/6;
+          pts.push([x + r*Math.cos(a), y + r*Math.sin(a)]);
+        }
+        shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+        break;
+      }
+      case "star": {
+        const pts = [];
+        const r1 = r;
+        const r2 = r * 0.5;
+        for(let i=0;i<10;i++){
+          const a = (Math.PI/5)*i - Math.PI/2;
+          const rr = i % 2 === 0 ? r1 : r2;
+          pts.push([x + rr*Math.cos(a), y + rr*Math.sin(a)]);
+        }
+        shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
+        break;
+      }
+      default:
+        shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+    }
+
+    const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+        `<rect x="0" y="0" width="${w}" height="${h}" fill="${baseFill}" />` +
+        shapeSvg +
+      `</svg>`;
+
+    return `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
+  }
+
+  function normalizeRampStops(stops){
+    if(!Array.isArray(stops)) return [];
+    return stops
+      .map(s => ({
+        pos: Math.max(0, Math.min(100, Number(s.pos))),
+        color: String(s.color || "#ffffff")
+      }))
+      .filter(s => !Number.isNaN(s.pos))
+      .sort((a,b) => a.pos - b.pos);
+  }
+
+  function parseHexColor(hex){
+    const h = String(hex || "").trim().replace(/^#/, "");
+    if(h.length === 3){
+      const r = parseInt(h[0] + h[0], 16);
+      const g = parseInt(h[1] + h[1], 16);
+      const b = parseInt(h[2] + h[2], 16);
+      return { r, g, b };
+    }
+    if(h.length === 6){
+      const r = parseInt(h.slice(0,2), 16);
+      const g = parseInt(h.slice(2,4), 16);
+      const b = parseInt(h.slice(4,6), 16);
+      return { r, g, b };
+    }
+    return { r: 255, g: 255, b: 255 };
+  }
+
+  function buildRampMaskUrl(stops, invert = false){
+    const list = normalizeRampStops(stops);
+    if(list.length === 0) return null;
+
+    const w = renderRoot?.clientWidth || 800;
+    const h = renderRoot?.clientHeight || 600;
+
+    const stopMarkup = list.map(s => {
+      const { r, g, b } = parseHexColor(s.color);
+      let lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      if(invert) lum = 1 - lum;
+      return `<stop offset="${s.pos}%" stop-color="white" stop-opacity="${lum.toFixed(3)}" />`;
+    }).join("");
+
+    const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+        `<defs>` +
+          `<linearGradient id="ramp" x1="0%" y1="0%" x2="100%" y2="0%">` +
+            stopMarkup +
+          `</linearGradient>` +
+        `</defs>` +
+        `<rect x="0" y="0" width="${w}" height="${h}" fill="url(#ramp)" />` +
+      `</svg>`;
+
+    return `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
+  }
+
+  function resolveGradientMetaFromEl(el){
+    if(!el) return null;
+    const stopsRaw = el.dataset?.gradStops;
+    if(!stopsRaw) return null;
+
+    try{
+      const stops = normalizeRampStops(JSON.parse(stopsRaw));
+      return {
+        type: el.dataset.gradType || "linear",
+        angle: Number(el.dataset.gradAngle ?? 0),
+        cx: Number(el.dataset.gradCx ?? 50),
+        cy: Number(el.dataset.gradCy ?? 50),
+        stops
+      };
+    }catch{
+      return null;
+    }
+  }
+
+  function buildGradientMaskUrl(meta, invert = false){
+    if(!meta || !Array.isArray(meta.stops) || meta.stops.length === 0) return null;
+
+    const w = renderRoot?.clientWidth || 800;
+    const h = renderRoot?.clientHeight || 600;
+    const stops = normalizeRampStops(meta.stops);
+
+    const stopMarkup = stops.map(s => {
+      const { r, g, b } = parseHexColor(s.color);
+      let lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      if(invert) lum = 1 - lum;
+      return `<stop offset="${s.pos}%" stop-color="white" stop-opacity="${lum.toFixed(3)}" />`;
+    }).join("");
+
+    let gradientMarkup = "";
+    if(meta.type === "radial"){
+      const cx = (Number(meta.cx ?? 50) / 100) * w;
+      const cy = (Number(meta.cy ?? 50) / 100) * h;
+      const r = Math.hypot(w, h) / 2;
+      gradientMarkup = `
+        <radialGradient id="g" gradientUnits="userSpaceOnUse" cx="${cx}" cy="${cy}" r="${r}">
+          ${stopMarkup}
+        </radialGradient>
+      `;
+    }else{
+      const angle = Number(meta.angle ?? 0);
+      const rad = (angle - 90) * Math.PI / 180;
+      const cx = w / 2;
+      const cy = h / 2;
+      const len = Math.hypot(w, h);
+      const dx = Math.cos(rad) * (len / 2);
+      const dy = Math.sin(rad) * (len / 2);
+      gradientMarkup = `
+        <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="${cx - dx}" y1="${cy - dy}" x2="${cx + dx}" y2="${cy + dy}">
+          ${stopMarkup}
+        </linearGradient>
+      `;
+    }
+
+    const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+        `<defs>${gradientMarkup}</defs>` +
+        `<rect x="0" y="0" width="${w}" height="${h}" fill="url(#g)" />` +
+      `</svg>`;
+
+    return `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
+  }
+
   const NODE_DEFS = {
     Color: {
       inputs: [],
@@ -1346,21 +1669,63 @@ refreshProjectList();
       ])
     },
     Gradient: {
-      inputs: [],
+      inputs: ["ramp"],
       outputs: ["layer"],
-      defaults: { a:"#0ea5e9", b:"#22c55e", angle:45 },
+      defaults: { a:"#0ea5e9", b:"#22c55e", angle:45, type:"linear", cx:50, cy:50 },
       icon: "🌈",
-      run: (node) => {
+      run: (node, inputs) => {
         const el = document.createElement("div");
         el.style.position = "absolute";
         el.style.inset = "0";
-        el.style.background = `linear-gradient(${Number(node.params.angle)||0}deg, ${node.params.a}, ${node.params.b})`;
+        const type = node.params.type || "linear";
+        const rampStops = inputs.ramp?.stops ? normalizeRampStops(inputs.ramp.stops) : [];
+
+        const stops = rampStops.length >= 2
+          ? rampStops
+          : [
+              { pos: 0, color: node.params.a || "#000000" },
+              { pos: 100, color: node.params.b || "#ffffff" }
+            ];
+
+        const stopList = stops.map(s => `${s.color} ${s.pos}%`).join(", ");
+
+        el.dataset.gradType = type;
+        el.dataset.gradAngle = String(node.params.angle ?? 0);
+        el.dataset.gradCx = String(node.params.cx ?? 50);
+        el.dataset.gradCy = String(node.params.cy ?? 50);
+        el.dataset.gradStops = JSON.stringify(stops);
+
+        if(type === "radial"){
+          const cx = Number(node.params.cx ?? 50);
+          const cy = Number(node.params.cy ?? 50);
+          el.style.background = `radial-gradient(circle at ${cx}% ${cy}%, ${stopList})`;
+        }else{
+          el.style.background = `linear-gradient(${Number(node.params.angle)||0}deg, ${stopList})`;
+        }
         return { el };
       },
       inspector: () => ([
+        {k:"type", type:"select", label:"Type", options:["linear","radial"]},
         {k:"a", type:"color", label:"Color A"},
         {k:"b", type:"color", label:"Color B"},
-        {k:"angle", type:"number", label:"Angle"}
+        {k:"angle", type:"knob", label:"Angle", min:0, max:360, step:1, showIf:{ k:"type", equals:"linear" }},
+        {k:"cx", type:"range", label:"Center X %", min:0, max:100, step:1, showIf:{ k:"type", equals:"radial" }},
+        {k:"cy", type:"range", label:"Center Y %", min:0, max:100, step:1, showIf:{ k:"type", equals:"radial" }}
+      ])
+    },
+    Ramp: {
+      inputs: [],
+      outputs: ["ramp"],
+      defaults: {
+        stops: [
+          { pos: 0, color: "#0ea5e9" },
+          { pos: 100, color: "#22c55e" }
+        ]
+      },
+      icon: "🎚️",
+      run: (node) => ({ stops: normalizeRampStops(node.params.stops) }),
+      inspector: () => ([
+        {k:"stops", type:"ramp", label:"Stops"}
       ])
     },
     Shape: {
@@ -1375,6 +1740,7 @@ refreshProjectList();
 
         const shape = document.createElement("div");
         shape.style.position = "absolute";
+        shape.dataset.boundId = node.id;
         
         const size = Number(node.params.size) || 100;
         const x = Number(node.params.x) || 0;
@@ -1451,6 +1817,7 @@ refreshProjectList();
         const t = document.createElement("div");
         t.textContent = node.params.text ?? "";
         t.style.position = "absolute";
+        t.dataset.boundId = node.id;
         t.style.left = (Number(node.params.x)||0) + "px";
         t.style.top  = (Number(node.params.y)||0) + "px";
         t.style.color = node.params.color;
@@ -1486,6 +1853,7 @@ refreshProjectList();
         const wrap = document.createElement("div");
         wrap.style.position = "absolute";
         wrap.style.inset = "0";
+        wrap.style.isolation = "isolate";
         wrap.appendChild(src.el);
 
         const x = Number(node.params.x) || 0;
@@ -1542,14 +1910,155 @@ refreshProjectList();
         {k:"originY", type:"range", label:"Pivot Y", min:-100, max:100, step:0.5},
       ])
     },
+    Glow: {
+      inputs: ["in"],
+      outputs: ["layer"],
+      defaults: { mode: "outer", color: "#7aa7ff", blur: 24, strength: 70, threshold: 40, intensity: 70 },
+      icon: "✨",
+      run: (node, inputs) => {
+        const src = inputs.in;
+        if(!src?.el) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+
+        const mode = node.params.mode || "outer";
+        const blur = Math.max(0, Number(node.params.blur) || 0);
+
+        if(mode === "luminance"){
+          const glowLayer = src.el.cloneNode(true);
+          const t = clamp((Number(node.params.threshold) || 0) / 100, 0, 1);
+          const intensity = clamp((Number(node.params.intensity) || 0) / 100, 0, 1);
+          const brightness = 1 + t * 0.9;
+          const contrast = 1 + t * 3.0;
+
+          glowLayer.style.position = "absolute";
+          glowLayer.style.inset = "0";
+          glowLayer.style.filter = `grayscale(1) brightness(${brightness}) contrast(${contrast}) blur(${blur}px)`;
+          glowLayer.style.mixBlendMode = "screen";
+          glowLayer.style.opacity = String(intensity);
+          glowLayer.style.pointerEvents = "none";
+
+          wrap.appendChild(src.el);
+          wrap.appendChild(glowLayer);
+        }else{
+          const { r, g, b } = parseHexColor(node.params.color || "#7aa7ff");
+          const alpha = clamp((Number(node.params.strength) || 0) / 100, 0, 1);
+          const glow = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          wrap.style.filter = `drop-shadow(0 0 ${Math.max(0, blur)}px ${glow})`;
+          wrap.appendChild(src.el);
+        }
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"mode", type:"select", label:"Mode", options:["outer","luminance"]},
+        {k:"color", type:"color", label:"Glow Color", showIf:{ k:"mode", equals:"outer" }},
+        {k:"blur", type:"range", label:"Blur", min:0, max:120, step:1},
+        {k:"strength", type:"range", label:"Strength", min:0, max:100, step:1, showIf:{ k:"mode", equals:"outer" }},
+        {k:"threshold", type:"range", label:"Luma Threshold", min:0, max:100, step:1, showIf:{ k:"mode", equals:"luminance" }},
+        {k:"intensity", type:"range", label:"Intensity", min:0, max:100, step:1, showIf:{ k:"mode", equals:"luminance" }}
+      ])
+    },
+    Clone: {
+      inputs: ["in"],
+      outputs: ["layer"],
+      defaults: {
+        mode: "x",
+        countX: 5,
+        countY: 5,
+        stepX: 40,
+        stepY: 40,
+        radialCount: 8,
+        radius: 140,
+        angleStart: 0,
+        angleStep: 45,
+        centerX: 0,
+        centerY: 0
+      },
+      icon: "🌀",
+      run: (node, inputs) => {
+        const src = inputs.in;
+        if(!src?.el) return null;
+
+        const wrap = document.createElement("div");
+        wrap.style.position = "absolute";
+        wrap.style.inset = "0";
+
+        const mode = node.params.mode || "x";
+        const countX = Math.max(1, Number(node.params.countX) || 1);
+        const countY = Math.max(1, Number(node.params.countY) || 1);
+        const stepX = Number(node.params.stepX) || 0;
+        const stepY = Number(node.params.stepY) || 0;
+        const radialCount = Math.max(1, Number(node.params.radialCount) || 1);
+        const radius = Number(node.params.radius) || 0;
+        const angleStart = Number(node.params.angleStart) || 0;
+        const angleStep = Number(node.params.angleStep) || 0;
+        const centerX = Number(node.params.centerX) || 0;
+        const centerY = Number(node.params.centerY) || 0;
+
+        const addClone = (dx, dy) => {
+          const c = src.el.cloneNode(true);
+          c.style.position = "absolute";
+          c.style.inset = "0";
+          c.style.transform = `translate(${dx}px, ${dy}px)`;
+          c.style.transformOrigin = "0 0";
+          wrap.appendChild(c);
+        };
+
+        if(mode === "radial"){
+          for(let i = 0; i < radialCount; i++){
+            const ang = (angleStart + angleStep * i) * Math.PI / 180;
+            const dx = centerX + Math.cos(ang) * radius;
+            const dy = centerY + Math.sin(ang) * radius;
+            addClone(dx, dy);
+          }
+        }else if(mode === "xy"){
+          for(let y = 0; y < countY; y++){
+            for(let x = 0; x < countX; x++){
+              addClone(x * stepX, y * stepY);
+            }
+          }
+        }else if(mode === "y"){
+          for(let y = 0; y < countY; y++){
+            addClone(0, y * stepY);
+          }
+        }else{
+          for(let x = 0; x < countX; x++){
+            addClone(x * stepX, 0);
+          }
+        }
+
+        return { el: wrap };
+      },
+      inspector: () => ([
+        {k:"mode", type:"select", label:"Mode", options:["x","y","xy","radial"]},
+        {k:"countX", type:"range", label:"Count X", min:1, max:50, step:1, showIf:{ k:"mode", equals:"x" }},
+        {k:"countY", type:"range", label:"Count Y", min:1, max:50, step:1, showIf:{ k:"mode", equals:"y" }},
+        {k:"countX", type:"range", label:"Count X", min:1, max:50, step:1, showIf:{ k:"mode", equals:"xy" }},
+        {k:"countY", type:"range", label:"Count Y", min:1, max:50, step:1, showIf:{ k:"mode", equals:"xy" }},
+        {k:"stepX", type:"range", label:"Step X", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"x" }},
+        {k:"stepY", type:"range", label:"Step Y", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"y" }},
+        {k:"stepX", type:"range", label:"Step X", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
+        {k:"stepY", type:"range", label:"Step Y", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
+        {k:"radialCount", type:"range", label:"Count", min:1, max:60, step:1, showIf:{ k:"mode", equals:"radial" }},
+        {k:"radius", type:"range", label:"Radius", min:0, max:800, step:1, showIf:{ k:"mode", equals:"radial" }},
+        {k:"angleStart", type:"range", label:"Angle Start", min:-180, max:180, step:1, showIf:{ k:"mode", equals:"radial" }},
+        {k:"angleStep", type:"range", label:"Angle Step", min:-180, max:180, step:1, showIf:{ k:"mode", equals:"radial" }},
+        {k:"centerX", type:"range", label:"Center X", min:-600, max:600, step:1, showIf:{ k:"mode", equals:"radial" }},
+        {k:"centerY", type:"range", label:"Center Y", min:-600, max:600, step:1, showIf:{ k:"mode", equals:"radial" }}
+      ])
+    },
     Composite: {
-      inputs: ["a", "b"],
+      inputs: ["a", "b", "mask"],
       outputs: ["layer"],
       defaults: { blend: "normal", opacity: 100 },
       icon: "🧬",
       run: (node, inputs) => {
         const A = inputs.a?.el || null;
         const B = inputs.b?.el || null;
+        const M = inputs.mask?.el || null;
+        const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
         if(!A && !B) return null;
 
         const wrap = document.createElement("div");
@@ -1567,6 +2076,23 @@ refreshProjectList();
           A.style.opacity = String(opacity);
           A.style.mixBlendMode = blendMode;
           wrap.appendChild(A);
+        }
+
+        const maskUrl = rampStops.length
+          ? buildRampMaskUrl(rampStops)
+          : (buildGradientMaskUrl(resolveGradientMetaFromEl(M), false)
+              || buildShapeMaskUrl(resolveMaskMetaFromEl(M), false));
+        if(maskUrl){
+          wrap.style.maskImage = maskUrl;
+          wrap.style.webkitMaskImage = maskUrl;
+          wrap.style.maskMode = "luminance";
+          wrap.style.webkitMaskMode = "luminance";
+          wrap.style.maskRepeat = "no-repeat";
+          wrap.style.webkitMaskRepeat = "no-repeat";
+          wrap.style.maskPosition = "0 0";
+          wrap.style.webkitMaskPosition = "0 0";
+          wrap.style.maskSize = "100% 100%";
+          wrap.style.webkitMaskSize = "100% 100%";
         }
         
         return { el: wrap };
@@ -1601,96 +2127,16 @@ refreshProjectList();
       run: (node, inputs) => {
         const source = inputs.source?.el || null;
         const mask = inputs.mask?.el || null;
+        const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
         
         if(!source) return null;
-        if(!mask) return { el: source };
+        if(!mask && rampStops.length === 0) return { el: source };
 
-        const resolveMaskMeta = (maskEl) => {
-          if(!maskEl) return null;
-          const direct = maskEl.dataset?.maskShape ? maskEl : null;
-          const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape]");
-          const target = direct || nested;
-          if(!target) return null;
-
-          return {
-            shapeType: target.dataset.maskShape || "circle",
-            size: Number(target.dataset.maskSize || 120),
-            x: Number(target.dataset.maskX || 100),
-            y: Number(target.dataset.maskY || 100)
-          };
-        };
-
-        const meta = resolveMaskMeta(mask);
-        if(!meta) return { el: source };
-
-        const { shapeType, size, x, y } = meta;
-
-        const wrap = document.createElement("div");
-        wrap.style.position = "absolute";
-        wrap.style.inset = "0";
-        
-        const w = renderRoot?.clientWidth || 800;
-        const h = renderRoot?.clientHeight || 600;
-
-        const baseFill = node.params.invert ? "white" : "black";
-        const shapeFill = node.params.invert ? "black" : "white";
-        const r = size / 2;
-
-        let shapeSvg = "";
-        switch(shapeType){
-          case "circle":
-            shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
-            break;
-          case "square":
-            shapeSvg = `<rect x="${x - r}" y="${y - r}" width="${size}" height="${size}" fill="${shapeFill}" />`;
-            break;
-          case "triangle":
-            shapeSvg = `<polygon points="${[
-              [x, y - r],
-              [x + r, y + r],
-              [x - r, y + r]
-            ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
-            break;
-          case "diamond":
-            shapeSvg = `<polygon points="${[
-              [x, y - r],
-              [x + r, y],
-              [x, y + r],
-              [x - r, y]
-            ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
-            break;
-          case "hexagon": {
-            const pts = [];
-            for(let i=0;i<6;i++){
-              const a = (Math.PI/3)*i - Math.PI/6;
-              pts.push([x + r*Math.cos(a), y + r*Math.sin(a)]);
-            }
-            shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
-            break;
-          }
-          case "star": {
-            const pts = [];
-            const r1 = r;
-            const r2 = r * 0.5;
-            for(let i=0;i<10;i++){
-              const a = (Math.PI/5)*i - Math.PI/2;
-              const rr = i % 2 === 0 ? r1 : r2;
-              pts.push([x + rr*Math.cos(a), y + rr*Math.sin(a)]);
-            }
-            shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
-            break;
-          }
-          default:
-            shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
-        }
-
-        const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
-          `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
-            `<rect x="0" y="0" width="${w}" height="${h}" fill="${baseFill}" />` +
-            shapeSvg +
-          `</svg>`;
-
-        const maskUrl = `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
+        const maskUrl = rampStops.length
+          ? buildRampMaskUrl(rampStops, !!node.params.invert)
+          : (buildGradientMaskUrl(resolveGradientMetaFromEl(mask), !!node.params.invert)
+              || buildShapeMaskUrl(resolveMaskMetaFromEl(mask), !!node.params.invert));
+        if(!maskUrl) return { el: source };
 
         const layerContainer = document.createElement("div");
         layerContainer.style.position = "absolute";
@@ -1728,7 +2174,7 @@ refreshProjectList();
       run: (_node, inputs) => inputs.in ?? null,
 
       inspector: (node) => ([
-        { k: "ratio", type: "select", label: "Aspect Ratio", options: ["16:9", "1:1"] },
+        { k: "ratio", type: "select", label: "Aspect Ratio", options: ["1:1", "4:3", "16:9", "21:9", "5:4", "3:2", "2:3", "9:16", "3:4", "4:5"] },
         { type: "buttons", label: "Export", buttons: [
           { label: "PNG", id: "exportPNG" },
           { label: "JPEG", id: "exportJPEG" }
@@ -1754,9 +2200,11 @@ let nodeSpawnEditorPos = { x: 160, y: 160 };
 const NODE_CATEGORIES = {
   Color: "Generators",
   Gradient: "Generators",
+  Ramp: "Generators",
   Shape: "Generators",
   Text: "Generators",
   Transform: "Operations",
+  Glow: "Operations",
   Composite: "Operations",
   Mask: "Operations",
   Output: "Output",
@@ -2072,6 +2520,7 @@ async function evaluate(){
 
     if(finalLayer?.el){
       renderRoot.appendChild(finalLayer.el);
+      updatePreviewSelectionBox();
     }else{
       const msg = document.createElement("div");
       msg.style.position="absolute";
@@ -2083,6 +2532,128 @@ async function evaluate(){
       msg.style.fontSize="12px";
       msg.textContent="Output is not connected (or upstream is empty).";
       renderRoot.appendChild(msg);
+      updatePreviewSelectionBox();
+    }
+  }
+
+  function updatePreviewSelectionBox(){
+    renderRoot.querySelectorAll(".previewSelectionBox, .previewSelectionDot").forEach(el => el.remove());
+    if(!state.selected) return;
+
+    const target = renderRoot.querySelector(`[data-bound-id="${state.selected}"]`);
+    if(!target || !previewInner) return;
+
+    const tRect = target.getBoundingClientRect();
+    const pRect = previewInner.getBoundingClientRect();
+    const left = (tRect.left - pRect.left) / previewScale;
+    const top = (tRect.top - pRect.top) / previewScale;
+    const width = tRect.width / previewScale;
+    const height = tRect.height / previewScale;
+
+    if(width <= 0 || height <= 0) return;
+
+    const box = document.createElement("div");
+    box.className = "previewSelectionBox";
+    box.style.left = left + "px";
+    box.style.top = top + "px";
+    box.style.width = width + "px";
+    box.style.height = height + "px";
+    renderRoot.appendChild(box);
+
+    const corners = [
+      { x: left, y: top },
+      { x: left + width, y: top },
+      { x: left, y: top + height },
+      { x: left + width, y: top + height }
+    ];
+
+    const node = state.nodes.get(state.selected);
+    if(!node) return;
+
+    const hasSize = typeof node.params?.size !== "undefined";
+    const hasScale = typeof node.params?.scale !== "undefined";
+    if(!hasSize && !hasScale) return;
+
+    const getPreviewPoint = (ev) => {
+      const pRect = previewInner.getBoundingClientRect();
+      return {
+        x: (ev.clientX - pRect.left) / previewScale,
+        y: (ev.clientY - pRect.top) / previewScale
+      };
+    };
+
+    const syncInspectorValue = (k, v) => {
+      inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(el => {
+        if(el.type === "checkbox"){
+          el.checked = Boolean(v);
+        }else{
+          el.value = v;
+        }
+      });
+    };
+
+    for(const c of corners){
+      const dot = document.createElement("div");
+      dot.className = "previewSelectionDot";
+      dot.style.left = (c.x - 4) + "px";
+      dot.style.top = (c.y - 4) + "px";
+      renderRoot.appendChild(dot);
+
+      dot.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const center = { x: left + width / 2, y: top + height / 2 };
+        const startPt = getPreviewPoint(ev);
+        const startDist = Math.hypot(startPt.x - center.x, startPt.y - center.y) || 1;
+
+        const startSize = Number(node.params?.size ?? 0);
+        const startScale = Number(node.params?.scale ?? 1);
+        const startX = Number(node.params?.x ?? 0);
+        const startY = Number(node.params?.y ?? 0);
+        const startW = width;
+        const startH = height;
+
+        const onMove = (eMove) => {
+          const pt = getPreviewPoint(eMove);
+          const dist = Math.hypot(pt.x - center.x, pt.y - center.y);
+          const factor = clamp(dist / startDist, 0.1, 10);
+
+          if(hasSize){
+            const nextSize = Math.max(1, startSize * factor);
+            node.params.size = nextSize;
+            syncInspectorValue("size", Math.round(nextSize));
+
+            if(node.type === "Text"){
+              const nextW = startW * factor;
+              const nextH = startH * factor;
+              const dx = (nextW - startW) / 2;
+              const dy = (nextH - startH) / 2;
+              node.params.x = startX - dx;
+              node.params.y = startY - dy;
+              syncInspectorValue("x", Math.round(node.params.x));
+              syncInspectorValue("y", Math.round(node.params.y));
+            }
+          } else if(hasScale){
+            const nextScale = Math.max(0.05, startScale * factor);
+            node.params.scale = nextScale;
+            syncInspectorValue("scale", Number(nextScale.toFixed(3)));
+          }
+
+          evaluateAndRender();
+        };
+
+        const onUp = (eUp) => {
+          dot.releasePointerCapture(eUp.pointerId);
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          pushHistory();
+        };
+
+        dot.setPointerCapture(ev.pointerId);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      });
     }
   }
 
@@ -2463,6 +3034,7 @@ async function evaluate(){
     
     render(); // update highlight + port cache
     renderInspector();
+    updatePreviewSelectionBox();
   }
 
   function clearSelection(){
@@ -2470,9 +3042,17 @@ async function evaluate(){
     state.selectedNodes.clear();
     render();
     renderInspector();
+    updatePreviewSelectionBox();
   }
 
   function renderInspectorField(node, f){
+    if(f.showIf){
+      const ok = typeof f.showIf === "function"
+        ? f.showIf(node)
+        : (node.params?.[f.showIf.k] === f.showIf.equals);
+      if(!ok) return "";
+    }
+
     let controlHtml = "";
 
     if(f.type === "buttons"){
@@ -2505,6 +3085,35 @@ async function evaluate(){
         <div style="display:flex; gap:8px; align-items:center;">
           <input data-k="${f.k}" type="range" min="${min}" max="${max}" step="${step}" value="${val}" style="flex:1;" />
           <input data-k="${f.k}" type="number" min="${min}" max="${max}" step="${step}" value="${val}" style="width:80px;" />
+        </div>
+      `;
+    } else if(f.type === "knob"){
+      const min = (typeof f.min !== 'undefined') ? f.min : 0;
+      const max = (typeof f.max !== 'undefined') ? f.max : 360;
+      const val = Number(node.params[f.k] ?? min);
+      controlHtml = `
+        <div class="knobWrap" data-k="${f.k}" data-min="${min}" data-max="${max}">
+          <div class="knob" role="slider" aria-valuemin="${min}" aria-valuemax="${max}" aria-valuenow="${val}">
+            <div class="knobIndicator"></div>
+          </div>
+          <input class="knobInput" type="number" min="${min}" max="${max}" step="1" value="${val}" style="width:80px;" />
+        </div>
+      `;
+    } else if(f.type === "ramp"){
+      const stops = normalizeRampStops(node.params.stops);
+      const rows = stops.map((s, i) => `
+        <div class="rampStop" data-index="${i}">
+          <input class="rampPosRange" type="range" min="0" max="100" step="1" value="${s.pos}" />
+          <input class="rampPosNum" type="number" min="0" max="100" step="1" value="${s.pos}" />
+          <input class="rampColor" type="color" value="${escapeAttr(s.color)}" />
+          <button class="rampRemoveBtn" type="button">Remove</button>
+        </div>
+      `).join("");
+
+      controlHtml = `
+        <div class="rampEditor" data-k="${f.k}">
+          ${rows}
+          <button class="rampAddBtn" type="button">Add stop</button>
         </div>
       `;
     } else if(f.type === "textarea"){
@@ -2615,10 +3224,150 @@ async function evaluate(){
           applyOutputRatio(v);
           renderInspector();
         }
+
+        if(node.type === "Gradient" && k === "type"){
+          renderInspector();
+        }
+
+        if(node.type === "Glow" && k === "mode"){
+          renderInspector();
+        }
+
+        if(node.type === "Clone" && k === "mode"){
+          renderInspector();
+        }
       };
 
       // Use change for selects, input for inputs/textarea
       inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", handler);
+    });
+
+    inspectorBody.querySelectorAll('.knobWrap[data-k]').forEach(wrap => {
+      const k = wrap.getAttribute("data-k");
+      const min = Number(wrap.getAttribute("data-min") ?? 0);
+      const max = Number(wrap.getAttribute("data-max") ?? 360);
+      const knob = wrap.querySelector(".knob");
+      const indicator = wrap.querySelector(".knobIndicator");
+      const inputEl = wrap.querySelector(".knobInput");
+      if(!knob || !indicator) return;
+
+      const setKnobValue = (val, fromDrag = false) => {
+        const v = clamp(val, min, max);
+        const deg = ((v - min) / (max - min)) * 360;
+        indicator.style.transform = `translateX(-50%) rotate(${deg}deg)`;
+        knob.setAttribute("aria-valuenow", String(v));
+        if(inputEl) inputEl.value = String(Math.round(v));
+
+        node.params[k] = v;
+        if(!fromDrag) pushHistory();
+        evaluateAndRender();
+      };
+
+      setKnobValue(Number(node.params[k] ?? min), true);
+
+      const onPointerMove = (ev) => {
+        const rect = knob.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = ev.clientX - cx;
+        const dy = ev.clientY - cy;
+        let angle = (Math.atan2(dy, dx) * 180 / Math.PI) + 90;
+        if(angle < 0) angle += 360;
+        const val = min + (angle / 360) * (max - min);
+        setKnobValue(val, true);
+      };
+
+      const onPointerUp = (ev) => {
+        knob.releasePointerCapture(ev.pointerId);
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        pushHistory();
+      };
+
+      knob.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        knob.setPointerCapture(ev.pointerId);
+        onPointerMove(ev);
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+      });
+
+      if(inputEl){
+        inputEl.addEventListener("input", () => {
+          const v = Number(inputEl.value);
+          if(Number.isNaN(v)) return;
+          setKnobValue(v, true);
+        });
+        inputEl.addEventListener("change", () => {
+          const v = Number(inputEl.value);
+          if(Number.isNaN(v)) return;
+          setKnobValue(v, true);
+          pushHistory();
+        });
+      }
+    });
+
+    inspectorBody.querySelectorAll('.rampEditor[data-k="stops"]').forEach(editor => {
+      if(!Array.isArray(node.params.stops)){
+        node.params.stops = normalizeRampStops(node.params.stops);
+      }
+
+      const syncStops = (stops, push = false) => {
+        node.params.stops = normalizeRampStops(stops);
+        if(push) pushHistory();
+        evaluateAndRender();
+      };
+
+      editor.querySelectorAll('.rampStop').forEach(row => {
+        const idx = Number(row.getAttribute('data-index'));
+        const rangeEl = row.querySelector('.rampPosRange');
+        const numEl = row.querySelector('.rampPosNum');
+        const colorEl = row.querySelector('.rampColor');
+        const removeBtn = row.querySelector('.rampRemoveBtn');
+
+        const updatePos = (v, commit = false) => {
+          if(Number.isNaN(v)) return;
+          const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
+          if(!stops[idx]) return;
+          stops[idx] = { ...stops[idx], pos: v };
+          if(rangeEl) rangeEl.value = String(v);
+          if(numEl) numEl.value = String(v);
+          syncStops(stops, commit);
+        };
+
+        rangeEl?.addEventListener('input', () => updatePos(Number(rangeEl.value), false));
+        rangeEl?.addEventListener('change', () => updatePos(Number(rangeEl.value), true));
+        numEl?.addEventListener('input', () => updatePos(Number(numEl.value), false));
+        numEl?.addEventListener('change', () => updatePos(Number(numEl.value), true));
+
+        colorEl?.addEventListener('input', () => {
+          const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
+          if(!stops[idx]) return;
+          stops[idx] = { ...stops[idx], color: colorEl.value };
+          syncStops(stops, false);
+        });
+        colorEl?.addEventListener('change', () => {
+          const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
+          if(!stops[idx]) return;
+          stops[idx] = { ...stops[idx], color: colorEl.value };
+          syncStops(stops, true);
+        });
+
+        removeBtn?.addEventListener('click', () => {
+          const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
+          stops.splice(idx, 1);
+          syncStops(stops, true);
+          renderInspector();
+        });
+      });
+
+      editor.querySelector('.rampAddBtn')?.addEventListener('click', () => {
+        const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
+        const mid = stops.length ? 50 : 50;
+        stops.push({ pos: mid, color: "#ffffff" });
+        syncStops(stops, true);
+        renderInspector();
+      });
     });
 
     // Auto-resize textarea fields and initialize their height
@@ -2635,11 +3384,27 @@ async function evaluate(){
 
   }
 
+  function parseRatioString(raw){
+    const s = String(raw || "").trim().toLowerCase().replace(/\s+/g, "");
+    const match = s.match(/^(\d+(?:\.\d+)?)(?:x|:)(\d+(?:\.\d+)?)$/);
+    if(!match) return null;
+    const w = Number(match[1]);
+    const h = Number(match[2]);
+    if(!w || !h) return null;
+    return { w, h };
+  }
+
   function applyOutputRatio(ratio){
     const screen = document.querySelector(".screen");
     const previewInner = document.getElementById("previewInner");
 
-    if(ratio === "1:1"){
+    const parsed = parseRatioString(ratio);
+    if(parsed){
+      const targetH = 720;
+      const targetW = Math.max(1, Math.round((parsed.w / parsed.h) * targetH));
+      screen.style.aspectRatio = `${parsed.w} / ${parsed.h}`;
+      previewBase = { w: targetW, h: targetH };
+    } else if(ratio === "1:1"){
       screen.style.aspectRatio = "1 / 1";
       previewBase = { w: 720, h: 720 };
     } else {
@@ -2701,6 +3466,88 @@ async function evaluate(){
 
     const cache = new Map();
 
+    const applyRampAlphaMask = (ctx, stops, w, h, invert = false) => {
+      const list = normalizeRampStops(stops);
+      if(list.length === 0) return;
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      for(const s of list){
+        const { r, g, b } = parseHexColor(s.color);
+        let lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        if(invert) lum = 1 - lum;
+        grad.addColorStop(Math.max(0, Math.min(1, s.pos / 100)), `rgba(255,255,255,${lum})`);
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    };
+
+    const applyGradientAlphaMask = (ctx, meta, w, h, invert = false) => {
+      if(!meta || !Array.isArray(meta.stops) || meta.stops.length === 0) return;
+
+      const stops = normalizeRampStops(meta.stops);
+      let grad = null;
+
+      if(meta.type === "radial"){
+        const cx = (Number(meta.cx ?? 50) / 100) * w;
+        const cy = (Number(meta.cy ?? 50) / 100) * h;
+        const r = Math.hypot(w, h) / 2;
+        grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      }else{
+        const angle = Number(meta.angle ?? 0);
+        const rad = (angle - 90) * Math.PI / 180;
+        const cx = w / 2;
+        const cy = h / 2;
+        const len = Math.hypot(w, h);
+        const dx = Math.cos(rad) * (len / 2);
+        const dy = Math.sin(rad) * (len / 2);
+        grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+      }
+
+      for(const s of stops){
+        const { r, g, b } = parseHexColor(s.color);
+        let lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        if(invert) lum = 1 - lum;
+        grad.addColorStop(Math.max(0, Math.min(1, s.pos / 100)), `rgba(255,255,255,${lum})`);
+      }
+
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    };
+
+    const getGradientMetaForNode = (gradNodeId) => {
+      const node = state.nodes.get(String(gradNodeId));
+      if(!node || node.type !== "Gradient") return null;
+
+      let stops = null;
+      const rampWire = findWireToInput(node.id, "ramp");
+      if(rampWire){
+        const rampNode = state.nodes.get(String(rampWire.from.nodeId));
+        if(rampNode?.type === "Ramp"){
+          stops = normalizeRampStops(rampNode.params.stops);
+        }
+      }
+
+      if(!stops || stops.length < 2){
+        stops = [
+          { pos: 0, color: node.params.a || "#000000" },
+          { pos: 100, color: node.params.b || "#ffffff" }
+        ];
+      }
+
+      return {
+        type: node.params.type || "linear",
+        angle: Number(node.params.angle ?? 0),
+        cx: Number(node.params.cx ?? 50),
+        cy: Number(node.params.cy ?? 50),
+        stops
+      };
+    };
+
     const renderNodeToCanvas = (nodeId) => {
       if(cache.has(nodeId)) return cache.get(nodeId);
       const node = state.nodes.get(nodeId);
@@ -2726,19 +3573,46 @@ async function evaluate(){
 
       if(node.type === "Gradient"){
         const { c, ctx } = createCanvas();
-        const angle = Number(node.params.angle) || 0;
-        const rad = (angle - 90) * Math.PI / 180;
-        const cx = w / 2;
-        const cy = h / 2;
-        const len = Math.hypot(w, h);
-        const dx = Math.cos(rad) * (len / 2);
-        const dy = Math.sin(rad) * (len / 2);
-        const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-        grad.addColorStop(0, node.params.a || "#000000");
-        grad.addColorStop(1, node.params.b || "#ffffff");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
+        const type = node.params.type || "linear";
+        const ramp = getInputCanvas("ramp");
+        const rampStops = ramp?.stops ? normalizeRampStops(ramp.stops) : [];
+        const colors = rampStops.length >= 2
+          ? rampStops
+          : [
+              { pos: 0, color: node.params.a || "#000000" },
+              { pos: 100, color: node.params.b || "#ffffff" }
+            ];
+
+        if(type === "radial"){
+          const cx = (Number(node.params.cx ?? 50) / 100) * w;
+          const cy = (Number(node.params.cy ?? 50) / 100) * h;
+          const r = Math.hypot(w, h) / 2;
+          const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+          for(const s of colors){
+            grad.addColorStop(Math.max(0, Math.min(1, s.pos / 100)), s.color);
+          }
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, w, h);
+        }else{
+          const angle = Number(node.params.angle) || 0;
+          const rad = (angle - 90) * Math.PI / 180;
+          const cx = w / 2;
+          const cy = h / 2;
+          const len = Math.hypot(w, h);
+          const dx = Math.cos(rad) * (len / 2);
+          const dy = Math.sin(rad) * (len / 2);
+          const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+          for(const s of colors){
+            grad.addColorStop(Math.max(0, Math.min(1, s.pos / 100)), s.color);
+          }
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, w, h);
+        }
         result = c;
+      }
+
+      if(node.type === "Ramp"){
+        result = { stops: normalizeRampStops(node.params.stops) };
       }
 
       if(node.type === "Shape"){
@@ -2838,16 +3712,116 @@ async function evaluate(){
         }
       }
 
+      if(node.type === "Glow"){
+        const src = getInputCanvas("in");
+        if(src){
+          const { c, ctx } = createCanvas();
+          const mode = node.params.mode || "outer";
+          const blur = Math.max(0, Number(node.params.blur) || 0);
+
+          if(mode === "luminance"){
+            const t = clamp((Number(node.params.threshold) || 0) / 100, 0, 1);
+            const intensity = clamp((Number(node.params.intensity) || 0) / 100, 0, 1);
+            const brightness = 1 + t * 0.9;
+            const contrast = 1 + t * 3.0;
+
+            ctx.drawImage(src, 0, 0);
+            ctx.save();
+            ctx.globalCompositeOperation = "screen";
+            ctx.globalAlpha = intensity;
+            ctx.filter = `grayscale(1) brightness(${brightness}) contrast(${contrast}) blur(${blur}px)`;
+            ctx.drawImage(src, 0, 0);
+            ctx.restore();
+          }else{
+            const { r, g, b } = parseHexColor(node.params.color || "#7aa7ff");
+            const alpha = clamp((Number(node.params.strength) || 0) / 100, 0, 1);
+            ctx.save();
+            ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            ctx.shadowBlur = blur;
+            ctx.drawImage(src, 0, 0);
+            ctx.restore();
+
+            // draw source on top for crisp edges
+            ctx.drawImage(src, 0, 0);
+          }
+          result = c;
+        }
+      }
+
+      if(node.type === "Clone"){
+        const src = getInputCanvas("in");
+        if(src){
+          const { c, ctx } = createCanvas();
+          const mode = node.params.mode || "x";
+          const countX = Math.max(1, Number(node.params.countX) || 1);
+          const countY = Math.max(1, Number(node.params.countY) || 1);
+          const stepX = Number(node.params.stepX) || 0;
+          const stepY = Number(node.params.stepY) || 0;
+          const radialCount = Math.max(1, Number(node.params.radialCount) || 1);
+          const radius = Number(node.params.radius) || 0;
+          const angleStart = Number(node.params.angleStart) || 0;
+          const angleStep = Number(node.params.angleStep) || 0;
+          const centerX = Number(node.params.centerX) || 0;
+          const centerY = Number(node.params.centerY) || 0;
+
+          const drawClone = (dx, dy) => {
+            ctx.save();
+            ctx.translate(dx, dy);
+            ctx.drawImage(src, 0, 0);
+            ctx.restore();
+          };
+
+          if(mode === "radial"){
+            for(let i = 0; i < radialCount; i++){
+              const ang = (angleStart + angleStep * i) * Math.PI / 180;
+              const dx = centerX + Math.cos(ang) * radius;
+              const dy = centerY + Math.sin(ang) * radius;
+              drawClone(dx, dy);
+            }
+          }else if(mode === "xy"){
+            for(let y = 0; y < countY; y++){
+              for(let x = 0; x < countX; x++){
+                drawClone(x * stepX, y * stepY);
+              }
+            }
+          }else if(mode === "y"){
+            for(let y = 0; y < countY; y++){
+              drawClone(0, y * stepY);
+            }
+          }else{
+            for(let x = 0; x < countX; x++){
+              drawClone(x * stepX, 0);
+            }
+          }
+
+          result = c;
+        }
+      }
+
       if(node.type === "Mask"){
         const source = getInputCanvas("source");
         const mask = getInputCanvas("mask");
+        const maskWire = findWireToInput(nodeId, "mask");
         if(source){
           const { c, ctx } = createCanvas();
           ctx.drawImage(source, 0, 0);
           if(mask){
-            ctx.globalCompositeOperation = node.params.invert ? "destination-out" : "destination-in";
-            ctx.drawImage(mask, 0, 0);
-            ctx.globalCompositeOperation = "source-over";
+            if(mask?.stops){
+              applyRampAlphaMask(ctx, mask.stops, w, h, !!node.params.invert);
+            }else if(maskWire){
+              const meta = getGradientMetaForNode(maskWire.from.nodeId);
+              if(meta){
+                applyGradientAlphaMask(ctx, meta, w, h, !!node.params.invert);
+              }else{
+                ctx.globalCompositeOperation = node.params.invert ? "destination-out" : "destination-in";
+                ctx.drawImage(mask, 0, 0);
+                ctx.globalCompositeOperation = "source-over";
+              }
+            }else{
+              ctx.globalCompositeOperation = node.params.invert ? "destination-out" : "destination-in";
+              ctx.drawImage(mask, 0, 0);
+              ctx.globalCompositeOperation = "source-over";
+            }
           }
           result = c;
         }
@@ -2856,6 +3830,8 @@ async function evaluate(){
       if(node.type === "Composite"){
         const A = getInputCanvas("a");
         const B = getInputCanvas("b");
+        const M = getInputCanvas("mask");
+        const maskWire = findWireToInput(nodeId, "mask");
         if(A || B){
           const { c, ctx } = createCanvas();
           if(B) ctx.drawImage(B, 0, 0);
@@ -2866,6 +3842,24 @@ async function evaluate(){
             ctx.drawImage(A, 0, 0);
             ctx.globalAlpha = 1;
             ctx.globalCompositeOperation = "source-over";
+          }
+          if(M){
+            if(M?.stops){
+              applyRampAlphaMask(ctx, M.stops, w, h);
+            }else if(maskWire){
+              const meta = getGradientMetaForNode(maskWire.from.nodeId);
+              if(meta){
+                applyGradientAlphaMask(ctx, meta, w, h, false);
+              }else{
+                ctx.globalCompositeOperation = "destination-in";
+                ctx.drawImage(M, 0, 0);
+                ctx.globalCompositeOperation = "source-over";
+              }
+            }else{
+              ctx.globalCompositeOperation = "destination-in";
+              ctx.drawImage(M, 0, 0);
+              ctx.globalCompositeOperation = "source-over";
+            }
           }
           result = c;
         }
@@ -3489,6 +4483,68 @@ function deleteSelectedNode(){
   toast(`Deleted ${count} node${count > 1 ? 's' : ''}`);
 }
 
+function findFirstOutputNode(){
+  for(const node of state.nodes.values()){
+    if(node.type === "Output") return node;
+  }
+  return null;
+}
+
+function quickConnectSelectedToOutput(){
+  const nodeId = state.selected;
+  if(!nodeId){
+    toast("Select a node first.");
+    return;
+  }
+
+  const node = state.nodes.get(String(nodeId));
+  if(!node){
+    toast("Selected node not found.");
+    return;
+  }
+
+  const def = NODE_DEFS[node.type];
+  const outputs = def?.outputs || [];
+  if(outputs.length === 0){
+    toast("Selected node has no outputs.");
+    return;
+  }
+
+  const outPort = outputs[outputs.length - 1];
+  const prevSelected = state.selected;
+  const prevSelectedNodes = new Set(state.selectedNodes);
+
+  pushHistory();
+
+  let outputNode = findFirstOutputNode();
+  if(!outputNode){
+    const pos = { x: node.pos.x + 360, y: node.pos.y };
+    outputNode = addNode("Output", pos);
+  }
+
+  if(!outputNode){
+    toast("Could not create Output node.");
+    return;
+  }
+
+  state.wires = state.wires.filter(w => !(w.to.nodeId === outputNode.id && w.to.port === "in"));
+  state.wires.push({
+    from: { nodeId: node.id, port: outPort },
+    to: { nodeId: outputNode.id, port: "in" }
+  });
+
+  state.connecting = null;
+  state.selected = prevSelected;
+  state.selectedNodes = prevSelectedNodes;
+
+  render();
+  evaluateAndRender();
+  renderInspector();
+  requestWireDraw();
+
+  toast(`Connected ${node.id}.${outPort} → ${outputNode.id}.in`);
+}
+
 // Delete / Backspace key handler
 window.addEventListener("keydown", (e) => {
   // Don't delete when typing in inputs/fields
@@ -3498,6 +4554,23 @@ window.addEventListener("keydown", (e) => {
     // prevent browser back navigation from Backspace (some browsers)
     e.preventDefault();
     deleteSelectedNode();
+  }
+});
+
+// Shift+O quick connect to Output
+window.addEventListener("keydown", (e) => {
+  if(isTypingTarget(e.target)) return;
+  if(nodeSearchOpen) return;
+
+  const isQuickConnect = e.shiftKey
+    && !e.ctrlKey
+    && !e.metaKey
+    && !e.altKey
+    && e.key.toLowerCase() === "o";
+
+  if(isQuickConnect){
+    e.preventDefault();
+    quickConnectSelectedToOutput();
   }
 });
 
@@ -3553,12 +4626,90 @@ function loadGraph(data){
   // -----------------------------
   // Commands
   // -----------------------------
-  document.getElementById("nodeType").addEventListener("change", (e) => {
-    const t = e.target.value;
-    addNode(t);
-    // keep select showing the last choice
-    e.target.blur();
+  const NODE_GROUPS = {
+    generator: ["Color", "Gradient", "Ramp", "Shape", "Text"],
+    operation: ["Transform", "Glow", "Composite", "Mask"],
+    output: ["Output"]
+  };
+
+  const nodeButtonsEl = document.getElementById("nodeButtons");
+  const nodeDropdown = document.getElementById("nodeDropdown");
+  let activeGroup = "generator";
+
+  function setActiveGroup(group){
+    activeGroup = group;
+    document.querySelectorAll(".nodeCategoryBtn").forEach(btn => {
+      const active = btn.getAttribute("data-group") === group;
+      btn.classList.toggle("active", active);
+    });
+  }
+
+  function closeNodeDropdown(){
+    if(!nodeDropdown) return;
+    nodeDropdown.classList.add("hidden");
+    nodeDropdown.setAttribute("aria-hidden", "true");
+    nodeDropdown.innerHTML = "";
+  }
+
+  function openNodeDropdown(group, anchorEl){
+    if(!nodeDropdown || !nodeButtonsEl) return;
+    const list = NODE_GROUPS[group] || [];
+    nodeDropdown.innerHTML = "";
+
+    for(const type of list){
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "nodeDropdownItem";
+      item.textContent = type;
+      item.dataset.node = type;
+      nodeDropdown.appendChild(item);
+    }
+
+    const parentRect = nodeButtonsEl.getBoundingClientRect();
+    const btnRect = anchorEl.getBoundingClientRect();
+    const left = btnRect.left - parentRect.left;
+    const top = btnRect.bottom - parentRect.top + 6;
+
+    nodeDropdown.style.left = `${Math.max(0, left)}px`;
+    nodeDropdown.style.top = `${top}px`;
+
+    nodeDropdown.classList.remove("hidden");
+    nodeDropdown.setAttribute("aria-hidden", "false");
+  }
+
+  nodeButtonsEl?.addEventListener("click", (e) => {
+    const btn = e.target.closest?.(".nodeCategoryBtn");
+    if(btn){
+      const group = btn.getAttribute("data-group");
+      if(!group) return;
+      const wasOpen = nodeDropdown && !nodeDropdown.classList.contains("hidden");
+      const sameGroup = group === activeGroup;
+
+      setActiveGroup(group);
+
+      if(wasOpen && sameGroup){
+        closeNodeDropdown();
+      }else{
+        openNodeDropdown(group, btn);
+      }
+      return;
+    }
+
+    const item = e.target.closest?.(".nodeDropdownItem");
+    if(item){
+      const t = item.getAttribute("data-node");
+      if(t) addNode(t);
+      closeNodeDropdown();
+    }
   });
+
+  window.addEventListener("mousedown", (e) => {
+    if(!nodeDropdown || nodeDropdown.classList.contains("hidden")) return;
+    const within = nodeButtonsEl?.contains(e.target) || nodeDropdown.contains(e.target);
+    if(!within) closeNodeDropdown();
+  });
+
+  setActiveGroup("generator");
 
   document.getElementById("btnResetGraph").addEventListener("click", () => {
     resetGraph();
