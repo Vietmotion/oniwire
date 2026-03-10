@@ -177,9 +177,11 @@
           🧩 Node Editor
           <div class="hdrInlineControls">
             <div class="nodeGroups" id="nodeButtons">
-              <button class="nodeCategoryBtn active" data-group="generator">Generator</button>
-              <button class="nodeCategoryBtn" data-group="operation">Operation</button>
-              <button class="nodeCategoryBtn" data-group="output">Output</button>
+              <button type="button" class="nodeCategoryBtn active" data-group="generator">Generator</button>
+              <button type="button" class="nodeCategoryBtn" data-group="operation">Operation</button>
+              <button type="button" class="nodeCategoryBtn" data-group="motion">Motion</button>
+              <button type="button" class="nodeCategoryBtn" data-group="effect">Effect</button>
+              <button type="button" class="nodeCategoryBtn" data-group="output">Output</button>
               <div id="nodeDropdown" class="nodeDropdown hidden" role="menu" aria-hidden="true"></div>
             </div>
         </div>
@@ -544,6 +546,7 @@ const exportApi = window.createOniwireExportApi({
 });
 
 const exportAnimationJSON = exportApi.exportAnimationJSON;
+const exportEmbedJS = exportApi.exportEmbedJS;
 
 // Init list on startup
 utilsApi.initProjectUtils();
@@ -1682,14 +1685,14 @@ async function evaluate(){
                   ${section.hint ? `<div class="exportGroupHint">${escapeAttr(section.hint)}</div>` : ""}
                 </div>
                 <div class="exportBtnRow">
-                  ${(section.buttons || []).map(btn => `<button data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}
+                  ${(section.buttons || []).map(btn => `<button type="button" data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}
                 </div>
               </div>
             `).join("")}
           </div>
         `;
       }else{
-        controlHtml = `<div style="display:flex; gap:8px;">${(f.buttons || []).map(btn => `<button data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`;
+        controlHtml = `<div style="display:flex; gap:8px;">${(f.buttons || []).map(btn => `<button type="button" data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`;
       }
     } else if(f.type === "select"){
       controlHtml = `
@@ -1826,11 +1829,15 @@ async function evaluate(){
 
     // Handle export buttons
     inspectorBody.querySelectorAll('[data-export-btn]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         const exportType = btn.getAttribute('data-export-btn');
+        const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
         if(exportType === "exportAnimJSON"){
-          const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
           exportAnimationJSON(projectName);
+        }else if(exportType === "exportEmbedJS"){
+          exportEmbedJS(projectName);
         }else{
           exportCanvasAsImage(exportType);
         }
@@ -3304,7 +3311,8 @@ function loadGraph(data){
     importProjectFromFile();
   });
 
-  document.getElementById("btnExport").addEventListener("click", () => {
+  document.getElementById("btnExport").addEventListener("click", (ev) => {
+    ev.preventDefault();
     const projectName = document.getElementById("projectName")?.value || "animation";
     exportAnimationJSON(projectName);
   });
