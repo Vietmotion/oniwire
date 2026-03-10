@@ -61,8 +61,8 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
     inspector: () => ([
       {k:"x", type:"range", label:"X", min:-600, max:600, step:1},
       {k:"y", type:"range", label:"Y", min:-600, max:600, step:1},
-      {k:"scale", type:"number", label:"Scale"},
-      {k:"rot", type:"number", label:"Rotate°"},
+      {k:"scale", type:"range", label:"Scale", min:0.05, max:5, step:0.01},
+      {k:"rot", type:"range", label:"Rotate°", min:-360, max:360, step:1},
       {k:"originX", type:"range", label:"Pivot X", min:-100, max:100, step:0.5},
       {k:"originY", type:"range", label:"Pivot Y", min:-100, max:100, step:0.5}
     ])
