@@ -24,7 +24,7 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             title: "Video/Data",
             hint: "Animation timeline payload",
             buttons: [
-              { label: "Animation JSON", id: "exportAnimJSON" }
+              { label: "Embed JS", id: "exportEmbedJS" }
             ]
           }
         ]

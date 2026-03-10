@@ -25,13 +25,9 @@ window.createOniwireMotionNodeDef = function createOniwireMotionNodeDef({ ensure
       motionLayer.style.inset = "0";
 
       if(bounds){
-        motionLayer.style.left = `${bounds.x}px`;
-        motionLayer.style.top = `${bounds.y}px`;
-        motionLayer.style.width = `${bounds.width}px`;
-        motionLayer.style.height = `${bounds.height}px`;
-        motionLayer.style.transformOrigin = "50% 50%";
-        clone.style.transform = `translate(${-bounds.x}px, ${-bounds.y}px)`;
-        clone.style.transformOrigin = "0 0";
+        const cx = bounds.x + (bounds.width / 2);
+        const cy = bounds.y + (bounds.height / 2);
+        motionLayer.style.transformOrigin = `${cx}px ${cy}px`;
       }else{
         motionLayer.style.inset = "0";
         motionLayer.style.transformOrigin = "50% 50%";

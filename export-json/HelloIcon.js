@@ -1,79 +1,5 @@
-window.createOniwireExportApi = function createOniwireExportApi(deps){
-	const {
-		serializeGraph,
-		toast,
-		state,
-		previewBase
-	} = deps;
-
-	function formatBytes(bytes){
-		if(bytes < 1024) return `${bytes} B`;
-		const kb = bytes / 1024;
-		if(kb < 1024) return `${kb.toFixed(1)} KB`;
-		const mb = kb / 1024;
-		if(mb < 1024) return `${mb.toFixed(1)} MB`;
-		const gb = mb / 1024;
-		return `${gb.toFixed(2)} GB`;
-	}
-
-	function buildAnimationPayload(name){
-		const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
-		if(!outNode){
-			toast("No Output node found.");
-			return null;
-		}
-
-		const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
-		const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
-		const ratio = outNode.params?.ratio || "16:9";
-		const totalFrames = Math.round(duration * fps);
-
-		const payload = serializeGraph();
-		payload.name = name;
-
-		return {
-			version: "2.0",
-			type: "oniwire-animation-data",
-			name,
-			metadata: {
-				duration,
-				fps,
-				totalFrames,
-				width: Math.max(1, Math.round(previewBase.w)),
-				height: Math.max(1, Math.round(previewBase.h)),
-				ratio,
-				rendererVersion: "oniwire-embed-player-1"
-			},
-			project: payload
-		};
-	}
-
-	function persistExportBackup(name){
-		try{
-			const safeBase = String(name || "animation").trim() || "animation";
-			const backupName = `${safeBase}__export_backup`;
-			const indexKey = "visual-node-app:saves:index";
-			const saveKey = `visual-node-app:save:${backupName}`;
-			const payload = serializeGraph();
-			payload.name = backupName;
-			payload.savedAt = new Date().toISOString();
-
-			localStorage.setItem(saveKey, JSON.stringify(payload));
-			let index = [];
-			try{ index = JSON.parse(localStorage.getItem(indexKey) || "[]"); }
-			catch{ index = []; }
-			if(!index.includes(backupName)){
-				index.unshift(backupName);
-				localStorage.setItem(indexKey, JSON.stringify(index));
-			}
-		}catch(err){
-			console.warn("Could not create export backup", err);
-		}
-	}
-
-	function buildEmbedScript(animData){
-		const runtime = `(function(){
-	var payload = __ONIWIRE_PAYLOAD__;
+(function(){
+	var payload = {"version":"2.0","type":"oniwire-animation-data","name":"animation","metadata":{"duration":5,"fps":30,"totalFrames":150,"width":1280,"height":720,"ratio":"16:9","rendererVersion":"oniwire-embed-player-1"},"project":{"version":"0.1","nextId":9,"panX":717.9067012902349,"panY":106.50964941194678,"zoom":0.6187833918061408,"nodes":[{"id":"1","type":"Gradient","pos":{"x":-157.56293712235532,"y":291.32148804385787},"params":{"a":"#0ea5e9","b":"#22c55e","angle":45,"type":"linear","cx":50,"cy":50}},{"id":"2","type":"Text","pos":{"x":-519.5636032135635,"y":-14.339422500873091},"params":{"text":"Hello 👋","size":85.04747810466482,"color":"#ffffff","x":454.6582464161619,"y":268.7334175136841,"weight":"800","font":"Roboto","wrapMode":"manual","boxWidth":560}},{"id":"3","type":"Composite","pos":{"x":570.0983064679797,"y":43.94619662895431},"params":{"blend":"normal","opacity":100}},{"id":"4","type":"Output","pos":{"x":1286.241782124101,"y":41.72301505307613},"params":{"ratio":"16:9","duration":5}},{"id":"5","type":"Motion","pos":{"x":-159.8405881604874,"y":-18.524696305258892},"params":{"mode":"breath","amount":0.04,"speed":0.2}},{"id":"6","type":"Transform","pos":{"x":192.46363151756327,"y":-8.828249892101539},"params":{"x":5.229826353421844,"y":-4.358188627851547,"scale":1,"rot":0,"originX":0,"originY":0}},{"id":"7","type":"Shape","pos":{"x":190.84755711537045,"y":178.63638076227411},"params":{"shape":"circle","size":493.365236176022,"color":"#144da9","x":613.278955954323,"y":324.3393148450245}},{"id":"8","type":"Motion","pos":{"x":898.6881452758579,"y":133.3862975008731},"params":{"mode":"breath","amount":0.02,"speed":0.7}}],"wires":[{"from":{"nodeId":"2","port":"layer"},"to":{"nodeId":"5","port":"in"}},{"from":{"nodeId":"5","port":"layer"},"to":{"nodeId":"6","port":"in"}},{"from":{"nodeId":"7","port":"layer"},"to":{"nodeId":"3","port":"b"}},{"from":{"nodeId":"6","port":"layer"},"to":{"nodeId":"3","port":"a"}},{"from":{"nodeId":"3","port":"layer"},"to":{"nodeId":"8","port":"in"}},{"from":{"nodeId":"8","port":"layer"},"to":{"nodeId":"4","port":"in"}}],"name":"animation"}};
 	function toNumber(v, fallback){ var n = Number(v); return Number.isFinite(n) ? n : (fallback || 0); }
 	function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
 	function hexToRgba(hex, alpha){
@@ -245,7 +171,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			cText.ctx.fillStyle = params.color || '#ffffff';
 			cText.ctx.font = weight + ' ' + textSize + 'px ' + font;
 			cText.ctx.textBaseline = 'top';
-			text.split('\\n').forEach(function(line, i){ cText.ctx.fillText(line, tx, ty + i * textSize * 1.1); });
+			text.split('\n').forEach(function(line, i){ cText.ctx.fillText(line, tx, ty + i * textSize * 1.1); });
 			result = { canvas: cText.canvas };
 		}
 		else if(node.type === 'Transform'){
@@ -356,7 +282,6 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		else if(node.type === 'Composite'){
 			var a = this.getInput(nodeId, ['a','fg','in'], timeSec, cache);
 			var b = this.getInput(nodeId, ['b','bg'], timeSec, cache);
-			var m = this.getInput(nodeId, ['mask','m'], timeSec, cache);
 			if(a || b){
 				var c8 = this.createLayer();
 				if(b && b.canvas) c8.ctx.drawImage(b.canvas, 0, 0);
@@ -376,11 +301,6 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					c8.ctx.drawImage(a.canvas, 0, 0);
 					c8.ctx.globalAlpha = prevA;
 					c8.ctx.globalCompositeOperation = prevC;
-				}
-				if(m && m.canvas){
-					c8.ctx.globalCompositeOperation = 'destination-in';
-					c8.ctx.drawImage(m.canvas, 0, 0);
-					c8.ctx.globalCompositeOperation = 'source-over';
 				}
 				result = { canvas: c8.canvas };
 			}
@@ -441,48 +361,4 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	var player = new CompactGraphPlayer(canvas, payload);
 	player.renderAtTime(0);
 	player.play();
-})();`;
-
-		return runtime.replace("__ONIWIRE_PAYLOAD__", JSON.stringify(animData));
-	}
-
-	async function exportAnimationJSON(name = "animation"){
-		persistExportBackup(name);
-		const animData = buildAnimationPayload(name);
-		if(!animData) return;
-
-		const blob = new Blob([JSON.stringify(animData, null, 2)], { type: "application/json" });
-		const link = document.createElement("a");
-		link.href = URL.createObjectURL(blob);
-		link.download = `${name.replace(/[^\w\-]+/g, "_")}_animation.json`;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(link.href);
-
-		toast(`Animation data exported ✅ (${formatBytes(blob.size)})`);
-	}
-
-	async function exportEmbedJS(name = "animation"){
-		persistExportBackup(name);
-		const animData = buildAnimationPayload(name);
-		if(!animData) return;
-
-		const scriptText = buildEmbedScript(animData);
-		const blob = new Blob([scriptText], { type: "text/javascript" });
-		const link = document.createElement("a");
-		link.href = URL.createObjectURL(blob);
-		link.download = `${name.replace(/[^\w\-]+/g, "_")}_embed.js`;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(link.href);
-
-		toast(`Embed JS exported ✅ (${formatBytes(blob.size)})`);
-	}
-
-	return {
-		exportAnimationJSON,
-		exportEmbedJS
-	};
-};
+})();

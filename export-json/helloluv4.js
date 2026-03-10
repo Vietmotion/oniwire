@@ -1,79 +1,5 @@
-window.createOniwireExportApi = function createOniwireExportApi(deps){
-	const {
-		serializeGraph,
-		toast,
-		state,
-		previewBase
-	} = deps;
-
-	function formatBytes(bytes){
-		if(bytes < 1024) return `${bytes} B`;
-		const kb = bytes / 1024;
-		if(kb < 1024) return `${kb.toFixed(1)} KB`;
-		const mb = kb / 1024;
-		if(mb < 1024) return `${mb.toFixed(1)} MB`;
-		const gb = mb / 1024;
-		return `${gb.toFixed(2)} GB`;
-	}
-
-	function buildAnimationPayload(name){
-		const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
-		if(!outNode){
-			toast("No Output node found.");
-			return null;
-		}
-
-		const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
-		const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
-		const ratio = outNode.params?.ratio || "16:9";
-		const totalFrames = Math.round(duration * fps);
-
-		const payload = serializeGraph();
-		payload.name = name;
-
-		return {
-			version: "2.0",
-			type: "oniwire-animation-data",
-			name,
-			metadata: {
-				duration,
-				fps,
-				totalFrames,
-				width: Math.max(1, Math.round(previewBase.w)),
-				height: Math.max(1, Math.round(previewBase.h)),
-				ratio,
-				rendererVersion: "oniwire-embed-player-1"
-			},
-			project: payload
-		};
-	}
-
-	function persistExportBackup(name){
-		try{
-			const safeBase = String(name || "animation").trim() || "animation";
-			const backupName = `${safeBase}__export_backup`;
-			const indexKey = "visual-node-app:saves:index";
-			const saveKey = `visual-node-app:save:${backupName}`;
-			const payload = serializeGraph();
-			payload.name = backupName;
-			payload.savedAt = new Date().toISOString();
-
-			localStorage.setItem(saveKey, JSON.stringify(payload));
-			let index = [];
-			try{ index = JSON.parse(localStorage.getItem(indexKey) || "[]"); }
-			catch{ index = []; }
-			if(!index.includes(backupName)){
-				index.unshift(backupName);
-				localStorage.setItem(indexKey, JSON.stringify(index));
-			}
-		}catch(err){
-			console.warn("Could not create export backup", err);
-		}
-	}
-
-	function buildEmbedScript(animData){
-		const runtime = `(function(){
-	var payload = __ONIWIRE_PAYLOAD__;
+(function(){
+	var payload = {"version":"2.0","type":"oniwire-animation-data","name":"Test 02","metadata":{"duration":5,"fps":30,"totalFrames":150,"width":1280,"height":720,"ratio":"16:9","rendererVersion":"oniwire-embed-player-1"},"project":{"version":"0.1","nextId":10,"panX":781.7792044386556,"panY":11.509649411946796,"zoom":0.6187833918061408,"nodes":[{"id":"1","type":"Gradient","pos":{"x":-157.56293712235532,"y":291.32148804385787},"params":{"a":"#0ea5e9","b":"#22c55e","angle":45,"type":"linear","cx":50,"cy":50}},{"id":"2","type":"Text","pos":{"x":-805.6087724017057,"y":32.52673516272082},"params":{"text":"Hello luv","size":85.04747810466482,"color":"#ffffff","x":467.50041687168687,"y":307.02011506159425,"weight":"800","font":"Roboto","wrapMode":"manual","boxWidth":560}},{"id":"3","type":"Composite","pos":{"x":487.6785119561422,"y":258.8840921206091},"params":{"blend":"normal","opacity":100}},{"id":"4","type":"Output","pos":{"x":1163.4201275574412,"y":255.04483614253803},"params":{"ratio":"16:9","duration":5}},{"id":"5","type":"Motion","pos":{"x":-484.671543001259,"y":33.1896845649137},"params":{"mode":"breath","amount":0.04,"speed":0.5}},{"id":"6","type":"Transform","pos":{"x":-151.76021614952296,"y":33.18968456491369},"params":{"x":5.229826353421844,"y":-4.358188627851547,"scale":1,"rot":0,"originX":0,"originY":0}},{"id":"7","type":"Shape","pos":{"x":-179.02743658860464,"y":479.2262195701522},"params":{"shape":"diamond","size":407.907906079077,"color":"#3b82f6","x":642.3091976516633,"y":355.4990215264188}},{"id":"8","type":"Ramp","pos":{"x":-531.3316562666554,"y":291.76158891577666},"params":{"stops":[{"pos":37,"color":"#0ea5e9"},{"pos":66,"color":"#d08ac7"}]}},{"id":"9","type":"Shape","pos":{"x":772.8403863030096,"y":28.341461358334996},"params":{"shape":"circle","size":120,"color":"#3b82f6","x":100,"y":100}}],"wires":[{"from":{"nodeId":"1","port":"layer"},"to":{"nodeId":"3","port":"b"}},{"from":{"nodeId":"2","port":"layer"},"to":{"nodeId":"5","port":"in"}},{"from":{"nodeId":"5","port":"layer"},"to":{"nodeId":"6","port":"in"}},{"from":{"nodeId":"6","port":"layer"},"to":{"nodeId":"3","port":"a"}},{"from":{"nodeId":"7","port":"layer"},"to":{"nodeId":"3","port":"mask"}},{"from":{"nodeId":"8","port":"ramp"},"to":{"nodeId":"1","port":"ramp"}},{"from":{"nodeId":"3","port":"layer"},"to":{"nodeId":"4","port":"in"}}],"name":"Test 02"}};
 	function toNumber(v, fallback){ var n = Number(v); return Number.isFinite(n) ? n : (fallback || 0); }
 	function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
 	function hexToRgba(hex, alpha){
@@ -245,7 +171,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			cText.ctx.fillStyle = params.color || '#ffffff';
 			cText.ctx.font = weight + ' ' + textSize + 'px ' + font;
 			cText.ctx.textBaseline = 'top';
-			text.split('\\n').forEach(function(line, i){ cText.ctx.fillText(line, tx, ty + i * textSize * 1.1); });
+			text.split('\n').forEach(function(line, i){ cText.ctx.fillText(line, tx, ty + i * textSize * 1.1); });
 			result = { canvas: cText.canvas };
 		}
 		else if(node.type === 'Transform'){
@@ -441,48 +367,4 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	var player = new CompactGraphPlayer(canvas, payload);
 	player.renderAtTime(0);
 	player.play();
-})();`;
-
-		return runtime.replace("__ONIWIRE_PAYLOAD__", JSON.stringify(animData));
-	}
-
-	async function exportAnimationJSON(name = "animation"){
-		persistExportBackup(name);
-		const animData = buildAnimationPayload(name);
-		if(!animData) return;
-
-		const blob = new Blob([JSON.stringify(animData, null, 2)], { type: "application/json" });
-		const link = document.createElement("a");
-		link.href = URL.createObjectURL(blob);
-		link.download = `${name.replace(/[^\w\-]+/g, "_")}_animation.json`;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(link.href);
-
-		toast(`Animation data exported ✅ (${formatBytes(blob.size)})`);
-	}
-
-	async function exportEmbedJS(name = "animation"){
-		persistExportBackup(name);
-		const animData = buildAnimationPayload(name);
-		if(!animData) return;
-
-		const scriptText = buildEmbedScript(animData);
-		const blob = new Blob([scriptText], { type: "text/javascript" });
-		const link = document.createElement("a");
-		link.href = URL.createObjectURL(blob);
-		link.download = `${name.replace(/[^\w\-]+/g, "_")}_embed.js`;
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(link.href);
-
-		toast(`Embed JS exported ✅ (${formatBytes(blob.size)})`);
-	}
-
-	return {
-		exportAnimationJSON,
-		exportEmbedJS
-	};
-};
+})();

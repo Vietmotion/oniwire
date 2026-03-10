@@ -106,7 +106,7 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		return `visual-node-app:save:${name}`;
 	}
 
-	function refreshProjectList(){
+	function refreshProjectList(selectedName = ""){
 		const sel = document.getElementById("projectList");
 		if(!sel) return;
 
@@ -116,6 +116,7 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 			const opt = document.createElement("option");
 			opt.value = name;
 			opt.textContent = name;
+			if(selectedName && name === selectedName) opt.selected = true;
 			sel.appendChild(opt);
 		}
 	}
@@ -128,14 +129,21 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		payload.name = name;
 		payload.savedAt = new Date().toISOString();
 
-		localStorage.setItem(keyFor(name), JSON.stringify(payload));
-
-		const list = getSaveIndex();
-		if(!list.includes(name)){
-			list.unshift(name);
-			setSaveIndex(list);
+		try{
+			localStorage.setItem(keyFor(name), JSON.stringify(payload));
+		}catch(e){
+			console.error(e);
+			toast("Save failed (storage error).");
+			return;
 		}
-		refreshProjectList();
+
+		// Keep newest save at top and avoid duplicate entries.
+		const list = getSaveIndex().filter(n => n !== name);
+		list.unshift(name);
+		setSaveIndex(list);
+		refreshProjectList(name);
+		const nameInput = document.getElementById("projectName");
+		if(nameInput) nameInput.value = name;
 		toast(`Saved: ${name} ✅`);
 	}
 
@@ -148,6 +156,9 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 
 		try{
 			loadGraph(JSON.parse(raw));
+			refreshProjectList(name);
+			const nameInput = document.getElementById("projectName");
+			if(nameInput) nameInput.value = name;
 			toast(`Loaded: ${name} ✅`);
 		}catch(e){
 			console.error(e);
@@ -190,19 +201,24 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 	}
 
 	function bindProjectButtons(){
-		document.getElementById("btnSaveNamed")?.addEventListener("click", () => {
+		document.getElementById("btnSaveNamed")?.addEventListener("click", (ev) => {
+			ev.preventDefault();
 			const name = document.getElementById("projectName")?.value;
 			saveNamed(name);
 		});
 
-		document.getElementById("btnLoadNamed")?.addEventListener("click", () => {
+		document.getElementById("btnLoadNamed")?.addEventListener("click", (ev) => {
+			ev.preventDefault();
 			const sel = document.getElementById("projectList");
-			loadNamed(sel?.value);
+			const pick = sel?.value;
+			loadNamed(pick);
 		});
 
-		document.getElementById("btnDeleteProject")?.addEventListener("click", () => {
+		document.getElementById("btnDeleteProject")?.addEventListener("click", (ev) => {
+			ev.preventDefault();
 			const sel = document.getElementById("projectList");
-			deleteNamed(sel?.value);
+			const pick = sel?.value;
+			deleteNamed(pick);
 		});
 	}
 

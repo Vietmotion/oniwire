@@ -7,7 +7,9 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
 
   const NODE_GROUPS = {
     generator: ["Color", "Gradient", "Ramp", "Shape", "Text"],
-    operation: ["Transform", "Motion", "Glow", "Composite", "Mask", "Freeze"],
+    operation: ["Transform", "Clone", "Composite", "Mask", "Freeze"],
+    motion: ["Motion"],
+    effect: ["Glow"],
     output: ["Output"]
   };
 
