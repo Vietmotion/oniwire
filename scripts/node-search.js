@@ -8,6 +8,8 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
     clamp,
     editorToWorld,
     addNode,
+    canAddNodeType,
+    onBlockedNodeType,
     toast,
     isTypingTarget,
     editorEl,
@@ -144,10 +146,22 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
   }
 
   function addNodeFromSearch(type){
+    const gate = typeof canAddNodeType === "function" ? canAddNodeType(type) : { ok: true };
+    if(gate && gate.ok === false){
+      if(typeof onBlockedNodeType === "function") onBlockedNodeType(type, gate.reason || "Node blocked by export mode");
+      else toast(gate.reason || "Node blocked by export mode");
+      close();
+      return;
+    }
+
     const world = editorToWorld(nodeSpawnEditorPos.x, nodeSpawnEditorPos.y);
-    addNode(type, { x: world.x, y: world.y });
+    const created = addNode(type, { x: world.x, y: world.y });
     close();
-    toast(`Added: ${type}`);
+    if(created){
+      toast(`Added: ${type}`);
+    }else{
+      toast(`Cannot add ${type} in current export mode.`);
+    }
   }
 
   function bind(){

@@ -1,10 +1,10 @@
 window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
   return {
-    inputs: [],
+    inputs: ["fill"],
     outputs: ["layer"],
     defaults: { shape: "circle", size: 120, color: "#3b82f6", x: 100, y: 100 },
     icon: "🔷",
-    run: (node) => {
+    run: (node, inputs) => {
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
@@ -16,20 +16,51 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       const size = Number(node.params.size) || 100;
       const x = Number(node.params.x) || 0;
       const y = Number(node.params.y) || 0;
-      const color = node.params.color || "#3b82f6";
+      const fallbackColor = String(node.params.color || "#3b82f6");
       const shapeType = node.params.shape || "circle";
+
+      let fillValue = fallbackColor;
+      const fillLayer = inputs?.fill?.el || null;
+      if(fillLayer){
+        const cs = window.getComputedStyle(fillLayer);
+        const inlineBg = String(fillLayer.style.background || "");
+        const inlineBgImg = String(fillLayer.style.backgroundImage || "");
+        const computedBgImg = String(cs.backgroundImage || "");
+        const computedBgColor = String(cs.backgroundColor || "");
+
+        const inlineHasGradient = inlineBg.includes("gradient(") || inlineBgImg.includes("gradient(");
+        const gradientValue = inlineHasGradient
+          ? (inlineBg.includes("gradient(") ? inlineBg : inlineBgImg)
+          : (computedBgImg !== "none" ? computedBgImg : "");
+
+        if(gradientValue){
+          fillValue = gradientValue;
+        }else{
+          fillValue = inlineBg && !inlineBg.includes("gradient(")
+            ? inlineBg
+            : ((computedBgColor && computedBgColor !== "rgba(0, 0, 0, 0)" && computedBgColor !== "transparent")
+                ? computedBgColor
+                : fallbackColor);
+        }
+      }
 
       wrap.dataset.maskShape = shapeType;
       wrap.dataset.maskSize = String(size);
       wrap.dataset.maskX = String(x);
       wrap.dataset.maskY = String(y);
-      wrap.dataset.maskColor = color;
+      wrap.dataset.maskColor = fallbackColor;
 
       shape.style.left = (x - size / 2) + "px";
       shape.style.top = (y - size / 2) + "px";
       shape.style.width = size + "px";
       shape.style.height = size + "px";
-      shape.style.backgroundColor = color;
+      shape.style.background = fillValue;
+      shape.style.backgroundColor = fallbackColor;
+      shape.style.borderLeft = "none";
+      shape.style.borderRight = "none";
+      shape.style.borderBottom = "none";
+      shape.style.clipPath = "none";
+      shape.style.webkitClipPath = "none";
 
       switch(shapeType){
         case "circle":
@@ -39,12 +70,9 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
           shape.style.borderRadius = "0";
           break;
         case "triangle":
-          shape.style.width = "0";
-          shape.style.height = "0";
-          shape.style.backgroundColor = "transparent";
-          shape.style.borderLeft = (size / 2) + "px solid transparent";
-          shape.style.borderRight = (size / 2) + "px solid transparent";
-          shape.style.borderBottom = size + "px solid " + color;
+          shape.style.borderRadius = "0";
+          shape.style.clipPath = "polygon(50% 0%, 100% 100%, 0% 100%)";
+          shape.style.webkitClipPath = "polygon(50% 0%, 100% 100%, 0% 100%)";
           break;
         case "diamond":
           shape.style.transform = "rotate(45deg)";
@@ -63,7 +91,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
     },
     inspector: () => ([
       { k: "shape", type: "select", label: "Shape", options: ["circle", "square", "triangle", "diamond", "hexagon", "star"] },
-      { k: "size", type: "range", label: "Size", min: 10, max: 400, step: 1 },
+      { k: "size", type: "range", label: "Size", min: 10, max: 1500, step: 1 },
       { k: "color", type: "color", label: "Color" },
       { k: "x", type: "range", label: "X", min: 0, max: 1200, step: 1 },
       { k: "y", type: "range", label: "Y", min: 0, max: 1200, step: 1 }

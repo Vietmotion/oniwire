@@ -2,7 +2,9 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
   const {
     nodeButtonsEl,
     nodeDropdown,
-    addNode
+    addNode,
+    canAddNodeType,
+    onBlockedNodeType
   } = deps;
 
   const NODE_GROUPS = {
@@ -36,11 +38,18 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
     nodeDropdown.innerHTML = "";
 
     for(const type of list){
+      const gate = typeof canAddNodeType === "function" ? canAddNodeType(type) : { ok: true };
       const item = document.createElement("button");
       item.type = "button";
       item.className = "nodeDropdownItem";
       item.textContent = type;
       item.dataset.node = type;
+      if(gate && gate.ok === false){
+        item.disabled = true;
+        item.title = gate.reason || "Blocked by current export mode";
+        item.style.opacity = "0.5";
+        item.style.cursor = "not-allowed";
+      }
       nodeDropdown.appendChild(item);
     }
 
@@ -78,7 +87,14 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
       const item = e.target.closest?.(".nodeDropdownItem");
       if(item){
         const t = item.getAttribute("data-node");
-        if(t) addNode(t);
+        if(t){
+          const gate = typeof canAddNodeType === "function" ? canAddNodeType(t) : { ok: true };
+          if(gate && gate.ok === false){
+            if(typeof onBlockedNodeType === "function") onBlockedNodeType(t, gate.reason || "Blocked by current export mode");
+            return;
+          }
+          addNode(t);
+        }
         closeNodeDropdown();
       }
     });

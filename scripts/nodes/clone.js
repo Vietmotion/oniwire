@@ -4,6 +4,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
     outputs: ["layer"],
     defaults: {
       mode: "x",
+      radialMode: "simple",
       countX: 5,
       countY: 5,
       stepX: 40,
@@ -32,6 +33,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       const stepY = Number(node.params.stepY) || 0;
       const radialCount = Math.max(1, Number(node.params.radialCount) || 1);
       const radius = Number(node.params.radius) || 0;
+      const radialMode = String(node.params.radialMode || "simple");
       const angleStart = Number(node.params.angleStart) || 0;
       const angleStep = Number(node.params.angleStep) || 0;
       const centerX = Number(node.params.centerX) || 0;
@@ -47,11 +49,21 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       };
 
       if(mode === "radial"){
-        for(let i = 0; i < radialCount; i++){
-          const ang = (angleStart + angleStep * i) * Math.PI / 180;
-          const dx = centerX + Math.cos(ang) * radius;
-          const dy = centerY + Math.sin(ang) * radius;
-          addClone(dx, dy);
+        if(radialMode === "advanced"){
+          for(let i = 0; i < radialCount; i++){
+            const ang = (angleStart - 90 + angleStep * i) * Math.PI / 180;
+            const dx = centerX + Math.cos(ang) * radius;
+            const dy = centerY + Math.sin(ang) * radius;
+            addClone(dx, dy);
+          }
+        }else{
+          const evenStep = 360 / radialCount;
+          for(let i = 0; i < radialCount; i++){
+            const ang = (-90 + evenStep * i) * Math.PI / 180;
+            const dx = Math.cos(ang) * radius;
+            const dy = Math.sin(ang) * radius;
+            addClone(dx, dy);
+          }
         }
       }else if(mode === "xy"){
         for(let y = 0; y < countY; y++){
@@ -81,12 +93,22 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       {k:"stepY", type:"range", label:"Step Y", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"y" }},
       {k:"stepX", type:"range", label:"Step X", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
       {k:"stepY", type:"range", label:"Step Y", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
+      {
+        k:"radialMode",
+        type:"options",
+        label:"Radial",
+        options:[
+          { label:"Simple", value:"simple" },
+          { label:"Advanced", value:"advanced" }
+        ],
+        showIf:{ k:"mode", equals:"radial" }
+      },
       {k:"radialCount", type:"range", label:"Count", min:1, max:60, step:1, showIf:{ k:"mode", equals:"radial" }},
       {k:"radius", type:"range", label:"Radius", min:0, max:800, step:1, showIf:{ k:"mode", equals:"radial" }},
-      {k:"angleStart", type:"range", label:"Angle Start", min:-180, max:180, step:1, showIf:{ k:"mode", equals:"radial" }},
-      {k:"angleStep", type:"range", label:"Angle Step", min:-180, max:180, step:1, showIf:{ k:"mode", equals:"radial" }},
-      {k:"centerX", type:"range", label:"Center X", min:-600, max:600, step:1, showIf:{ k:"mode", equals:"radial" }},
-      {k:"centerY", type:"range", label:"Center Y", min:-600, max:600, step:1, showIf:{ k:"mode", equals:"radial" }}
+      {k:"angleStart", type:"range", label:"Angle Start", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
+      {k:"angleStep", type:"range", label:"Angle Step", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
+      {k:"centerX", type:"range", label:"Center X", min:-600, max:600, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
+      {k:"centerY", type:"range", label:"Center Y", min:-600, max:600, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"}
     ])
   };
 };

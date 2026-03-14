@@ -3,7 +3,7 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
     inputs: ["in"],
     outputs: [],
     icon: "🎯",
-    defaults: { ratio: "16:9", duration: 5 },
+    defaults: { ratio: "16:9", duration: 5, exportEmbedMode: true, exportLottieMode: false },
     run: (_node, inputs) => inputs.in ?? null,
     inspector: () => ([
       { k: "ratio", type: "select", label: "Aspect Ratio", options: ["1:1", "4:3", "16:9", "21:9", "5:4", "3:2", "2:3", "9:16", "3:4", "4:5"] },
@@ -25,6 +25,13 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             hint: "Animation timeline payload",
             buttons: [
               { label: "Embed JS", id: "exportEmbedJS" }
+            ]
+          },
+          {
+            title: "Lottie (Beta)",
+            hint: "Exports supported nodes only",
+            buttons: [
+              { label: "Lottie JSON", id: "exportLottieJSON" }
             ]
           }
         ]

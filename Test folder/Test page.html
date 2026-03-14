@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HelloChain - Oniwire Alpha Test</title>
+  <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
+  <script type="module" src="https://unpkg.com/@dotlottie/player-component@latest/dist/dotlottie-player.mjs"></script>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap");
 
@@ -295,6 +297,117 @@
       line-height: 1.5;
     }
 
+    .lottie-gallery {
+      margin-top: 30px;
+      padding: clamp(18px, 2.6vw, 28px);
+      display: grid;
+      gap: 18px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.05;
+    }
+
+    .section-head p {
+      max-width: 58ch;
+      font-size: 14px;
+    }
+
+    .lottie-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .lottie-card {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid rgba(135, 179, 255, 0.22);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(14, 24, 46, 0.88), rgba(7, 13, 26, 0.92));
+    }
+
+    .lottie-stage {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(149, 194, 255, 0.18);
+      background:
+        radial-gradient(circle at 22% 18%, rgba(111, 172, 255, 0.22), transparent 32%),
+        radial-gradient(circle at 80% 78%, rgba(28, 231, 191, 0.16), transparent 30%),
+        linear-gradient(180deg, rgba(6, 10, 19, 0.92), rgba(13, 22, 39, 0.98));
+    }
+
+    .lottie-stage lottie-player,
+    .lottie-stage dotlottie-player {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .lottie-stage img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+    }
+
+    .breathing-preview {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
+
+    .breathing-preview img {
+      animation: pulse 2s ease-in-out infinite;
+      transform-origin: center;
+    }
+
+    .lottie-meta {
+      display: grid;
+      gap: 6px;
+    }
+
+    .lottie-meta h3 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .format-chip {
+      width: fit-content;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #d8ebff;
+      background: rgba(31, 53, 92, 0.86);
+      border: 1px solid rgba(138, 181, 255, 0.28);
+    }
+
+    .asset-path {
+      color: #89a5ce;
+      font-size: 12px;
+      line-height: 1.45;
+      word-break: break-all;
+    }
+
     @keyframes drift {
       0% { transform: translateY(0); }
       50% { transform: translateY(-14px); }
@@ -313,6 +426,7 @@
 
     @media (max-width: 980px) {
       .hero { grid-template-columns: 1fr; }
+      .lottie-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 620px) {
@@ -324,6 +438,7 @@
       .top-meta { display: none; }
       .stats { grid-template-columns: 1fr; }
       .copy { gap: 14px; }
+      .lottie-gallery { padding: 16px; }
     }
   </style>
 </head>
@@ -387,6 +502,69 @@
           Alpha test rule: background pattern must remain visible through transparent regions of the animation.
         </div>
       </aside>
+    </section>
+
+    <section class="panel lottie-gallery">
+      <div class="section-head">
+        <div>
+          <div class="badge">Lottie Asset Check</div>
+          <h2>Downloaded Lottie Files</h2>
+        </div>
+        <p>
+          This preview block loads the three new assets from <strong>example-lottie-json</strong> so they can be reviewed on the same test page.
+        </p>
+      </div>
+
+      <div class="lottie-grid">
+        <article class="lottie-card">
+          <div class="lottie-stage">
+            <lottie-player
+              src="../example-lottie-json/loading%20-%20chemistry.json"
+              background="transparent"
+              speed="1"
+              loop
+              autoplay>
+            </lottie-player>
+          </div>
+          <div class="lottie-meta">
+            <span class="format-chip">JSON</span>
+            <h3>Loading - Chemistry</h3>
+            <div class="asset-path">example-lottie-json/loading - chemistry.json</div>
+          </div>
+        </article>
+
+        <article class="lottie-card">
+          <div class="lottie-stage">
+            <div class="breathing-preview">
+              <img
+                src="../example-lottie-json/helloboize.png"
+                alt="helloboize preview" />
+            </div>
+          </div>
+          <div class="lottie-meta">
+            <span class="format-chip">PNG Fallback</span>
+            <h3>helloboize</h3>
+            <div class="asset-path">example-lottie-json/helloboize.png (from helloboize.json)</div>
+          </div>
+        </article>
+
+        <article class="lottie-card">
+          <div class="lottie-stage">
+            <lottie-player
+              src="../example-lottie-json/Smartphones%20Applications.json"
+              background="transparent"
+              speed="1"
+              loop
+              autoplay>
+            </lottie-player>
+          </div>
+          <div class="lottie-meta">
+            <span class="format-chip">JSON</span>
+            <h3>Smartphones Applications JSON</h3>
+            <div class="asset-path">example-lottie-json/Smartphones Applications.json</div>
+          </div>
+        </article>
+      </div>
     </section>
   </div>
 

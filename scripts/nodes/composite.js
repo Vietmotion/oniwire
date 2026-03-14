@@ -8,14 +8,24 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
   buildShapeMaskUrl,
   startLiveMaskUpdate
 }){
+  function getCompositeLayerPorts(node){
+    const fromParams = Array.isArray(node?.params?.inputPorts)
+      ? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
+      : [];
+    if(fromParams.length) return fromParams;
+    return ["a", "b"];
+  }
+
   return {
-    inputs: ["a", "b", "mask"],
+    inputs: (node) => [...getCompositeLayerPorts(node), "mask"],
     outputs: ["layer"],
-    defaults: { blend: "normal", opacity: 100 },
+    defaults: { blend: "normal", opacity: 100, inputPorts: ["a", "b"] },
     icon: "🧬",
     run: (node, inputs) => {
-      const A = inputs.a?.el ? inputs.a.el.cloneNode(true) : null;
-      const B = inputs.b?.el ? inputs.b.el.cloneNode(true) : null;
+      const layerPorts = getCompositeLayerPorts(node);
+      const layerClones = layerPorts
+        .map(port => inputs[port]?.el ? inputs[port].el.cloneNode(true) : null)
+        .filter(Boolean);
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
       const liveMaskEl = inputs.mask?.el || null;
       const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true";
@@ -27,23 +37,30 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       } : null;
 
       const M = inputs.mask?.el ? inputs.mask.el.cloneNode(true) : null;
-      if(!A && !B) return null;
+  if(!layerClones.length) return null;
 
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
-      if(hasMotionFlag(inputs.a?.el) || hasMotionFlag(inputs.b?.el) || hasMotionFlag(inputs.mask?.el)){
+      if(layerPorts.some(port => hasMotionFlag(inputs[port]?.el)) || hasMotionFlag(inputs.mask?.el)){
         wrap.dataset.hasMotion = "true";
       }
 
       const blendMode = node.params.blend || "normal";
       const opacity = Number(node.params.opacity ?? 100) / 100;
 
-      if(B) wrap.appendChild(B);
-      if(A) {
-        A.style.opacity = String(opacity);
-        A.style.mixBlendMode = blendMode;
-        wrap.appendChild(A);
+      for(let i = 0; i < layerClones.length; i++){
+        const layer = layerClones[i];
+        // Apply blend and opacity to all layers above the bottom-most layer.
+        if(i < layerClones.length - 1){
+          layer.style.opacity = String(opacity);
+          layer.style.mixBlendMode = blendMode;
+        }
+      }
+
+      // Append bottom -> top. Port order is top -> bottom (a over b over c...).
+      for(let i = layerClones.length - 1; i >= 0; i--){
+        wrap.appendChild(layerClones[i]);
       }
 
       const liveUrl = isLiveMask ? (liveMaskEl?.dataset?.frozenUrl || "") : "";
@@ -122,7 +139,8 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
         "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
       ]},
-      {k:"opacity", type:"range", label:"Opacity %", min:0, max:100, step:1}
+      {k:"opacity", type:"range", label:"Opacity %", min:0, max:100, step:1},
+      { type:"actionButtons", label:"Inputs", buttons:[{ label:"+ Input", id:"compositeAddInput" }, { label:"- Input", id:"compositeRemoveInput" }] }
     ])
   };
 };

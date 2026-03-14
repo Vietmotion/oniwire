@@ -29,7 +29,7 @@
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script src="scripts/export.js"></script>
+  <script src="scripts/export.js?v=20260314d"></script>
   <script src="scripts/node-menu.js"></script>
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
@@ -285,6 +285,7 @@
       nodes: Array.from(state.nodes.values()).map(n => ({
         id: String(n.id),
         type: n.type,
+        name: String(n.name || ""),
         pos: { x: n.pos.x, y: n.pos.y },
         params: JSON.parse(JSON.stringify(n.params || {}))
       })),
@@ -320,6 +321,7 @@
       state.nodes.set(String(n.id), {
         id: String(n.id),
         type: n.type,
+        name: String(n.name || ""),
         pos: { x: Number(n.pos?.x) || 0, y: Number(n.pos?.y) || 0 },
         params: { ...(n.params || {}) }
       });
@@ -508,7 +510,7 @@
   // -----------------------------
   // Toast
   // -----------------------------
-  const toast = window.createOniwireToast({ toastEl, state, durationMs: 1500 });
+  const toast = window.createOniwireToast({ toastEl, state, durationMs: 3200 });
   window.bindOniwireGlobalErrorHandlers({ toast });
 
 const utilsApi = window.createOniwireUtilsApi({
@@ -547,6 +549,31 @@ const exportApi = window.createOniwireExportApi({
 
 const exportAnimationJSON = exportApi.exportAnimationJSON;
 const exportEmbedJS = exportApi.exportEmbedJS;
+const exportLottieJSON = exportApi.exportLottieJSON;
+
+const LOTTIE_ALLOWED_NODE_TYPES = new Set(["Output", "Shape", "Text", "Transform", "Motion", "Color", "Composite"]);
+
+function isLottieRestrictionEnabled(){
+  const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+  return Boolean(outNode?.params?.exportLottieMode);
+}
+
+function getUnsupportedTypesInGraphForLottie(){
+  const blocked = [];
+  for(const node of state.nodes.values()){
+    if(!LOTTIE_ALLOWED_NODE_TYPES.has(node.type)) blocked.push(node.type);
+  }
+  return Array.from(new Set(blocked));
+}
+
+function canAddNodeType(type){
+  if(!isLottieRestrictionEnabled()) return { ok: true };
+  if(LOTTIE_ALLOWED_NODE_TYPES.has(type)) return { ok: true };
+  return {
+    ok: false,
+    reason: `Blocked in Lottie mode: ${type} is not supported. Allowed: ${Array.from(LOTTIE_ALLOWED_NODE_TYPES).join(", ")}.`
+  };
+}
 
 // Init list on startup
 utilsApi.initProjectUtils();
@@ -1029,6 +1056,8 @@ const nodeSearchApi = window.createOniwireNodeSearchApi({
   clamp,
   editorToWorld,
   addNode,
+  canAddNodeType,
+  onBlockedNodeType: (_type, reason) => toast(reason || "Node blocked by export mode"),
   toast,
   isTypingTarget,
   editorEl,
@@ -1045,6 +1074,15 @@ nodeSearchApi.bind();
   // -----------------------------
   function findWireToInput(nodeId, inPort){
     return state.wires.find(w => w.to.nodeId === nodeId && w.to.port === inPort);
+  }
+  function getNodeInputPorts(node, def){
+    const raw = (typeof def?.inputs === "function") ? def.inputs(node) : def?.inputs;
+    return Array.isArray(raw) ? raw : [];
+  }
+
+  function getNodeOutputPorts(node, def){
+    const raw = (typeof def?.outputs === "function") ? def.outputs(node) : def?.outputs;
+    return Array.isArray(raw) ? raw : [];
   }
 
   function topoSortNodeIds(){
@@ -1098,7 +1136,7 @@ async function evaluate(){
     const def = NODE_DEFS[node.type];
     const inputValues = {};
 
-    for(const p of def.inputs){
+    for(const p of getNodeInputPorts(node, def)){
       const w = findWireToInput(nodeId, p);
       if(w){
         const upstream = cache.get(String(w.from.nodeId));
@@ -1119,7 +1157,7 @@ async function evaluate(){
     catch(e){ console.error(e); outVal = null; }
 
     const outMap = {};
-    for(const op of def.outputs) outMap[op] = outVal;
+    for(const op of getNodeOutputPorts(node, def)) outMap[op] = outVal;
     cache.set(nodeId, outMap);
   }
 
@@ -1179,15 +1217,33 @@ async function evaluate(){
     renderRoot.querySelectorAll(".previewSelectionBox, .previewSelectionDot").forEach(el => el.remove());
     if(!state.selected) return;
 
-    const target = renderRoot.querySelector(`[data-bound-id="${state.selected}"]`);
-    if(!target || !previewInner) return;
+    const node = state.nodes.get(state.selected);
+    if(!node || !previewInner) return;
 
-    const tRect = target.getBoundingClientRect();
-    const pRect = previewInner.getBoundingClientRect();
-    const left = (tRect.left - pRect.left) / previewScale;
-    const top = (tRect.top - pRect.top) / previewScale;
-    const width = tRect.width / previewScale;
-    const height = tRect.height / previewScale;
+    const target = renderRoot.querySelector(`[data-bound-id="${state.selected}"]`);
+    let left = 0;
+    let top = 0;
+    let width = 0;
+    let height = 0;
+
+    if(target){
+      const tRect = target.getBoundingClientRect();
+      const pRect = previewInner.getBoundingClientRect();
+      left = (tRect.left - pRect.left) / previewScale;
+      top = (tRect.top - pRect.top) / previewScale;
+      width = tRect.width / previewScale;
+      height = tRect.height / previewScale;
+    }else if(node.type === "Shape"){
+      const size = Math.max(1, Number(node.params?.size) || 1);
+      const x = Number(node.params?.x) || 0;
+      const y = Number(node.params?.y) || 0;
+      left = x - (size / 2);
+      top = y - (size / 2);
+      width = size;
+      height = size;
+    }else{
+      return;
+    }
 
     if(width <= 0 || height <= 0) return;
 
@@ -1205,9 +1261,6 @@ async function evaluate(){
       { x: left, y: top + height },
       { x: left + width, y: top + height }
     ];
-
-    const node = state.nodes.get(state.selected);
-    if(!node) return;
 
     const hasSize = typeof node.params?.size !== "undefined";
     const hasScale = typeof node.params?.scale !== "undefined";
@@ -1446,6 +1499,7 @@ async function evaluate(){
     for(const node of state.nodes.values()){
       const def = NODE_DEFS[node.type];
       if(!def) continue;
+      const nodeName = String(node.name || "").trim() || node.type;
 
       const el = document.createElement("div");
       const isSelected = state.selected === node.id;
@@ -1457,13 +1511,13 @@ async function evaluate(){
 
       el.innerHTML = `
         <div class="nh" title="Drag node. Click body to select.">
-          <div class="nname">${def.icon} ${node.type}</div>
+          <div class="nname">${def.icon} ${escapeAttr(nodeName)}</div>
           <div class="ntype">${node.id}</div>
         </div>
         <div class="nbody">
           <div class="ports">
             <div class="portcol">
-              ${def.inputs.map(p => `
+              ${getNodeInputPorts(node, def).map(p => `
                 <div class="port">
                   <div class="dot in" data-io="in" data-port="${portKey(node.id,"in",p)}" data-node="${node.id}" data-name="${p}"></div>
                   <span>${p}</span>
@@ -1471,7 +1525,7 @@ async function evaluate(){
               `).join("")}
             </div>
             <div class="portcol" style="justify-self:end;">
-              ${def.outputs.map(p => `
+              ${getNodeOutputPorts(node, def).map(p => `
                 <div class="port" style="justify-content:flex-end;">
                   <span>${p}</span>
                   <div class="dot out" data-io="out" data-port="${portKey(node.id,"out",p)}" data-node="${node.id}" data-name="${p}"></div>
@@ -1678,22 +1732,54 @@ async function evaluate(){
       if(Array.isArray(f.sections) && f.sections.length){
         controlHtml = `
           <div class="exportGroups">
-            ${f.sections.map(section => `
+            ${f.sections.map(section => {
+              const firstBtnId = section?.buttons?.[0]?.id;
+              const isEmbedMode = node.type === "Output" && firstBtnId === "exportEmbedJS";
+              const isLottieMode = node.type === "Output" && firstBtnId === "exportLottieJSON";
+              const modeKey = isEmbedMode ? "embed" : (isLottieMode ? "lottie" : "");
+              const modeChecked = isEmbedMode
+                ? Boolean(node.params?.exportEmbedMode)
+                : (isLottieMode ? Boolean(node.params?.exportLottieMode) : false);
+              const modeCheckbox = modeKey
+                ? `<label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#9db4d7; cursor:pointer;"><input type="checkbox" data-export-mode="${modeKey}" ${modeChecked ? "checked" : ""} />Mode</label>`
+                : "";
+              return `
               <div class="exportGroup">
                 <div class="exportGroupHead">
-                  <div class="exportGroupTitle">${escapeAttr(section.title || "Export")}</div>
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <div class="exportGroupTitle">${escapeAttr(section.title || "Export")}</div>
+                    ${modeCheckbox}
+                  </div>
                   ${section.hint ? `<div class="exportGroupHint">${escapeAttr(section.hint)}</div>` : ""}
                 </div>
                 <div class="exportBtnRow">
                   ${(section.buttons || []).map(btn => `<button type="button" data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}
                 </div>
               </div>
-            `).join("")}
+            `;
+            }).join("")}
           </div>
         `;
       }else{
         controlHtml = `<div style="display:flex; gap:8px;">${(f.buttons || []).map(btn => `<button type="button" data-export-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`;
       }
+    } else if(f.type === "actionButtons"){
+      controlHtml = `<div style="display:flex; gap:8px;">${(f.buttons || []).map(btn => `<button type="button" data-action-btn="${btn.id}" style="flex:1;">${btn.label}</button>`).join("")}</div>`;
+    } else if(f.type === "options"){
+      const current = String(node.params[f.k] ?? "");
+      controlHtml = `
+        <div style="display:flex; gap:6px;">
+          ${(f.options || []).map(opt => {
+            const value = (typeof opt === "object" && opt !== null) ? opt.value : opt;
+            const label = (typeof opt === "object" && opt !== null) ? (opt.label ?? opt.value) : opt;
+            const active = String(value) === current;
+            const activeStyle = active
+              ? "border-color:#4f7ccf; background:#1f2f4d; color:#e8f2ff;"
+              : "";
+            return `<button type="button" data-option-k="${f.k}" data-option-v="${escapeAttr(value)}" style="flex:1; ${activeStyle}">${escapeAttr(label)}</button>`;
+          }).join("")}
+        </div>
+      `;
     } else if(f.type === "select"){
       controlHtml = `
         <select data-k="${f.k}">
@@ -1823,9 +1909,35 @@ async function evaluate(){
 
     inspectorBody.innerHTML = header + `
       <div class="kv">
+        <div class="row">
+          <label>Name</label>
+          <input data-node-name type="text" value="${escapeAttr(String(node.name || node.type))}" placeholder="${escapeAttr(node.type)}" />
+        </div>
         ${fields.map(f => renderInspectorField(node, f)).join("")}
       </div>
     `;
+
+    const nameInput = inspectorBody.querySelector('input[data-node-name]');
+    if(nameInput){
+      nameInput.addEventListener('focus', () => {
+        if(nameInput.dataset.historyPushed === "1") return;
+        pushHistory();
+        nameInput.dataset.historyPushed = "1";
+      });
+
+      nameInput.addEventListener('input', () => {
+        const next = String(nameInput.value || "").trim();
+        node.name = next || node.type;
+        render();
+      });
+
+      nameInput.addEventListener('blur', () => {
+        nameInput.dataset.historyPushed = "0";
+        const next = String(nameInput.value || "").trim();
+        node.name = next || node.type;
+        nameInput.value = node.name;
+      });
+    }
 
     // Handle export buttons
     inspectorBody.querySelectorAll('[data-export-btn]').forEach(btn => {
@@ -1838,9 +1950,108 @@ async function evaluate(){
           exportAnimationJSON(projectName);
         }else if(exportType === "exportEmbedJS"){
           exportEmbedJS(projectName);
+        }else if(exportType === "exportLottieJSON"){
+          exportLottieJSON(projectName);
         }else{
           exportCanvasAsImage(exportType);
         }
+      });
+    });
+
+    inspectorBody.querySelectorAll('input[data-export-mode]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        if(node.type !== "Output") return;
+        pushHistory();
+
+        const mode = inp.getAttribute("data-export-mode");
+        if(mode === "embed"){
+          node.params.exportEmbedMode = Boolean(inp.checked);
+          if(inp.checked) node.params.exportLottieMode = false;
+        }else if(mode === "lottie"){
+          node.params.exportLottieMode = Boolean(inp.checked);
+          if(inp.checked) node.params.exportEmbedMode = false;
+        }
+
+        if(!node.params.exportEmbedMode && !node.params.exportLottieMode){
+          node.params.exportEmbedMode = true;
+        }
+
+        if(node.params.exportLottieMode){
+          const blocked = getUnsupportedTypesInGraphForLottie();
+          if(blocked.length > 0){
+            toast(`Lottie mode enabled. Existing unsupported nodes: ${blocked.join(", ")}.`);
+          }
+        }
+
+        renderInspector();
+      });
+    });
+
+    inspectorBody.querySelectorAll('[data-action-btn]').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const actionType = btn.getAttribute('data-action-btn');
+        if(actionType === "compositeAddInput" && node.type === "Composite"){
+          pushHistory();
+          const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
+            ? [...node.params.inputPorts]
+            : ["a", "b"];
+
+          const preferred = "abcdefghijklmnopqrstuvwxyz";
+          let next = "";
+          for(let i = 0; i < preferred.length; i++){
+            const candidate = preferred[i];
+            if(candidate === "mask") continue;
+            if(!currentPorts.includes(candidate)){
+              next = candidate;
+              break;
+            }
+          }
+          if(!next){
+            let n = currentPorts.length + 1;
+            while(currentPorts.includes(`layer${n}`)) n += 1;
+            next = `layer${n}`;
+          }
+
+          currentPorts.push(next);
+          node.params.inputPorts = currentPorts;
+          render();
+          evaluateAndRender();
+          renderInspector();
+          toast(`Composite input added: ${next}`);
+        } else if(actionType === "compositeRemoveInput" && node.type === "Composite"){
+          pushHistory();
+          const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
+            ? [...node.params.inputPorts]
+            : ["a", "b"];
+
+          if(currentPorts.length <= 2){
+            toast("Composite keeps at least 2 layer inputs.");
+            return;
+          }
+
+          const removed = currentPorts.pop();
+          node.params.inputPorts = currentPorts;
+          state.wires = state.wires.filter(w => !(String(w.to.nodeId) === String(node.id) && w.to.port === removed));
+          render();
+          evaluateAndRender();
+          renderInspector();
+          toast(`Composite input removed: ${removed}`);
+        }
+      });
+    });
+
+    inspectorBody.querySelectorAll('[data-option-k]').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        pushHistory();
+        const k = btn.getAttribute("data-option-k");
+        const v = btn.getAttribute("data-option-v") || "";
+        node.params[k] = v;
+        evaluateAndRender();
+        renderInspector();
       });
     });
 
@@ -1856,6 +2067,25 @@ async function evaluate(){
         if(inp.type === 'number' || inp.type === 'range') v = Number(v);
 
         node.params[k] = v;
+
+        if(node.type === "Output" && (k === "exportEmbedMode" || k === "exportLottieMode")){
+          if(k === "exportEmbedMode" && v){
+            node.params.exportLottieMode = false;
+          }
+          if(k === "exportLottieMode" && v){
+            node.params.exportEmbedMode = false;
+          }
+          if(!node.params.exportEmbedMode && !node.params.exportLottieMode){
+            node.params.exportEmbedMode = true;
+          }
+
+          if(node.params.exportLottieMode){
+            const blocked = getUnsupportedTypesInGraphForLottie();
+            if(blocked.length > 0){
+              toast(`Lottie mode enabled. Existing unsupported nodes: ${blocked.join(", ")}.`);
+            }
+          }
+        }
 
         // Sync all inspector controls with the same data-k
         inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(el => {
@@ -1884,6 +2114,10 @@ async function evaluate(){
         }
 
         if(node.type === "Clone" && k === "mode"){
+          renderInspector();
+        }
+
+        if(node.type === "Output" && (k === "exportEmbedMode" || k === "exportLottieMode")){
           renderInspector();
         }
       };
@@ -2042,13 +2276,16 @@ async function evaluate(){
       const targetH = 720;
       const targetW = Math.max(1, Math.round((parsed.w / parsed.h) * targetH));
       screen.style.aspectRatio = `${parsed.w} / ${parsed.h}`;
-      previewBase = { w: targetW, h: targetH };
+      previewBase.w = targetW;
+      previewBase.h = targetH;
     } else if(ratio === "1:1"){
       screen.style.aspectRatio = "1 / 1";
-      previewBase = { w: 720, h: 720 };
+      previewBase.w = 720;
+      previewBase.h = 720;
     } else {
       screen.style.aspectRatio = "16 / 9";
-      previewBase = { w: 1280, h: 720 };
+      previewBase.w = 1280;
+      previewBase.h = 720;
     }
 
     if(previewInner){
@@ -3007,6 +3244,7 @@ function serializeGraph(){
     nodes: Array.from(state.nodes.values()).map(n => ({
       id: String(n.id),
       type: n.type,
+      name: String(n.name || ""),
       pos: { x: n.pos.x, y: n.pos.y },
       params: n.params
     })),
@@ -3042,6 +3280,7 @@ function copySelectedNodes(){
     nodes.push({
       id: String(node.id),
       type: node.type,
+      name: String(node.name || ""),
       pos: { x: node.pos.x - minX, y: node.pos.y - minY },
       params: JSON.parse(JSON.stringify(node.params || {}))
     });
@@ -3065,6 +3304,16 @@ function pasteCopiedNodes(){
     return;
   }
 
+  if(isLottieRestrictionEnabled()){
+    const blocked = Array.from(new Set(copyBuffer.nodes
+      .map(n => n.type)
+      .filter(type => !LOTTIE_ALLOWED_NODE_TYPES.has(type))));
+    if(blocked.length > 0){
+      toast(`Paste blocked in Lottie mode: ${blocked.join(", ")}.`);
+      return;
+    }
+  }
+
   pushHistory();
 
   const base = state.mouse
@@ -3083,6 +3332,7 @@ function pasteCopiedNodes(){
     state.nodes.set(id, {
       id,
       type: n.type,
+      name: String(n.name || n.type || ""),
       pos: { x: base.x + n.pos.x + offset, y: base.y + n.pos.y + offset },
       params: JSON.parse(JSON.stringify(n.params || {}))
     });
@@ -3258,6 +3508,7 @@ function loadGraph(data){
     state.nodes.set(String(n.id), {
       id: String(n.id),
       type: n.type,
+      name: String(n.name || n.type || ""),
       pos: { x: Number(n.pos?.x) || 0, y: Number(n.pos?.y) || 0 },
       params: { ...(n.params || {}) }
     });
@@ -3291,7 +3542,9 @@ function loadGraph(data){
   const nodeMenuApi = window.createOniwireNodeMenuApi({
     nodeButtonsEl,
     nodeDropdown,
-    addNode
+    addNode,
+    canAddNodeType,
+    onBlockedNodeType: (_type, reason) => toast(reason || "Node blocked by export mode")
   });
   nodeMenuApi.bind();
 
@@ -3353,6 +3606,12 @@ function loadGraph(data){
   // Node creation
   // -----------------------------
   function addNode(type, pos){
+    const gate = canAddNodeType(type);
+    if(!gate.ok){
+      toast(gate.reason || "Node blocked by export mode");
+      return null;
+    }
+
     const def = NODE_DEFS[type];
     if(!def) return null;
 
@@ -3360,6 +3619,7 @@ function loadGraph(data){
     const node = {
       id,
       type,
+      name: type,
       pos: pos || { x: 60 + Math.random()*420, y: 60 + Math.random()*220 },
       params: { ...(def.defaults || {}) }
     };
