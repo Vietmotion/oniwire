@@ -2520,47 +2520,63 @@ async function evaluate(){
         const color = node.params.color || "#000000";
         const shapeType = node.params.shape || "circle";
         const r = size / 2;
+        const fillInput = getInputCanvas("fill");
 
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        if(shapeType === "circle"){
-          ctx.arc(x, y, r, 0, Math.PI * 2);
-        }else if(shapeType === "square"){
-          ctx.rect(x - r, y - r, size, size);
-        }else if(shapeType === "triangle"){
-          ctx.moveTo(x, y - r);
-          ctx.lineTo(x + r, y + r);
-          ctx.lineTo(x - r, y + r);
-          ctx.closePath();
-        }else if(shapeType === "diamond"){
-          ctx.moveTo(x, y - r);
-          ctx.lineTo(x + r, y);
-          ctx.lineTo(x, y + r);
-          ctx.lineTo(x - r, y);
-          ctx.closePath();
-        }else if(shapeType === "hexagon"){
-          for(let i = 0; i < 6; i++){
-            const a = (Math.PI / 3) * i - Math.PI / 6;
-            const px = x + r * Math.cos(a);
-            const py = y + r * Math.sin(a);
-            if(i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
+        const drawShapePath = (tctx) => {
+          tctx.beginPath();
+          if(shapeType === "circle"){
+            tctx.arc(x, y, r, 0, Math.PI * 2);
+          }else if(shapeType === "square"){
+            tctx.rect(x - r, y - r, size, size);
+          }else if(shapeType === "triangle"){
+            tctx.moveTo(x, y - r);
+            tctx.lineTo(x + r, y + r);
+            tctx.lineTo(x - r, y + r);
+            tctx.closePath();
+          }else if(shapeType === "diamond"){
+            tctx.moveTo(x, y - r);
+            tctx.lineTo(x + r, y);
+            tctx.lineTo(x, y + r);
+            tctx.lineTo(x - r, y);
+            tctx.closePath();
+          }else if(shapeType === "hexagon"){
+            for(let i = 0; i < 6; i++){
+              const a = (Math.PI / 3) * i - Math.PI / 6;
+              const px = x + r * Math.cos(a);
+              const py = y + r * Math.sin(a);
+              if(i === 0) tctx.moveTo(px, py);
+              else tctx.lineTo(px, py);
+            }
+            tctx.closePath();
+          }else if(shapeType === "star"){
+            const r1 = r;
+            const r2 = r * 0.5;
+            for(let i = 0; i < 10; i++){
+              const a = (Math.PI / 5) * i - Math.PI / 2;
+              const rr = (i % 2 === 0) ? r1 : r2;
+              const px = x + rr * Math.cos(a);
+              const py = y + rr * Math.sin(a);
+              if(i === 0) tctx.moveTo(px, py);
+              else tctx.lineTo(px, py);
+            }
+            tctx.closePath();
           }
-          ctx.closePath();
-        }else if(shapeType === "star"){
-          const r1 = r;
-          const r2 = r * 0.5;
-          for(let i = 0; i < 10; i++){
-            const a = (Math.PI / 5) * i - Math.PI / 2;
-            const rr = (i % 2 === 0) ? r1 : r2;
-            const px = x + rr * Math.cos(a);
-            const py = y + rr * Math.sin(a);
-            if(i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
+        };
+
+        if(fillInput && !fillInput.stops){
+          const { c: mc, ctx: mctx } = createCanvas();
+          mctx.fillStyle = "#ffffff";
+          drawShapePath(mctx);
+          mctx.fill();
+          ctx.drawImage(fillInput, 0, 0);
+          ctx.globalCompositeOperation = "destination-in";
+          ctx.drawImage(mc, 0, 0);
+          ctx.globalCompositeOperation = "source-over";
+        }else{
+          ctx.fillStyle = color;
+          drawShapePath(ctx);
+          ctx.fill();
         }
-        ctx.fill();
         result = c;
       }
 
@@ -2575,45 +2591,64 @@ async function evaluate(){
         const wrapMode = String(node.params.wrapMode || "manual");
         const boxWidth = Math.max(80, Number(node.params.boxWidth) || 560);
         const color = node.params.color || "#ffffff";
-        ctx.fillStyle = color;
+        const align = String(node.params.align || "left");
+        const fillInput = getInputCanvas("fill");
         ctx.font = `${weight} ${size}px ${font}`;
         ctx.textBaseline = "top";
         const lineH = size * 1.1;
 
-        if(wrapMode === "box"){
-          const paragraphs = text.split("\n");
-          let cursorY = y;
-          for(const para of paragraphs){
-            if(para === ""){
-              cursorY += lineH;
-              continue;
-            }
-
-            const words = para.split(/\s+/).filter(Boolean);
-            let line = "";
-            for(const word of words){
-              const next = line ? `${line} ${word}` : word;
-              if(ctx.measureText(next).width <= boxWidth || !line){
-                line = next;
-              }else{
-                ctx.fillText(line, x, cursorY);
-                cursorY += lineH;
-                line = word;
+        const getLines = () => {
+          if(wrapMode === "box"){
+            const out = [];
+            for(const para of text.split("\n")){
+              if(para === ""){ out.push(""); continue; }
+              const words = para.split(/\s+/).filter(Boolean);
+              let line = "";
+              for(const word of words){
+                const next = line ? `${line} ${word}` : word;
+                if(ctx.measureText(next).width <= boxWidth || !line){ line = next; }
+                else{ out.push(line); line = word; }
               }
+              if(line) out.push(line);
             }
-
-            if(line){
-              ctx.fillText(line, x, cursorY);
-              cursorY += lineH;
-            }
+            return out;
           }
-        }else{
-          const lines = text.split("\n");
-          lines.forEach((line, i) => {
-            ctx.fillText(line, x, y + i * lineH);
-          });
-        }
+          return text.split("\n");
+        };
 
+        const lines = getLines();
+        const lineWidths = lines.map(l => ctx.measureText(l).width);
+        const maxLineWidth = Math.max(1, ...lineWidths);
+        const textBlockWidth = wrapMode === "box" ? boxWidth : maxLineWidth;
+        let baseX = x;
+        if(align === "center") baseX = x - textBlockWidth / 2;
+        if(align === "right") baseX = x - textBlockWidth;
+        const getLineX = (lw) => {
+          if(align === "center") return baseX + (textBlockWidth - lw) / 2;
+          if(align === "right") return baseX + (textBlockWidth - lw);
+          return baseX;
+        };
+
+        const drawTextLines = (tctx) => {
+          lines.forEach((line, i) => {
+            tctx.fillText(line, getLineX(lineWidths[i] || 0), y + i * lineH);
+          });
+        };
+
+        if(fillInput && !fillInput.stops){
+          const { c: mc, ctx: mctx } = createCanvas();
+          mctx.font = `${weight} ${size}px ${font}`;
+          mctx.textBaseline = "top";
+          mctx.fillStyle = "#ffffff";
+          drawTextLines(mctx);
+          ctx.drawImage(fillInput, 0, 0);
+          ctx.globalCompositeOperation = "destination-in";
+          ctx.drawImage(mc, 0, 0);
+          ctx.globalCompositeOperation = "source-over";
+        }else{
+          ctx.fillStyle = color;
+          drawTextLines(ctx);
+        }
         result = c;
       }
 
@@ -2702,11 +2737,18 @@ async function evaluate(){
           };
 
           if(mode === "radial"){
-            for(let i = 0; i < radialCount; i++){
-              const ang = (angleStart + angleStep * i) * Math.PI / 180;
-              const dx = centerX + Math.cos(ang) * radius;
-              const dy = centerY + Math.sin(ang) * radius;
-              drawClone(dx, dy);
+            const radialMode = String(node.params.radialMode || "simple");
+            if(radialMode === "advanced"){
+              for(let i = 0; i < radialCount; i++){
+                const ang = (angleStart - 90 + angleStep * i) * Math.PI / 180;
+                drawClone(centerX + Math.cos(ang) * radius, centerY + Math.sin(ang) * radius);
+              }
+            }else{
+              const evenStep = 360 / radialCount;
+              for(let i = 0; i < radialCount; i++){
+                const ang = (-90 + evenStep * i) * Math.PI / 180;
+                drawClone(Math.cos(ang) * radius, Math.sin(ang) * radius);
+              }
             }
           }else if(mode === "xy"){
             for(let y = 0; y < countY; y++){
@@ -2758,20 +2800,31 @@ async function evaluate(){
       }
 
       if(node.type === "Composite"){
-        const A = getInputCanvas("a");
-        const B = getInputCanvas("b");
+        const layerPorts = Array.isArray(node.params?.inputPorts) && node.params.inputPorts.length
+          ? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
+          : ["a", "b"];
+        const layers = layerPorts.map(port => getInputCanvas(port));
+        const hasLayer = layers.some(l => l && !l.stops);
         const M = getInputCanvas("mask");
         const maskWire = findWireToInput(nodeId, "mask");
-        if(A || B){
+        if(hasLayer){
           const { c, ctx } = createCanvas();
-          if(B) ctx.drawImage(B, 0, 0);
-          if(A){
-            const blend = String(node.params.blend || "normal").toLowerCase();
-            ctx.globalCompositeOperation = blendMap[blend] || "source-over";
-            ctx.globalAlpha = Number(node.params.opacity ?? 100) / 100;
-            ctx.drawImage(A, 0, 0);
-            ctx.globalAlpha = 1;
-            ctx.globalCompositeOperation = "source-over";
+          const blend = String(node.params.blend || "normal").toLowerCase();
+          const opacity = Number(node.params.opacity ?? 100) / 100;
+          let foundBottom = false;
+          for(let li = layers.length - 1; li >= 0; li--){
+            const layer = layers[li];
+            if(!layer || layer.stops) continue;
+            if(!foundBottom){
+              ctx.drawImage(layer, 0, 0);
+              foundBottom = true;
+            }else{
+              ctx.globalCompositeOperation = blendMap[blend] || "source-over";
+              ctx.globalAlpha = opacity;
+              ctx.drawImage(layer, 0, 0);
+              ctx.globalAlpha = 1;
+              ctx.globalCompositeOperation = "source-over";
+            }
           }
           if(M){
             if(M?.stops){
@@ -2849,71 +2902,7 @@ async function evaluate(){
   }
 
   function exportCanvasAsImage(format){
-    if(graphUsesBlendModes()){
-      exportCanvasWithBlend(format);
-      return;
-    }
-    // Use html2canvas to capture the preview element
-    const previewInner = document.getElementById("previewInner");
-    if(!previewInner) {
-      toast("No preview to export.");
-      return;
-    }
-
-    const exportHost = document.createElement("div");
-    exportHost.style.position = "fixed";
-    exportHost.style.left = "-100000px";
-    exportHost.style.top = "0";
-    exportHost.style.width = previewBase.w + "px";
-    exportHost.style.height = previewBase.h + "px";
-    exportHost.style.pointerEvents = "none";
-
-    const exportClone = previewInner.cloneNode(true);
-    exportClone.style.transform = "none";
-    exportClone.style.left = "0";
-    exportClone.style.top = "0";
-    exportClone.style.width = previewBase.w + "px";
-    exportClone.style.height = previewBase.h + "px";
-
-    exportHost.appendChild(exportClone);
-    document.body.appendChild(exportHost);
-
-    ensureHtml2CanvasLoaded()
-      .then((h2c) => h2c(exportClone, {
-        backgroundColor: null,
-        scale: 2,
-        logging: false,
-        useCORS: true,
-        allowTaint: true
-      }))
-      .then(canvas => {
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-        const mimeType = format === 'exportPNG' ? 'image/png' : 'image/jpeg';
-        const ext = format === 'exportPNG' ? 'png' : 'jpg';
-        const quality = format === 'exportPNG' ? undefined : 0.95;
-
-        canvas.toBlob(blob => {
-          if(!blob){
-            toast("Export failed.");
-            exportHost.remove();
-            return;
-          }
-          link.href = URL.createObjectURL(blob);
-          link.download = `export_${timestamp}.${ext}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(link.href);
-          toast(`Exported as ${ext.toUpperCase()} ✅`);
-          exportHost.remove();
-        }, mimeType, quality);
-      })
-      .catch(err => {
-        console.error(err);
-        toast(`Export failed: ${err.message}`);
-        exportHost.remove();
-      });
+    exportCanvasWithBlend(format);
   }
 
   const escapeAttr = window.oniwireEscapeAttr;

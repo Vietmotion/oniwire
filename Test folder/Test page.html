@@ -424,6 +424,60 @@
       to { transform: translateX(8%); }
     }
 
+    .embed-js-section {
+      margin-top: 30px;
+      padding: clamp(18px, 2.6vw, 28px);
+      display: grid;
+      gap: 20px;
+    }
+
+    .embed-js-player {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(135, 179, 255, 0.34);
+      background: rgba(5, 9, 18, 0.8);
+      isolation: isolate;
+    }
+
+    .embed-js-player .alpha-backdrop { z-index: 1; }
+    .embed-js-player .alpha-overlay  { z-index: 2; }
+
+    .embed-js-player .oniwire-embed-root {
+      position: absolute;
+      inset: 0;
+      width: 100% !important;
+      height: 100% !important;
+      z-index: 3;
+    }
+
+    .embed-js-player .oniwire-embed-root canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .embed-info {
+      display: grid;
+      gap: 6px;
+    }
+
+    .embed-info .file-label {
+      font-family: "Space Grotesk", monospace;
+      font-size: 12px;
+      color: #89a5ce;
+      word-break: break-all;
+    }
+
+    .embed-info .check-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
     @media (max-width: 980px) {
       .hero { grid-template-columns: 1fr; }
       .lottie-grid { grid-template-columns: 1fr; }
@@ -566,16 +620,134 @@
         </article>
       </div>
     </section>
+
+    <section class="panel embed-js-section">
+      <div class="section-head">
+        <div>
+          <div class="badge">Embed JS Check</div>
+          <h2>Exported Embed JS · 0315</h2>
+        </div>
+        <p>
+          Loads <strong>Test_03_embed.js</strong> from <code>example-embed-js/</code> directly.
+          The animation should render inside the frame and loop continuously.
+        </p>
+      </div>
+
+      <div class="embed-js-player">
+        <div class="alpha-backdrop"></div>
+        <div class="alpha-overlay"></div>
+        <div id="embedJsMount"></div>
+      </div>
+
+      <div class="embed-info">
+        <div id="embedJsStatus" class="status">Loading Test_03_embed.js...</div>
+        <div class="file-label">example-embed-js/Test_03_embed.js</div>
+        <ul class="check-list">
+          <li>Animation plays and loops (no freeze or blank canvas)</li>
+          <li>Text &ldquo;Hello 👋 / This is Oniwire&rdquo; visible with gradient fill</li>
+          <li>Radial Clone circles breathing via Motion node</li>
+          <li>Blend modes (overlay / hard-light) render correctly on canvas</li>
+          <li>Background pattern visible through transparent regions ✓</li>
+        </ul>
+      </div>
+    </section>
   </div>
 
   <script>
     const EMBED_CANDIDATES = ["../export-json/helloluv4.js", "../helloluv4.js", "../export-json/helloluv3.js", "../helloluv3.js", "../export-json/helloluv2.js", "../helloluv2.js", "../export-json/helloluv.js", "../helloluv.js", "../export-json/HelloIcon.js", "../HelloIcon.js", "../export-json/animation_embed.js", "../animation_embed.js"];
     const statusEl = document.getElementById("status");
     const mount = document.getElementById("embedMount");
+    const embedJsMount = document.getElementById("embedJsMount");
+    const embedJsStatus = document.getElementById("embedJsStatus");
 
     function setStatus(text){
       statusEl.textContent = text;
     }
+
+    function setEmbedJsStatus(text){
+      if(embedJsStatus) embedJsStatus.textContent = text;
+    }
+
+    function summarizeCanvasAlpha(canvas){
+      if(!canvas) return { hasPixels: false, alphaHitCount: 0 };
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if(!ctx) return { hasPixels: false, alphaHitCount: 0 };
+      const w = canvas.width || 0;
+      const h = canvas.height || 0;
+      if(!w || !h) return { hasPixels: false, alphaHitCount: 0 };
+
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let alphaHitCount = 0;
+      for(let i = 3; i < data.length; i += 16){
+        if(data[i] > 8) alphaHitCount++;
+      }
+      return { hasPixels: alphaHitCount > 0, alphaHitCount };
+    }
+
+    function loadTest03Embed(){
+      if(!embedJsMount){
+        setEmbedJsStatus("Embed JS mount not found.");
+        return;
+      }
+
+      const src = "../example-embed-js/Test_03_embed.js?v=20260315-13";
+      const script = document.createElement("script");
+      script.src = src;
+      script.async = true;
+
+      script.onload = () => {
+        let tries = 0;
+        const maxTries = 20;
+        const timer = setInterval(() => {
+          tries += 1;
+          const host = embedJsMount.querySelector(".oniwire-embed-root");
+          if(!host){
+            if(tries >= maxTries){
+              clearInterval(timer);
+              setEmbedJsStatus(`Loaded ${src}, but no .oniwire-embed-root was created.`);
+            }
+            return;
+          }
+
+          const canvas = host.querySelector("canvas");
+          const alpha = summarizeCanvasAlpha(canvas);
+          const dbg = window.__oniwireEmbedDebug;
+          const dbgStatus = window.__oniwireEmbedDebugStatus || "missing";
+          const dbgError = window.__oniwireEmbedDebugError || "";
+
+          if(alpha.hasPixels){
+            clearInterval(timer);
+            setEmbedJsStatus(`Playing via ${src} (alpha pixels detected: ${alpha.alphaHitCount})`);
+            return;
+          }
+
+          if(dbg && Array.isArray(dbg.nodes) && dbgStatus !== "init"){
+            clearInterval(timer);
+            const top3 = dbg.nodes.slice(0, 3).map(n => `${n.type}#${n.id}:${n.alpha}`).join(", ");
+            setEmbedJsStatus(`Playing via ${src}, but frame is fully transparent (alpha pixels: 0). dbg=${dbgStatus}; output=${dbg.outputAlpha}; top nodes: ${top3}`);
+            return;
+          }
+
+          if(tries >= maxTries){
+            clearInterval(timer);
+            setEmbedJsStatus(`Playing via ${src}, but frame is fully transparent (alpha pixels: 0). dbg=${dbgStatus}${dbgError ? `; err=${dbgError}` : ""}`);
+          }
+        }, 500);
+      };
+
+      script.onerror = () => {
+        setEmbedJsStatus(`Failed to load ${src}`);
+      };
+
+      embedJsMount.appendChild(script);
+    }
+
+    window.addEventListener("error", (ev) => {
+      const file = String(ev.filename || "");
+      if(file.includes("Test_03_embed.js")){
+        setEmbedJsStatus(`Runtime error in Test_03_embed.js: ${ev.message}`);
+      }
+    });
 
     function loadEmbedScript(index = 0){
       if(!mount){
@@ -610,6 +782,7 @@
     }
 
     loadEmbedScript();
+    loadTest03Embed();
   </script>
 </body>
 </html>

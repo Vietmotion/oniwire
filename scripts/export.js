@@ -1076,12 +1076,56 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + clamp(alpha == null ? 1 : alpha, 0, 1) + ')';
 	}
 
+	function splitLines(text){
+		var LF = String.fromCharCode(10);
+		var CR = String.fromCharCode(13);
+		return String(text == null ? '' : text).split(CR).join('').split(LF);
+	}
+
+	function wrapTextLines(ctx, text, maxWidth){
+		var width = Math.max(1, toNumber(maxWidth, 560));
+		var lines = [];
+		var paragraphs = splitLines(text);
+		for(var pi = 0; pi < paragraphs.length; pi++){
+			var para = paragraphs[pi];
+			if(para === ''){
+				lines.push('');
+				continue;
+			}
+			var words = para.split(/\s+/).filter(Boolean);
+			var line = '';
+			for(var wi = 0; wi < words.length; wi++){
+				var next = line ? (line + ' ' + words[wi]) : words[wi];
+				if(ctx.measureText(next).width <= width || !line){
+					line = next;
+				}else{
+					lines.push(line);
+					line = words[wi];
+				}
+			}
+			if(line) lines.push(line);
+		}
+		return lines;
+	}
+
+	function normalizeTextAlign(value){
+		var v = String(value || 'left').toLowerCase();
+		if(v === 'center' || v === 'right') return v;
+		return 'left';
+	}
+
+	function getAlignedLineOffset(align, blockWidth, lineWidth){
+		if(align === 'center') return (blockWidth - lineWidth) / 2;
+		if(align === 'right') return (blockWidth - lineWidth);
+		return 0;
+	}
+
 	function CompactGraphPlayer(canvas, data){
 		this.canvas = canvas;
 		this.data = data || {};
 		this.metadata = this.data.metadata || {};
 		this.project = this.data.project || { nodes: [], wires: [] };
-		this.nodes = new Map((this.project.nodes || []).map(function(n){ return [n.id, n]; }));
+		this.nodes = new Map((this.project.nodes || []).map(function(n){ return [String(n.id), n]; }));
 		this.wires = this.project.wires || [];
 		this.canvas.width = Math.max(1, Math.round(toNumber(this.metadata.width, 1280)));
 		this.canvas.height = Math.max(1, Math.round(toNumber(this.metadata.height, 720)));
@@ -1091,6 +1135,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		this.startTime = null;
 		this.rafId = null;
 		this.isPlaying = false;
+		this.motionBoundsCache = new Map();
+		this.motionSafeScaleCache = new Map();
 	}
 
 	CompactGraphPlayer.prototype.createLayer = function(){
@@ -1103,9 +1149,10 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	CompactGraphPlayer.prototype.getInput = function(nodeId, ports, timeSec, cache){
 		var list = Array.isArray(ports) ? ports : [ports];
 		for(var i=0;i<list.length;i++){
-			var port = list[i];
-			var wire = this.wires.find(function(w){ return w.to && w.to.nodeId === nodeId && w.to.port === port; });
-			if(wire && wire.from) return this.renderNode(wire.from.nodeId, timeSec, cache);
+			var port = String(list[i]);
+			var nId = String(nodeId);
+			var wire = this.wires.find(function(w){ return w.to && String(w.to.nodeId) === nId && String(w.to.port) === port; });
+			if(wire && wire.from) return this.renderNode(String(wire.from.nodeId), timeSec, cache);
 		}
 		return null;
 	};
@@ -1163,12 +1210,40 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			}
 		}
 		if(maxX < minX || maxY < minY) return null;
-		return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+		return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+	};
+
+	CompactGraphPlayer.prototype.getMotionBounds = function(nodeId, sourceCanvas){
+		var key = String(nodeId);
+		if(this.motionBoundsCache.has(key)) return this.motionBoundsCache.get(key);
+		var bounds = this.getOpaqueBounds(sourceCanvas);
+		this.motionBoundsCache.set(key, bounds);
+		return bounds;
+	};
+
+	CompactGraphPlayer.prototype.getMotionSafeScale = function(nodeId, bounds, canvasW, canvasH){
+		var key = String(nodeId);
+		if(this.motionSafeScaleCache.has(key)) return this.motionSafeScaleCache.get(key);
+		if(!bounds){
+			this.motionSafeScaleCache.set(key, Infinity);
+			return Infinity;
+		}
+		var cxm = bounds.cx;
+		var cym = bounds.cy;
+		var safeScaleXMin = (cxm - bounds.minX) > 0 ? (cxm / (cxm - bounds.minX)) : Infinity;
+		var safeScaleXMax = (bounds.maxX - cxm) > 0 ? ((canvasW - cxm) / (bounds.maxX - cxm)) : Infinity;
+		var safeScaleYMin = (cym - bounds.minY) > 0 ? (cym / (cym - bounds.minY)) : Infinity;
+		var safeScaleYMax = (bounds.maxY - cym) > 0 ? ((canvasH - cym) / (bounds.maxY - cym)) : Infinity;
+		var safeScale = Math.min(safeScaleXMin, safeScaleXMax, safeScaleYMin, safeScaleYMax);
+		if(!Number.isFinite(safeScale) || safeScale <= 0) safeScale = Infinity;
+		this.motionSafeScaleCache.set(key, safeScale);
+		return safeScale;
 	};
 
 	CompactGraphPlayer.prototype.renderNode = function(nodeId, timeSec, cache){
-		if(cache.has(nodeId)) return cache.get(nodeId);
-		var node = this.nodes.get(nodeId);
+		var key = String(nodeId);
+		if(cache.has(key)) return cache.get(key);
+		var node = this.nodes.get(key);
 		if(!node) return null;
 		var params = node.params || {};
 		var result = null;
@@ -1179,7 +1254,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					.map(function(s){ return { pos: clamp(toNumber(s.pos, 0), 0, 100), color: s.color || '#ffffff' }; })
 					.sort(function(a,b){ return a.pos - b.pos; })
 			};
-			cache.set(nodeId, result);
+			cache.set(key, result);
 			return result;
 		}
 
@@ -1256,7 +1331,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 
 			var lines = wrapMode === 'box'
 				? wrapTextLines(cText.ctx, text, boxWidth)
-				: String(text).replace(/\r\n/g, '\n').split('\n');
+				: String(text).replace(/\\r\\n/g, '\\n').split('\\n');
 			var lineWidths = lines.map(function(line){ return cText.ctx.measureText(line).width; });
 			var maxLineWidth = 1;
 			for(var lw = 0; lw < lineWidths.length; lw++) maxLineWidth = Math.max(maxLineWidth, lineWidths[lw]);
@@ -1353,9 +1428,14 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				var speed = Math.max(0.2, toNumber(params.speed, 2));
 				var minScale = Math.max(0.01, 1 - amount);
 				var maxScale = 1 + amount;
+				var bounds = this.getMotionBounds(nodeId, srcM.canvas);
+				var safeScale = this.getMotionSafeScale(nodeId, bounds, c5.canvas.width, c5.canvas.height);
+				if(Number.isFinite(safeScale) && safeScale > 0){
+					maxScale = Math.min(maxScale, Math.max(0.01, safeScale * 0.999));
+					minScale = Math.min(minScale, maxScale);
+				}
 				var wave = (1 - Math.cos((2 * Math.PI * timeSec) / speed)) / 2;
 				var scale = minScale + (maxScale - minScale) * wave;
-				var bounds = this.getOpaqueBounds(srcM.canvas);
 				var cxm = bounds ? bounds.cx : (c5.canvas.width / 2);
 				var cym = bounds ? bounds.cy : (c5.canvas.height / 2);
 				c5.ctx.save();
@@ -1414,12 +1494,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					'hard-light': 'hard-light', 'soft-light': 'soft-light', difference: 'difference', exclusion: 'exclusion',
 					hue: 'hue', saturation: 'saturation', color: 'color', luminosity: 'luminosity', add: 'lighter'
 				};
-
+				var foundBottom = false;
 				for(var li = layerInputs.length - 1; li >= 0; li--){
 					var layerInput = layerInputs[li];
 					if(!layerInput || !layerInput.canvas) continue;
-					if(li === layerInputs.length - 1){
+					if(!foundBottom){
 						c8.ctx.drawImage(layerInput.canvas, 0, 0);
+						foundBottom = true;
 					}else{
 						var prevA = c8.ctx.globalAlpha;
 						var prevC = c8.ctx.globalCompositeOperation;
@@ -1445,7 +1526,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			result = this.getInput(nodeId, ['in','layer','source','a'], timeSec, cache);
 		}
 
-		cache.set(nodeId, result);
+		cache.set(key, result);
 		return result;
 	};
 
