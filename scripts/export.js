@@ -530,7 +530,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			return ["a", "b"];
 		}
 
-		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Text", "Composite"]);
+		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite"]);
 		const usedNodeIds = new Set();
 		(function walk(nodeId){
 			const id = String(nodeId || "");
@@ -604,6 +604,22 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				};
 			}
 
+			if(node.type === "Gradient"){
+				return {
+					type: "gradient",
+					node,
+					fillSpec: {
+						type: "gradient",
+						gradientType: String(node.params?.type || "linear"),
+						angle: Number(node.params?.angle || 0),
+						cx: Number(node.params?.cx ?? 50),
+						cy: Number(node.params?.cy ?? 50),
+						stops: resolveGradientStops(node)
+					},
+					transform: accum
+				};
+			}
+
 			if(node.type === "Shape"){
 				return {
 					type: "shape",
@@ -666,6 +682,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 
 		const textAssetCache = new Map();
 		const shapeAssetCache = new Map();
+		const gradientAssetCache = new Map();
 		function getRenderedTextAsset(textNode, fillSpec){
 			const key = String(textNode?.id || "") + "::" + JSON.stringify(fillSpec || {});
 			if(textAssetCache.has(key)) return textAssetCache.get(key);
@@ -679,6 +696,36 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			if(shapeAssetCache.has(key)) return shapeAssetCache.get(key);
 			const rendered = renderShapeAsImageAsset(shapeNode, fillSpec);
 			shapeAssetCache.set(key, rendered || null);
+			return rendered;
+		}
+
+		function getRenderedGradientAsset(gradientNode, fillSpec){
+			const key = String(gradientNode?.id || "") + "::" + JSON.stringify(fillSpec || {});
+			if(gradientAssetCache.has(key)) return gradientAssetCache.get(key);
+
+			const canvas = document.createElement("canvas");
+			canvas.width = w;
+			canvas.height = h;
+			const ctx = canvas.getContext("2d");
+			if(!ctx){
+				gradientAssetCache.set(key, null);
+				return null;
+			}
+
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			applyCanvasFillStyle(ctx, fillSpec, "#000000", canvas.width, canvas.height);
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+			const rendered = {
+				dataUrl: canvas.toDataURL("image/png"),
+				assetWidth: canvas.width,
+				assetHeight: canvas.height,
+				anchorX: canvas.width / 2,
+				anchorY: canvas.height / 2,
+				centerX: canvas.width / 2,
+				centerY: canvas.height / 2
+			};
+			gradientAssetCache.set(key, rendered);
 			return rendered;
 		}
 
@@ -735,6 +782,15 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			}
 
 			if(item.type === "solid"){
+				return {
+					minX: tx,
+					minY: ty,
+					maxX: w + tx,
+					maxY: h + ty
+				};
+			}
+
+			if(item.type === "gradient"){
 				return {
 					minX: tx,
 					minY: ty,
@@ -843,6 +899,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 							lottieScale
 						),
 						ao: 0,
+						w: rendered.assetWidth,
+						h: rendered.assetHeight,
 						ip: 0,
 						op: totalFrames,
 						st: 0,
@@ -897,6 +955,52 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				};
 			}
 
+			if(item.type === "gradient"){
+				const rendered = getRenderedGradientAsset(item.node, item.fillSpec);
+				if(!rendered || !rendered.dataUrl){
+					toast("Lottie export failed: could not rasterize gradient.");
+					return null;
+				}
+
+				const assetId = `gradient_asset_${item.node.id}`;
+				const gradientAnchorX = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorX || rendered.anchorX) : rendered.anchorX;
+				const gradientAnchorY = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorY || rendered.anchorY) : rendered.anchorY;
+				const gradientPosX = item.transform?.hasExplicitAnchor
+					? gradientAnchorX + Number(item.transform?.tx || 0)
+					: rendered.centerX + Number(item.transform?.tx || 0);
+				const gradientPosY = item.transform?.hasExplicitAnchor
+					? gradientAnchorY + Number(item.transform?.ty || 0)
+					: rendered.centerY + Number(item.transform?.ty || 0);
+
+				if(!sharedAssets.some(a => a.id === assetId)){
+					sharedAssets.push({ id: assetId, w: rendered.assetWidth, h: rendered.assetHeight, u: "", p: rendered.dataUrl, e: 1 });
+				}
+
+				return {
+					ddd: 0,
+					ind,
+					ty: 2,
+					nm: `Gradient ${item.node.id}`,
+					refId: assetId,
+					sr: 1,
+					ks: createStaticSpatialTransform(
+						gradientAnchorX,
+						gradientAnchorY,
+						gradientPosX,
+						gradientPosY,
+						Number(item.transform?.rot || 0),
+						lottieScale
+					),
+					ao: 0,
+					w: rendered.assetWidth,
+					h: rendered.assetHeight,
+					ip: 0,
+					op: totalFrames,
+					st: 0,
+					bm: 0
+				};
+			}
+
 			if(item.type === "text"){
 				const rendered = getRenderedTextAsset(item.node, item.fillSpec);
 				if(!rendered || !rendered.dataUrl){
@@ -933,6 +1037,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						lottieScale
 					),
 					ao: 0,
+					w: rendered.assetWidth,
+					h: rendered.assetHeight,
 					ip: 0,
 					op: totalFrames,
 					st: 0,
@@ -951,81 +1057,148 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					: [item.fg, item.bg].filter(Boolean);
 				if(!topChildren.length) return { layers: [], nextInd: startInd };
 
-				if(item.transform?.motion && !item.transform?.hasExplicitAnchor){
-					const groupBounds = computeItemBounds(item);
-					if(groupBounds){
-						const pivotX = (groupBounds.minX + groupBounds.maxX) / 2;
-						const pivotY = (groupBounds.minY + groupBounds.maxY) / 2;
-						const staticItem = cloneItemWithoutMotion(item);
-						const staticTopChildren = Array.isArray(staticItem.layers)
-							? staticItem.layers.filter(Boolean)
-							: [staticItem.fg, staticItem.bg].filter(Boolean);
-						let nextIndWithParent = startInd + 1;
-						const childBucketsWithParent = [];
-						for(const child of staticTopChildren){
-							const childResult = buildLayers(child, nextIndWithParent, sharedAssets);
-							childBucketsWithParent.push(childResult.layers);
-							nextIndWithParent = childResult.nextInd;
-						}
-						const blendWithParent = mapBlendModeToLottie(item.node?.params?.blend);
-						const opacityWithParent = Math.max(0, Math.min(1, Number(item.node?.params?.opacity ?? 100) / 100));
-						for(let i = 0; i < childBucketsWithParent.length - 1; i++){
-							for(const topLayer of childBucketsWithParent[i]){
-								topLayer.bm = blendWithParent;
-								applyOpacityMultiplier(topLayer, opacityWithParent);
+				function buildCompositeContent(contentStartInd){
+					if(item.transform?.motion && !item.transform?.hasExplicitAnchor){
+						const groupBounds = computeItemBounds(item);
+						if(groupBounds){
+							const pivotX = (groupBounds.minX + groupBounds.maxX) / 2;
+							const pivotY = (groupBounds.minY + groupBounds.maxY) / 2;
+							const staticItem = cloneItemWithoutMotion(item);
+							const staticTopChildren = Array.isArray(staticItem.layers)
+								? staticItem.layers.filter(Boolean)
+								: [staticItem.fg, staticItem.bg].filter(Boolean);
+							let nextIndWithParent = contentStartInd + 1;
+							const childBucketsWithParent = [];
+							for(const child of staticTopChildren){
+								const childResult = buildLayers(child, nextIndWithParent, sharedAssets);
+								childBucketsWithParent.push(childResult.layers);
+								nextIndWithParent = childResult.nextInd;
 							}
+							const blendWithParent = mapBlendModeToLottie(item.node?.params?.blend);
+							const opacityWithParent = Math.max(0, Math.min(1, Number(item.node?.params?.opacity ?? 100) / 100));
+							for(let i = 0; i < childBucketsWithParent.length - 1; i++){
+								for(const topLayer of childBucketsWithParent[i]){
+									topLayer.bm = blendWithParent;
+									applyOpacityMultiplier(topLayer, opacityWithParent);
+								}
+							}
+
+							const controllerLayer = {
+								ddd: 0,
+								ind: contentStartInd,
+								ty: 3,
+								nm: `Composite Motion ${item.node.id}`,
+								sr: 1,
+								ks: createStaticSpatialTransform(
+									pivotX,
+									pivotY,
+									pivotX,
+									pivotY,
+									0,
+									buildBreathScale(100, item.transform.motion.amount, item.transform.motion.speed, duration, fps)
+								),
+								ao: 0,
+								ip: 0,
+								op: totalFrames,
+								st: 0,
+								bm: 0
+							};
+
+							for(const bucket of childBucketsWithParent){
+								for(const layer of bucket) layer.parent = contentStartInd;
+							}
+
+							return {
+								layers: [controllerLayer, ...childBucketsWithParent.flat()],
+								nextInd: nextIndWithParent
+							};
+						}
+					}
+
+					let nextInd = contentStartInd;
+					const childBuckets = [];
+					for(const child of topChildren){
+						const childResult = buildLayers(child, nextInd, sharedAssets);
+						childBuckets.push(childResult.layers);
+						nextInd = childResult.nextInd;
+					}
+					const blend = mapBlendModeToLottie(item.node?.params?.blend);
+					const opacityFactor = Math.max(0, Math.min(1, Number(item.node?.params?.opacity ?? 100) / 100));
+					for(let i = 0; i < childBuckets.length - 1; i++){
+						for(const topLayer of childBuckets[i]){
+							topLayer.bm = blend;
+							applyOpacityMultiplier(topLayer, opacityFactor);
+						}
+					}
+					return {
+						layers: childBuckets.flat(),
+						nextInd
+					};
+				}
+
+				const maskInputId = findInput(item.node.id, ["mask"]);
+				if(maskInputId){
+					const maskDecoded = decodeLayer(maskInputId, {
+						tx: 0,
+						ty: 0,
+						scale: 1,
+						rot: 0,
+						anchorX: w / 2,
+						anchorY: h / 2,
+						hasExplicitAnchor: false,
+						motion: null
+					});
+					const maskLayer = maskDecoded ? buildSingleLayer(maskDecoded, startInd, sharedAssets) : null;
+					const contentBuilt = buildCompositeContent(1);
+					if(maskLayer && contentBuilt.layers.length){
+						const precompId = `composite_precomp_${item.node.id}_${startInd}`;
+						if(!sharedAssets.some(a => a.id === precompId)){
+							sharedAssets.push({
+								id: precompId,
+								w,
+								h,
+								layers: contentBuilt.layers
+							});
 						}
 
-						const controllerLayer = {
+						const contentLayer = {
 							ddd: 0,
-							ind: startInd,
-							ty: 3,
-							nm: `Composite Motion ${item.node.id}`,
+							ind: startInd + 1,
+							ty: 0,
+							nm: `Composite ${item.node.id}`,
+							refId: precompId,
 							sr: 1,
 							ks: createStaticSpatialTransform(
-								pivotX,
-								pivotY,
-								pivotX,
-								pivotY,
+								w / 2,
+								h / 2,
+								w / 2,
+								h / 2,
 								0,
-								buildBreathScale(100, item.transform.motion.amount, item.transform.motion.speed, duration, fps)
+								{ a: 0, k: [100, 100, 100] }
 							),
 							ao: 0,
+							w,
+							h,
 							ip: 0,
 							op: totalFrames,
 							st: 0,
-							bm: 0
+							bm: 0,
+							tt: 1
 						};
 
-						for(const bucket of childBucketsWithParent){
-							for(const layer of bucket) layer.parent = startInd;
-						}
+						const matteLayer = {
+							...maskLayer,
+							td: 1
+						};
 
 						return {
-							layers: [controllerLayer, ...childBucketsWithParent.flat()],
-							nextInd: nextIndWithParent
+							layers: [matteLayer, contentLayer],
+							nextInd: startInd + 2
 						};
 					}
 				}
-				let nextInd = startInd;
-				const childBuckets = [];
-				for(const child of topChildren){
-					const childResult = buildLayers(child, nextInd, sharedAssets);
-					childBuckets.push(childResult.layers);
-					nextInd = childResult.nextInd;
-				}
-				const blend = mapBlendModeToLottie(item.node?.params?.blend);
-				const opacityFactor = Math.max(0, Math.min(1, Number(item.node?.params?.opacity ?? 100) / 100));
-				for(let i = 0; i < childBuckets.length - 1; i++){
-					for(const topLayer of childBuckets[i]){
-						topLayer.bm = blend;
-						applyOpacityMultiplier(topLayer, opacityFactor);
-					}
-				}
-				return {
-					layers: childBuckets.flat(),
-					nextInd
-				};
+
+				return buildCompositeContent(startInd);
 			}
 
 			const layer = buildSingleLayer(item, startInd, sharedAssets);
