@@ -146,9 +146,12 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	}
 
 	function createStaticSpatialTransform(anchorX, anchorY, positionX, positionY, rotation, scaleValue){
+		const rotationValue = (rotation && typeof rotation === "object" && Object.prototype.hasOwnProperty.call(rotation, "k"))
+			? rotation
+			: { a: 0, k: Number(rotation || 0) };
 		return {
 			o: { a: 0, k: 100 },
-			r: { a: 0, k: Number(rotation || 0) },
+			r: rotationValue,
 			p: { a: 0, k: [Number(positionX || 0), Number(positionY || 0), 0] },
 			a: { a: 0, k: [Number(anchorX || 0), Number(anchorY || 0), 0] },
 			s: scaleValue
@@ -239,7 +242,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	function buildBreathScale(baseScalePct, amount, speed, duration, fps){
 		const minS = Math.max(1, baseScalePct * Math.max(0.01, 1 - amount));
 		const maxS = Math.max(1, baseScalePct * (1 + amount));
-		const speedSec = Math.max(0.2, Number(speed) || 2);
+		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
 		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
 		const halfCycleFrames = Math.max(1, Math.round((speedSec * fps) / 2));
 		const keyframes = [];
@@ -262,6 +265,92 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			return { a: 0, k: [baseScalePct, baseScalePct, 100] };
 		}
 		keyframes.push({ t: totalFrames, s: [current, current, 100] });
+		return { a: 1, k: keyframes };
+	}
+
+	function buildCircleRotation(baseRotation, speed, direction, duration, fps){
+		const startRotation = Number(baseRotation || 0);
+		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
+		const dir = String(direction || "clockwise").toLowerCase() === "counter-clockwise" ? -1 : 1;
+		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
+		const cycleFrames = Math.max(1, Math.round(speedSec * fps));
+		const keyframes = [];
+		let frame = 0;
+		let turns = 0;
+		const ease = createLottieEase();
+
+		while(frame < totalFrames){
+			keyframes.push({
+				...ease,
+				t: frame,
+				s: [startRotation + (turns * 360 * dir)],
+				e: [startRotation + ((turns + 1) * 360 * dir)]
+			});
+			frame += cycleFrames;
+			turns += 1;
+		}
+
+		keyframes.push({
+			t: totalFrames,
+			s: [startRotation + (turns * 360 * dir)]
+		});
+		return { a: 1, k: keyframes };
+	}
+
+	function buildWigglePosition(baseX, baseY, amount, speed, randomAmount, radiusHint, duration, fps){
+		const amt = Math.max(0, Math.min(0.5, Number(amount) || 0));
+		const randomness = Math.max(0, Math.min(1, Number(randomAmount) || 0));
+		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
+		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
+		const hint = Math.max(1, Number(radiusHint) || Math.min(w, h));
+		const radius = Math.max(0, Math.min(Math.min(w, h) / 2, hint * amt));
+		if(radius <= 0.001) return { a: 0, k: [Number(baseX || 0), Number(baseY || 0), 0] };
+		const jitter = radius * randomness;
+
+		const quarterCycleFrames = Math.max(1, Math.round((speedSec * fps) / 4));
+		const keyframes = [];
+		let frame = 0;
+		let segment = 0;
+		const ease = createLottieEase();
+		const tau = Math.PI * 2;
+
+		const nodeSeed = Math.max(1, Math.floor((Number(baseX || 0) * 13) + (Number(baseY || 0) * 17) + (radius * 19)));
+		let seed = nodeSeed % 2147483647;
+		const seededRand = () => {
+			seed = (seed * 48271) % 2147483647;
+			return (seed / 2147483647);
+		};
+
+		while(frame < totalFrames){
+			const fromT = (segment / 4) * tau;
+			const toT = ((segment + 1) / 4) * tau;
+			const from = [
+				Math.cos(fromT) * radius + ((seededRand() * 2 - 1) * jitter),
+				Math.sin(fromT) * radius + ((seededRand() * 2 - 1) * jitter)
+			];
+			const to = [
+				Math.cos(toT) * radius + ((seededRand() * 2 - 1) * jitter),
+				Math.sin(toT) * radius + ((seededRand() * 2 - 1) * jitter)
+			];
+			keyframes.push({
+				...ease,
+				t: frame,
+				s: [Number(baseX || 0) + from[0], Number(baseY || 0) + from[1], 0],
+				e: [Number(baseX || 0) + to[0], Number(baseY || 0) + to[1], 0]
+			});
+			frame += quarterCycleFrames;
+			segment += 1;
+		}
+
+		const finalT = (segment / 4) * tau;
+		const finalPoint = [
+			Math.cos(finalT) * radius + ((seededRand() * 2 - 1) * jitter),
+			Math.sin(finalT) * radius + ((seededRand() * 2 - 1) * jitter)
+		];
+		keyframes.push({
+			t: totalFrames,
+			s: [Number(baseX || 0) + finalPoint[0], Number(baseY || 0) + finalPoint[1], 0]
+		});
 		return { a: 1, k: keyframes };
 	}
 
@@ -589,7 +678,9 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					motion: {
 						mode: String(p.mode || "breath"),
 						amount: Math.max(0, Math.min(0.5, Number(p.amount) || 0)),
-						speed: Math.max(0.2, Number(p.speed) || 2)
+						random: Math.max(0, Math.min(1, Number(p.random) || 0)),
+						direction: String(p.direction || "clockwise"),
+						speed: Math.min(10, Math.max(0.1, Number(p.speed) || 1))
 					}
 				};
 				const srcId = findInput(node.id, ["in", "layer", "source"]);
@@ -827,16 +918,29 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		}
 
 		function buildSingleLayer(item, ind, sharedAssets){
+			const motion = item.transform?.motion || null;
 			const baseScalePct = Math.max(1, (item.transform?.scale || 1) * 100);
-			const lottieScale = item.transform?.motion && item.transform.motion.mode === "breath"
-				? buildBreathScale(baseScalePct, item.transform.motion.amount, item.transform.motion.speed, duration, fps)
+			const lottieScale = motion && motion.mode === "breath"
+				? buildBreathScale(baseScalePct, motion.amount, motion.speed, duration, fps)
 				: { a: 0, k: [baseScalePct, baseScalePct, 100] };
+			const lottieRotation = motion && motion.mode === "circle"
+				? buildCircleRotation(Number(item.transform?.rot || 0), motion.speed, motion.direction, duration, fps)
+				: { a: 0, k: Number(item.transform?.rot || 0) };
+			const itemBounds = motion && motion.mode === "wiggle" ? computeItemBounds(item) : null;
+			const radiusHint = itemBounds
+				? Math.max(1, Math.min(itemBounds.maxX - itemBounds.minX, itemBounds.maxY - itemBounds.minY))
+				: Math.min(w, h);
+
+			function applyWiggleMotionPosition(layer, baseX, baseY){
+				if(!(motion && motion.mode === "wiggle" && layer?.ks)) return;
+				layer.ks.p = buildWigglePosition(baseX, baseY, motion.amount, motion.speed, motion.random, radiusHint, duration, fps);
+			}
 
 			if(item.type === "solid"){
 				const sc = String(item.node.params?.color || "#000000");
 				const solidAnchorX = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorX || (w / 2)) : (w / 2);
 				const solidAnchorY = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorY || (h / 2)) : (h / 2);
-				return {
+				const layer = {
 					ddd: 0,
 					ind,
 					ty: 1,
@@ -847,7 +951,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						solidAnchorY,
 						solidAnchorX + Number(item.transform?.tx || 0),
 						solidAnchorY + Number(item.transform?.ty || 0),
-						Number(item.transform?.rot || 0),
+						lottieRotation,
 						lottieScale
 					),
 					ao: 0,
@@ -859,6 +963,12 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					st: 0,
 					bm: 0
 				};
+				applyWiggleMotionPosition(
+					layer,
+					solidAnchorX + Number(item.transform?.tx || 0),
+					solidAnchorY + Number(item.transform?.ty || 0)
+				);
+				return layer;
 			}
 
 			if(item.type === "shape"){
@@ -883,7 +993,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						sharedAssets.push({ id: assetId, w: rendered.assetWidth, h: rendered.assetHeight, u: "", p: rendered.dataUrl, e: 1 });
 					}
 
-					return {
+					const layer = {
 						ddd: 0,
 						ind,
 						ty: 2,
@@ -895,7 +1005,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 							shapeAnchorY,
 							shapePosX,
 							shapePosY,
-							Number(item.transform?.rot || 0),
+							lottieRotation,
 							lottieScale
 						),
 						ao: 0,
@@ -906,6 +1016,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						st: 0,
 						bm: 0
 					};
+					applyWiggleMotionPosition(layer, shapePosX, shapePosY);
+					return layer;
 				}
 
 				const shapeDef = buildShapeItem(item.node, fillSpec);
@@ -923,7 +1035,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				const shapePosY = item.transform?.hasExplicitAnchor
 					? shapeAnchorY + Number(item.transform?.ty || 0)
 					: shapeY + Number(item.transform?.ty || 0);
-				return {
+				const layer = {
 					ddd: 0,
 					ind,
 					ty: 4,
@@ -934,7 +1046,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						shapeAnchorY,
 						shapePosX,
 						shapePosY,
-						Number(item.transform?.rot || 0),
+						lottieRotation,
 						lottieScale
 					),
 					ao: 0,
@@ -953,6 +1065,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					st: 0,
 					bm: 0
 				};
+				applyWiggleMotionPosition(layer, shapePosX, shapePosY);
+				return layer;
 			}
 
 			if(item.type === "gradient"){
@@ -976,7 +1090,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					sharedAssets.push({ id: assetId, w: rendered.assetWidth, h: rendered.assetHeight, u: "", p: rendered.dataUrl, e: 1 });
 				}
 
-				return {
+				const layer = {
 					ddd: 0,
 					ind,
 					ty: 2,
@@ -988,7 +1102,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						gradientAnchorY,
 						gradientPosX,
 						gradientPosY,
-						Number(item.transform?.rot || 0),
+						lottieRotation,
 						lottieScale
 					),
 					ao: 0,
@@ -999,6 +1113,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					st: 0,
 					bm: 0
 				};
+				applyWiggleMotionPosition(layer, gradientPosX, gradientPosY);
+				return layer;
 			}
 
 			if(item.type === "text"){
@@ -1021,7 +1137,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					sharedAssets.push({ id: assetId, w: rendered.assetWidth, h: rendered.assetHeight, u: "", p: rendered.dataUrl, e: 1 });
 				}
 
-				return {
+				const layer = {
 					ddd: 0,
 					ind,
 					ty: 2,
@@ -1033,7 +1149,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						textAnchorY,
 						textPosX,
 						textPosY,
-						Number(item.transform?.rot || 0),
+						lottieRotation,
 						lottieScale
 					),
 					ao: 0,
@@ -1044,6 +1160,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					st: 0,
 					bm: 0
 				};
+				applyWiggleMotionPosition(layer, textPosX, textPosY);
+				return layer;
 			}
 
 			return null;
@@ -1083,6 +1201,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 								}
 							}
 
+							const controllerScale = item.transform.motion.mode === "breath"
+								? buildBreathScale(100, item.transform.motion.amount, item.transform.motion.speed, duration, fps)
+								: { a: 0, k: [100, 100, 100] };
+							const controllerRotation = item.transform.motion.mode === "circle"
+								? buildCircleRotation(0, item.transform.motion.speed, item.transform.motion.direction, duration, fps)
+								: { a: 0, k: 0 };
+							const controllerRadiusHint = Math.max(1, Math.min(groupBounds.maxX - groupBounds.minX, groupBounds.maxY - groupBounds.minY));
 							const controllerLayer = {
 								ddd: 0,
 								ind: contentStartInd,
@@ -1094,8 +1219,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 									pivotY,
 									pivotX,
 									pivotY,
-									0,
-									buildBreathScale(100, item.transform.motion.amount, item.transform.motion.speed, duration, fps)
+									controllerRotation,
+									controllerScale
 								),
 								ao: 0,
 								ip: 0,
@@ -1103,6 +1228,18 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 								st: 0,
 								bm: 0
 							};
+							if(item.transform.motion.mode === "wiggle"){
+								controllerLayer.ks.p = buildWigglePosition(
+									pivotX,
+									pivotY,
+									item.transform.motion.amount,
+									item.transform.motion.speed,
+									item.transform.motion.random,
+									controllerRadiusHint,
+									duration,
+									fps
+								);
+							}
 
 							for(const bucket of childBucketsWithParent){
 								for(const layer of bucket) layer.parent = contentStartInd;
@@ -1308,6 +1445,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		this.startTime = null;
 		this.rafId = null;
 		this.isPlaying = false;
+		this.imageAssetCache = new Map();
 		this.motionBoundsCache = new Map();
 		this.motionSafeScaleCache = new Map();
 	}
@@ -1413,6 +1551,34 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return safeScale;
 	};
 
+	CompactGraphPlayer.prototype.getImageAsset = function(nodeId, src){
+		var key = String(nodeId);
+		var existing = this.imageAssetCache.get(key);
+		if(existing && existing.src === src) return existing;
+
+		var entry = { src: src, img: null, loaded: false, error: false };
+		if(!src){
+			entry.error = true;
+			this.imageAssetCache.set(key, entry);
+			return entry;
+		}
+
+		var self = this;
+		var img = new Image();
+		entry.img = img;
+		img.onload = function(){
+			entry.loaded = true;
+			entry.error = false;
+			self.renderAtTime(self.currentTime);
+		};
+		img.onerror = function(){
+			entry.error = true;
+		};
+		img.src = src;
+		this.imageAssetCache.set(key, entry);
+		return entry;
+	};
+
 	CompactGraphPlayer.prototype.renderNode = function(nodeId, timeSec, cache){
 		var key = String(nodeId);
 		if(cache.has(key)) return cache.get(key);
@@ -1462,6 +1628,41 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			}
 			c1.ctx.fillRect(0, 0, c1.canvas.width, c1.canvas.height);
 			result = { canvas: c1.canvas };
+		}
+		else if(node.type === 'Image'){
+			var cImg = this.createLayer();
+			var srcUrl = String(params.src || '');
+			var asset = this.getImageAsset(nodeId, srcUrl);
+			if(asset && asset.loaded && asset.img){
+				var ix = toNumber(params.x, 0);
+				var iy = toNumber(params.y, 0);
+				var iw = Math.max(1, toNumber(params.width, asset.img.naturalWidth || cImg.canvas.width));
+				var ih = Math.max(1, toNumber(params.height, asset.img.naturalHeight || cImg.canvas.height));
+				var fit = String(params.fit || 'contain');
+				var opacity = clamp(toNumber(params.opacity, 100) / 100, 0, 1);
+				var sw = Math.max(1, asset.img.naturalWidth || asset.img.width || iw);
+				var sh = Math.max(1, asset.img.naturalHeight || asset.img.height || ih);
+
+				cImg.ctx.save();
+				cImg.ctx.globalAlpha = opacity;
+				if(fit === 'fill'){
+					cImg.ctx.drawImage(asset.img, ix, iy, iw, ih);
+				}else{
+					var scale = fit === 'cover'
+						? Math.max(iw / sw, ih / sh)
+						: Math.min(iw / sw, ih / sh);
+					var dw = sw * scale;
+					var dh = sh * scale;
+					var dx = ix + (iw - dw) / 2;
+					var dy = iy + (ih - dh) / 2;
+					cImg.ctx.beginPath();
+					cImg.ctx.rect(ix, iy, iw, ih);
+					cImg.ctx.clip();
+					cImg.ctx.drawImage(asset.img, dx, dy, dw, dh);
+				}
+				cImg.ctx.restore();
+			}
+			result = { canvas: cImg.canvas };
 		}
 		else if(node.type === 'Shape'){
 			var c2 = this.createLayer();
