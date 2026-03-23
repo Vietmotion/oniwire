@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.1)</title>
+  <title>Oniwire (v0.2.2)</title>
   <link rel="stylesheet" href="styles.css">
   <style>
     :root{
@@ -15,12 +15,6 @@
     --r: 18px;
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-
-    /* Layout sizing */
-    --leftW: 260px;
-    --rightW: 500px;
-    --topH: 54vh;
-    --gap: 14px;
 
     /* Node editor transform */
     --nx: 0px;
@@ -65,7 +59,7 @@
           <div class="menuTile" id="btnNew">New</div>
           <div class="menuTile" id="btnImport">Import</div>
           <div class="menuTile" id="btnExport">Export</div>
-          <div class="menuTile">Help</div>
+          <div class="menuTile" id="btnHelp">Help</div>
           <div class="menuTile" id="btnClearCache">Clear Cache</div>
         </div>
 
@@ -86,9 +80,9 @@
 
         <div class="emptyNote">
           Blue panel is yours:
-          <br>• New project
-          <br>• Login/user switch
-          <br>• Menu / file ops
+          <br>- New project
+          <br>- Login/user switch
+          <br>- Menu / file ops
           <br><br>
           We keep it flexible.
         </div>
@@ -98,7 +92,7 @@
     <!-- PREVIEW (Center Top) -->
     <section class="panel preview">
       <div class="hdr">
-        <div class="title">🎬 Preview <span class="pill">16:9</span></div>
+        <div class="title">Preview <span class="pill">16:9</span></div>
         <div class="btns" style="flex:1; justify-content:flex-start;">
           <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);">
             Screen
@@ -143,7 +137,7 @@
               - You can pan and scroll for viewport Control. 
               - More is coming. 
             </span>
-            <span class="pill">Editor: Space+Drag to pan • Wheel to zoom</span>
+            <span class="pill">Editor: Space+Drag to pan - Wheel to zoom</span>
           </div>
         </div>
         
@@ -153,7 +147,7 @@
     <!-- INSPECTOR (Red Right Top) -->
     <section class="panel inspector">
       <div class="hdr">
-        <div class="title">🧰 Inspector <span class="pill">Selected</span></div>
+        <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
           <button id="btnClearSel">Clear</button>
         </div>
@@ -163,9 +157,9 @@
           Click a node to edit its parameters here.
           <br><br>
           Red panel can later become:
-          <br>• advanced params
-          <br>• notes / metadata
-          <br>• node help / docs
+          <br>- advanced params
+          <br>- notes / metadata
+          <br>- node help / docs
         </div>
       </div>
     </section>
@@ -176,7 +170,7 @@
     <section class="panel editorWrap">
       <div class="hdr">
         <div class="title">
-          🧩 Node Editor
+          Node Editor
           <div class="hdrInlineControls">
             <div class="nodeGroups" id="nodeButtons">
               <button type="button" class="nodeCategoryBtn active" data-group="generator">Generator</button>
@@ -212,8 +206,43 @@
 <!-- Node Search (Tab Menu) -->
 <div id="nodeSearch" class="nodeSearch hidden" aria-hidden="true">
   <div class="nodeSearchBox">
-    <input id="nodeSearchInput" type="text" placeholder="Search nodes… (e.g. gradient, text, transform)" autocomplete="off" />
+    <input id="nodeSearchInput" type="text" placeholder="Search nodes... (e.g. gradient, text, transform)" autocomplete="off" />
     <div id="nodeSearchList" class="nodeSearchList"></div>
+  </div>
+</div>
+
+<div id="helpOverlay" class="helpOverlay isHidden" aria-hidden="true">
+  <div class="helpDialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div class="helpHeader">
+      <div>
+        <div class="helpEyebrow" id="helpEyebrow">Oniwire Help - Introduction</div>
+        <h2 class="helpTitle" id="helpTitle">Build visuals by connecting ideas, not by fighting the timeline.</h2>
+        <p class="helpSubtitle" id="helpSubtitle">Oniwire is a node-based visual creation app for building layered motion graphics and generative compositions in a direct, flexible way.</p>
+      </div>
+      <button type="button" class="helpClose" id="btnCloseHelp" aria-label="Close help">X</button>
+    </div>
+
+    <div class="helpBody">
+      <aside class="helpSidebar" aria-label="Help navigation">
+        <div class="helpNavTitle">Browse Help</div>
+        <div class="helpNavSection">Guide</div>
+        <div class="helpNavGroup">
+          <button type="button" class="helpNavBtn" data-help-page="introduction">Introduction</button>
+          <button type="button" class="helpNavBtn" data-help-page="updates">Latest Update</button>
+          <button type="button" class="helpNavBtn" data-help-page="examples">Examples</button>
+        </div>
+        <div class="helpNavSection">Nodes</div>
+        <div class="helpNavGroup" id="helpNodeNav"></div>
+      </aside>
+
+      <div class="helpMain">
+        <div id="helpContent" class="helpContent"></div>
+        <div class="helpFooter">
+          <div class="helpFooterNote">Press Esc to close this window. Click outside the dialog to dismiss it.</div>
+          <button type="button" id="btnHelpStart" class="active">Start Creating</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -275,6 +304,42 @@
   const wiresSvg = document.getElementById("wires");
   const toastEl  = document.getElementById("toast");
   const selectionRectEl = document.getElementById("selectionRect");
+  const helpBtn = document.getElementById("btnHelp");
+  const helpOverlay = document.getElementById("helpOverlay");
+  const helpCloseBtn = document.getElementById("btnCloseHelp");
+  const helpStartBtn = document.getElementById("btnHelpStart");
+  const helpEyebrowEl = document.getElementById("helpEyebrow");
+  const helpTitleEl = document.getElementById("helpTitle");
+  const helpSubtitleEl = document.getElementById("helpSubtitle");
+  const helpNodeNavEl = document.getElementById("helpNodeNav");
+  const helpContentEl = document.getElementById("helpContent");
+
+  let helpVisible = false;
+  let lastHelpFocus = null;
+  let activeHelpPage = "introduction";
+
+  function setHelpVisible(visible){
+    helpVisible = !!visible;
+    helpOverlay?.classList.toggle("isHidden", !helpVisible);
+    helpOverlay?.setAttribute("aria-hidden", helpVisible ? "false" : "true");
+    if(helpBtn) helpBtn.setAttribute("aria-pressed", helpVisible ? "true" : "false");
+  }
+
+  function openHelp(pageKey = activeHelpPage){
+    lastHelpFocus = document.activeElement;
+    renderHelpPage(pageKey);
+    setHelpVisible(true);
+    helpCloseBtn?.focus();
+  }
+
+  function closeHelp(){
+    setHelpVisible(false);
+    if(lastHelpFocus && typeof lastHelpFocus.focus === "function"){
+      lastHelpFocus.focus();
+    }else{
+      helpBtn?.focus();
+    }
+  }
 
   function cloneGraphSnapshot(){
     return {
@@ -839,6 +904,37 @@ utilsApi.initProjectUtils();
     if(hasMotionFlag(sourceEl)) targetEl.dataset.hasMotion = "true";
   }
 
+  function bakeComputedStylesToClone(sourceRoot, cloneRoot){
+    if(!(sourceRoot instanceof HTMLElement) || !(cloneRoot instanceof HTMLElement)) return;
+
+    const sourceAll = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+    const cloneAll = [cloneRoot, ...cloneRoot.querySelectorAll("*")];
+    const count = Math.min(sourceAll.length, cloneAll.length);
+
+    for(let i = 0; i < count; i++){
+      const src = sourceAll[i];
+      const dst = cloneAll[i];
+      if(!(src instanceof HTMLElement) || !(dst instanceof HTMLElement)) continue;
+
+      try{
+        const cs = getComputedStyle(src);
+        if(cs.transform && cs.transform !== "none"){
+          dst.style.transform = cs.transform;
+        }
+        if(cs.transformOrigin){
+          dst.style.transformOrigin = cs.transformOrigin;
+        }
+        if(cs.opacity){
+          dst.style.opacity = cs.opacity;
+        }
+      }catch(_){ }
+
+      // Freeze the clone to the baked frame.
+      dst.style.animation = "none";
+      dst.style.transition = "none";
+    }
+  }
+
   function measureLayerBounds(layerEl){
     if(!layerEl) return null;
     const w = renderRoot?.clientWidth || 1280;
@@ -890,8 +986,12 @@ utilsApi.initProjectUtils();
     return { x: rect.left, y: rect.top, width, height };
   }
 
-  async function renderLayerToDataUrl(layerEl){
+  async function renderLayerToDataUrl(layerEl, options = {}){
     if(!layerEl) return null;
+
+    const useSimpleShapeRender = options.useSimpleShapeRender !== false;
+    const timeoutMs = Math.max(100, Number(options.timeoutMs) || 200);
+    const bakeComputedStyles = options.bakeComputedStyles === true;
 
     const targetW = Math.max(1, Math.round(layerEl.clientWidth || previewBase?.w || 1280));
     const targetH = Math.max(1, Math.round(layerEl.clientHeight || previewBase?.h || 720));
@@ -922,12 +1022,16 @@ utilsApi.initProjectUtils();
     tempDiv.appendChild(clone);
     document.body.appendChild(tempDiv);
 
+    if(bakeComputedStyles){
+      bakeComputedStylesToClone(layerEl, clone);
+    }
+
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     let dataUrl = null;
     let simpleRenderSuccess = false;
     const shapes = tempDiv.querySelectorAll("[data-shape]");
-    if(shapes.length > 0) {
+    if(useSimpleShapeRender && shapes.length > 0) {
       ctx.fillStyle = "#fff";
       for(const shape of shapes) {
         const rect = shape.getBoundingClientRect();
@@ -989,7 +1093,7 @@ utilsApi.initProjectUtils();
           if(resolved) return;
           resolved = true;
           resolve(null);
-        }, 200);
+        }, timeoutMs);
 
         img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgMarkup);
       });
@@ -1046,72 +1150,167 @@ utilsApi.initProjectUtils();
 // Per-node tip content shown in the Tips panel when a node is selected
 const NODE_TIPS = {
   Color: [
-    "<strong>🟦 Color</strong> — Solid color fill. No inputs needed.",
+    "<strong>Color</strong> - Solid color fill. No inputs needed.",
     "Use as a background, tint layer, or base for compositing."
   ],
   Gradient: [
-    "<strong>🎨 Gradient</strong> — Fills the canvas with a gradient.",
+    "<strong>Gradient</strong> - Fills the canvas with a gradient.",
     "Connect a <em>Ramp</em> node to set the color stops. Choose direction and style in the inspector."
   ],
   Ramp: [
-    "<strong>🎚️ Ramp</strong> — Defines color stops for Gradient or Mask nodes.",
-    "Add/remove stops, drag to reorder. Output connects to Gradient ➜ fill, or Mask ➜ mask input."
+    "<strong>Ramp</strong> - Defines color stops for Gradient or Mask nodes.",
+    "Add/remove stops, drag to reorder. Output connects to Gradient -> fill, or Mask -> mask input."
   ],
   Shape: [
-    "<strong>⬛ Shape</strong> — Draws a geometric shape.",
+    "<strong>Shape</strong> - Draws a geometric shape.",
     "Pick type (rect, circle, etc.), fill color, stroke, and corner radius. No inputs needed."
   ],
   Text: [
-    "<strong>🔤 Text</strong> — Renders styled text on the canvas.",
+    "<strong>Text</strong> - Renders styled text on the canvas.",
     "Set font, size, color, weight, and wrap mode. No inputs needed."
   ],
   Image: [
-    "<strong>🖼️ Image</strong> — Loads an image as a layer.",
+    "<strong>Image</strong> - Loads an image as a layer.",
     "Paste a URL or upload a file. Supports PNG, JPG, SVG, GIF. No inputs needed."
   ],
   Transform: [
-    "<strong>↔️ Transform</strong> — Moves, scales, and rotates a layer.",
-    "<em>in</em> → the layer to transform. Set Pivot X/Y to control transform origin."
+    "<strong>Transform</strong> - Moves, scales, and rotates a layer.",
+    "<em>in</em> -> the layer to transform. Set Pivot X/Y to control transform origin."
   ],
   Glow: [
-    "<strong>✨ Glow</strong> — Adds a glow effect to a layer.",
+    "<strong>Glow</strong> - Adds a glow effect to a layer.",
     "<em>Outer</em>: color-tinted drop-shadow glow. <em>Luminance</em>: brightens highlights and blooms them.",
-    "<em>in</em> → the layer to glow."
+    "<em>in</em> -> the layer to glow."
   ],
   ColorCorrect: [
-    "<strong>🎨 Color Correct</strong> — Adjusts color grading on any layer.",
-    "Controls: Brightness · Contrast · Saturation · Hue Rotate · Temperature (warm/cool).",
-    "<em>in</em> → the layer to correct."
+    "<strong>Color Correct</strong> - Adjusts color grading on any layer.",
+    "Controls: Brightness | Contrast | Saturation | Hue Rotate | Temperature (warm/cool).",
+    "<em>in</em> -> the layer to correct."
   ],
   Clone: [
-    "<strong>📋 Clone</strong> — Duplicates a layer in a grid, line, or radial pattern.",
-    "<em>in</em> → the layer to clone. Set count, spacing, and layout in the inspector."
+    "<strong>Clone</strong> - Duplicates a layer in a grid, line, or radial pattern.",
+    "<em>in</em> -> the layer to clone. Set count, spacing, and layout in the inspector."
   ],
   Composite: [
-    "<strong>🔀 Composite</strong> — Blends multiple layers together.",
+    "<strong>Composite</strong> - Blends multiple layers together.",
     "Use <em>+ Input</em> to add layers (stacked bottom-to-top). Set blend mode and opacity per node.",
     "Supports: normal, screen, multiply, overlay, add, and more."
   ],
   Mask: [
-    "<strong>🎭 Mask</strong> — Applies a luminance mask to a layer.",
-    "<em>source</em> → layer to mask. <em>mask</em> → Ramp, Shape, or Gradient node as the mask shape.",
+    "<strong>Mask</strong> - Applies a luminance mask to a layer.",
+    "<em>source</em> -> layer to mask. <em>mask</em> -> Ramp, Shape, or Gradient node as the mask shape.",
     "Toggle <em>Invert</em> to flip the masked area."
   ],
   Freeze: [
-    "<strong>🧊 Freeze</strong> — Captures a live layer as a static image snapshot.",
-    "<em>in</em> → any live or animated layer. Stops animation and bakes it into a still frame."
+    "<strong>Freeze</strong> - Captures a live layer as a static image snapshot.",
+    "<em>in</em> -> any live or animated layer. Stops animation and bakes it into a still frame."
   ],
   Output: [
-    "<strong>📤 Output</strong> — The final output of your node graph.",
-    "Connect your finished layer here. Only one Output node is needed — it drives the preview."
+    "<strong>Output</strong> - The final output of your node graph.",
+    "Connect your finished layer here. Only one Output node is needed - it drives the preview."
   ]
 };
 
 const TIPS_DEFAULT = [
   "<strong>Welcome!</strong> This is an online node-based visual creation app.",
-  "• Press <kbd>Tab</kbd> to search and add nodes.<br>• Press <kbd>Shift+O</kbd> to quick-connect to Output.",
-  "Editor: <kbd>Space</kbd>+Drag to pan · Wheel to zoom · Click a node to inspect it."
+  "- Press <kbd>Tab</kbd> to search and add nodes.<br>- Press <kbd>Shift+O</kbd> to quick-connect to Output.",
+  "Editor: <kbd>Space</kbd>+Drag to pan | Wheel to zoom | Click a node to inspect it."
 ];
+
+const HELP_GENERAL_PAGES = {
+  introduction: {
+    eyebrow: "Oniwire Help - Introduction",
+    title: "Build visuals by connecting ideas, not by fighting the timeline.",
+    subtitle: "Oniwire is a node-based visual creation app for building layered motion graphics and generative compositions in a direct, flexible way.",
+    body: `
+      <div class="helpHero">
+        <div class="helpPanel">
+          <h3>What Oniwire is for</h3>
+          <p class="helpLead">Oniwire lets you combine shapes, text, gradients, images, transforms, masks, effects, and output settings as a visual graph. Instead of editing one long stack, you branch, remix, and reuse layers as the composition grows.</p>
+          <ul class="helpChecklist">
+            <li>Use generator nodes to create base visuals.</li>
+            <li>Use operation and effect nodes to transform or combine them.</li>
+            <li>Connect the final result into Output to drive the preview and export tools.</li>
+          </ul>
+        </div>
+        <div class="helpPanel helpAside">
+          <h3>Quick start</h3>
+          <ul class="helpChecklist">
+            <li>Press Tab to open node search.</li>
+            <li>Add a few source nodes like Text, Shape, Gradient, or Image.</li>
+            <li>Blend and adjust them with Composite, Transform, Glow, Mask, or Color Correct.</li>
+            <li>Connect the last layer to Output to preview the result.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Where this help is going</h3>
+        <p>This help area is designed to stay inside the app. You can move from introduction to node docs and examples without breaking flow.</p>
+      </div>
+    `
+  },
+  updates: {
+    eyebrow: "Oniwire Help - Latest Update",
+    title: "What changed in v0.2.2",
+    subtitle: "Recent improvements focused on color control, contextual guidance, and a tighter layout on laptop-sized screens.",
+    body: `
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Latest in v0.2.2</h3>
+        <div class="helpUpdateGrid">
+          <div class="helpUpdateCard">
+            <span class="helpUpdateKicker">New node</span>
+            <div>
+              <h4>Color Correct</h4>
+              <p>Adjust brightness, contrast, saturation, hue rotation, and temperature directly on any input layer.</p>
+            </div>
+          </div>
+          <div class="helpUpdateCard">
+            <span class="helpUpdateKicker">UX</span>
+            <div>
+              <h4>Contextual Tips</h4>
+              <p>The Tips area now changes based on the selected node so users can understand what each node does faster.</p>
+            </div>
+          </div>
+          <div class="helpUpdateCard">
+            <span class="helpUpdateKicker">Layout</span>
+            <div>
+              <h4>Laptop optimization</h4>
+              <p>Panel spacing and density were tuned for smaller screens so the workspace feels less crowded on MacBook-sized displays.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  },
+  examples: {
+    eyebrow: "Oniwire Help - Examples",
+    title: "A few simple graph ideas to start from",
+    subtitle: "These are lightweight compositions you can build quickly to learn the flow of the app.",
+    body: `
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Example workflows</h3>
+        <div class="helpExampleGrid">
+          <div class="helpExampleCard">
+            <h4>Title over gradient</h4>
+            <p>Gradient -> Composite -> Output, then Text -> Composite. A clean first graph for learning layers and connections.</p>
+          </div>
+          <div class="helpExampleCard">
+            <h4>Glowing headline</h4>
+            <p>Text -> Glow -> Composite -> Output. Good for testing effect nodes and understanding the preview result quickly.</p>
+          </div>
+          <div class="helpExampleCard">
+            <h4>Image color treatment</h4>
+            <p>Image -> Color Correct -> Transform -> Output. Useful for trying the grading and positioning flow on one layer.</p>
+          </div>
+          <div class="helpExampleCard">
+            <h4>Masked reveal</h4>
+            <p>Gradient or Image -> Mask -> Output, with Shape or Ramp feeding the mask input. Good for learning two-input nodes.</p>
+          </div>
+        </div>
+      </div>
+    `
+  }
+};
 
 // Simple categories (adjust anytime)
 const NODE_CATEGORIES = {
@@ -1128,6 +1327,67 @@ const NODE_CATEGORIES = {
   ColorCorrect: "Operations",
   Output: "Output",
 };
+
+function getHelpPageData(pageKey){
+  if(HELP_GENERAL_PAGES[pageKey]) return HELP_GENERAL_PAGES[pageKey];
+
+  if(pageKey.startsWith("node:")){
+    const nodeType = pageKey.slice(5);
+    const lines = NODE_TIPS[nodeType] || [];
+    const def = NODE_DEFS[nodeType];
+    const category = NODE_CATEGORIES[nodeType] || "Node";
+    return {
+      eyebrow: `Node Help - ${nodeType}`,
+      title: `${def?.icon || "*"} ${nodeType}`,
+      subtitle: `${nodeType} is part of ${category.toLowerCase()}. Use this page as a quick reference while building your graph.`,
+      body: `
+        <div class="helpSection">
+          <div class="helpNodeHeader">
+            <div class="helpNodeIcon">${def?.icon || "*"}</div>
+            <div>
+              <h3 class="helpSectionTitle" style="margin-bottom:4px;">${nodeType}</h3>
+              <div class="helpNodeMeta">Category: ${category}</div>
+            </div>
+          </div>
+          <div class="helpUpdateList">
+            ${lines.map(line => `<li>${line}</li>`).join("")}
+          </div>
+        </div>
+      `
+    };
+  }
+
+  return HELP_GENERAL_PAGES.introduction;
+}
+
+function renderHelpPage(pageKey){
+  activeHelpPage = pageKey || "introduction";
+  const page = getHelpPageData(activeHelpPage);
+  if(helpEyebrowEl) helpEyebrowEl.textContent = page.eyebrow;
+  if(helpTitleEl) helpTitleEl.textContent = page.title;
+  if(helpSubtitleEl) helpSubtitleEl.textContent = page.subtitle;
+  if(helpContentEl) helpContentEl.innerHTML = page.body;
+  document.querySelectorAll(".helpNavBtn[data-help-page]").forEach(btn => {
+    btn.classList.toggle("active", btn.getAttribute("data-help-page") === activeHelpPage);
+  });
+}
+
+function buildHelpNavigation(){
+  if(helpNodeNavEl && !helpNodeNavEl.dataset.ready){
+    helpNodeNavEl.innerHTML = Object.keys(NODE_TIPS).map(nodeType => (
+      `<button type="button" class="helpNavBtn" data-help-page="node:${nodeType}">${nodeType}</button>`
+    )).join("");
+    helpNodeNavEl.dataset.ready = "true";
+  }
+
+  helpOverlay?.querySelectorAll(".helpNavBtn[data-help-page]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      renderHelpPage(btn.getAttribute("data-help-page") || "introduction");
+    });
+  });
+
+  renderHelpPage(activeHelpPage);
+}
 
 const nodeSearchEl = document.getElementById("nodeSearch");
 const nodeSearchInput = document.getElementById("nodeSearchInput");
@@ -1211,7 +1471,7 @@ async function evaluate(){
 
   const { order, hasCycle } = topoSortNodeIds();
   if(hasCycle){
-    toast("⚠️ Cycle detected. Eval is best-effort (break the loop).");
+    toast("Warning: Cycle detected. Eval is best-effort (break the loop).");
   }
 
   for(const nodeId of order){
@@ -1269,7 +1529,7 @@ async function evaluate(){
       return;
     }
 
-    // ✅ Apply Output Ratio to Preview Screen
+    // Apply Output Ratio to Preview Screen
     if(outNode?.params?.ratio){
       applyOutputRatio(outNode.params.ratio);
     }
@@ -1544,7 +1804,7 @@ async function evaluate(){
     p.setAttribute("opacity","0.9");
     p.setAttribute("vector-effect","non-scaling-stroke");
 
-    // ✅ glow here (NOW p exists)
+    // glow here (NOW p exists)
     p.style.filter = "drop-shadow(0 0 4px rgba(0,0,0,.55))";
 
     wiresSvg.appendChild(p);
@@ -1566,7 +1826,7 @@ async function evaluate(){
       p.setAttribute("opacity","0.9");
       p.setAttribute("vector-effect","non-scaling-stroke");
 
-      // ✅ glow for live wire too
+      // glow for live wire too
       p.style.filter = "drop-shadow(0 0 4px rgba(0,0,0,.55))";
 
       wiresSvg.appendChild(p);
@@ -1716,7 +1976,7 @@ async function evaluate(){
             state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
             state.wires.push({ from, to });
             state.connecting = null;
-            toast(`Connected → ${to.nodeId}.${to.port}`);
+            toast(`Connected -> ${to.nodeId}.${to.port}`);
 
             evaluateAndRender();
             renderActiveDots();
@@ -1977,9 +2237,9 @@ async function evaluate(){
           <div class="emptyNote">
             <strong>${count} nodes selected</strong>
             <br><br>
-            • Drag to move them together
-            <br>• Delete/Backspace to remove
-            <br>• Click background to deselect
+            - Drag to move them together
+            <br>- Delete/Backspace to remove
+            <br>- Click background to deselect
             <br><br>
             Click a single node to edit its parameters.
           </div>`;
@@ -1992,9 +2252,9 @@ async function evaluate(){
           Click a node to edit its parameters here.
           <br><br>
           Red panel can later become:
-          <br>• advanced params
-          <br>• notes / metadata
-          <br>• node help / docs
+          <br>- advanced params
+          <br>- notes / metadata
+          <br>- node help / docs
         </div>`;
       updateTips(null);
       return;
@@ -2113,6 +2373,8 @@ async function evaluate(){
           exportEmbedJS(projectName);
         }else if(exportType === "exportLottieJSON"){
           exportLottieJSON(projectName);
+        }else if(exportType === "exportMp4"){
+          exportMp4(projectName);
         }else{
           exportCanvasAsImage(exportType);
         }
@@ -2260,7 +2522,7 @@ async function evaluate(){
 
         evaluateAndRender();
 
-        // ✅ Update preview screen when ratio changes
+        // Update preview screen when ratio changes
         if(node.type === "Output" && k === "ratio"){
           applyOutputRatio(v);
           renderInspector();
@@ -2572,7 +2834,7 @@ async function evaluate(){
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
-        toast(`Exported as ${ext.toUpperCase()} ✅`);
+        toast(`Exported as ${ext.toUpperCase()} OK`);
       }, mimeType, quality);
     };
     img.onerror = () => toast("Export failed.");
@@ -2581,6 +2843,313 @@ async function evaluate(){
 
   function exportCanvasAsImage(format){
     exportCanvasWithBlend(format);
+  }
+
+  // -----------------------------------------------
+  // MP4 Export
+  // -----------------------------------------------
+
+  let mp4MuxerLoadPromise = null;
+  function ensureMp4MuxerLoaded(){
+    if(window.Mp4Muxer?.Muxer) return Promise.resolve(window.Mp4Muxer);
+    if(mp4MuxerLoadPromise) return mp4MuxerLoadPromise;
+
+    mp4MuxerLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js";
+      script.onload = () => {
+        if(window.Mp4Muxer?.Muxer) resolve(window.Mp4Muxer);
+        else reject(new Error("mp4-muxer loaded but unavailable."));
+      };
+      script.onerror = () => reject(new Error("Failed to load MP4 muxer."));
+      document.head.appendChild(script);
+    });
+
+    return mp4MuxerLoadPromise;
+  }
+
+  async function getSupportedMp4EncoderConfig(w, h, fps){
+    if(typeof VideoEncoder !== "function" || typeof VideoEncoder.isConfigSupported !== "function") return null;
+    const candidates = [
+      { codec: "avc1.42001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+      { codec: "avc1.4d401f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+      { codec: "avc1.64001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+    ];
+
+    for(const config of candidates){
+      try{
+        const support = await VideoEncoder.isConfigSupported(config);
+        if(support?.supported) return support.config || config;
+      }catch(_){}
+    }
+    return null;
+  }
+
+  function freezeAnimationsAtTime(el, t){
+    if(!el || typeof t !== "number") return;
+    const all = [el, ...el.querySelectorAll("*")];
+    for(const e of all){
+      if(!(e instanceof HTMLElement)) continue;
+      if(e.style.animation){
+        const count = (e.style.animation.match(/,/g) || []).length + 1;
+        e.style.animationPlayState = Array(count).fill("paused").join(", ");
+        e.style.animationDelay = Array(count).fill(`-${t.toFixed(6)}s`).join(", ");
+      }
+      if(typeof e.getAnimations === "function"){
+        for(const anim of e.getAnimations()){
+          const isCssAnim = typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation;
+          if(isCssAnim) continue;
+          try{
+            const timing = anim.effect?.getComputedTiming?.();
+            const dur = typeof timing?.duration === "number" ? timing.duration : 0;
+            anim.currentTime = dur > 0 ? (t * 1000) % dur : t * 1000;
+            anim.pause();
+          }catch(_){}
+        }
+      }
+    }
+  }
+
+  function buildMp4ProgressOverlay(){
+    const div = document.createElement("div");
+    div.id = "mp4ExportOverlay";
+    div.className = "mp4ProgressOverlay";
+    div.innerHTML = `
+      <div class="mp4ProgressDialog">
+        <div class="mp4ProgressIcon">MP4</div>
+        <div class="mp4ProgressTitle">Exporting Video</div>
+        <div class="mp4ProgressPhase" id="mp4ProgressPhase">Starting\u2026</div>
+        <div class="mp4ProgressSub" id="mp4ProgressSub"></div>
+        <div class="mp4ProgressBarTrack">
+          <div class="mp4ProgressBarFill" id="mp4ProgressBarFill" style="width:0%"></div>
+        </div>
+        <div class="mp4ProgressNote">Frame-accurate MP4 export in progress.</div>
+        <button type="button" id="btnCancelMp4" class="danger" style="margin-top:12px; width:100%;">Cancel</button>
+      </div>`;
+    return div;
+  }
+
+  function updateMp4Progress(overlay, current, total, phase){
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    const subEl = overlay.querySelector("#mp4ProgressSub");
+    const fillEl = overlay.querySelector("#mp4ProgressBarFill");
+    const phaseEl = overlay.querySelector("#mp4ProgressPhase");
+    if(phaseEl && phase) phaseEl.textContent = phase;
+    if(subEl) subEl.textContent = `Frame ${current} of ${total} (${pct}%)`;
+    if(fillEl) fillEl.style.width = `${pct}%`;
+  }
+
+  async function dataUrlToCanvas(dataUrl, w, h){
+    if(!dataUrl) return null;
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try{
+          const c = document.createElement("canvas");
+          c.width = w;
+          c.height = h;
+          const cctx = c.getContext("2d", { alpha: false });
+          if(!cctx){
+            resolve(null);
+            return;
+          }
+          cctx.fillStyle = "#000000";
+          cctx.fillRect(0, 0, w, h);
+          cctx.drawImage(img, 0, 0, w, h);
+          resolve(c);
+        }catch(_){
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  }
+
+  async function captureFrameCanvasFromDomSnapshot(w, h){
+    const dataUrl = await renderLayerToDataUrl(renderRoot, {
+      useSimpleShapeRender: false,
+      timeoutMs: 900,
+      bakeComputedStyles: true
+    });
+    return dataUrlToCanvas(dataUrl, w, h);
+  }
+
+  function sceneHasCssMask(rootEl){
+    if(!(rootEl instanceof HTMLElement)) return false;
+    const all = [rootEl, ...rootEl.querySelectorAll("*")];
+    for(const el of all){
+      if(!(el instanceof HTMLElement)) continue;
+      const inlineMask = (el.style.maskImage && el.style.maskImage !== "none")
+        || (el.style.webkitMaskImage && el.style.webkitMaskImage !== "none");
+      if(inlineMask) return true;
+      try{
+        const cs = getComputedStyle(el);
+        if((cs.maskImage && cs.maskImage !== "none") || (cs.webkitMaskImage && cs.webkitMaskImage !== "none")){
+          return true;
+        }
+      }catch(_){ }
+    }
+    return false;
+  }
+
+  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject){
+    const tmpWrap = document.createElement("div");
+    tmpWrap.style.position = "fixed";
+    tmpWrap.style.left = "0";
+    tmpWrap.style.top = "-200vh";
+    tmpWrap.style.width = `${w}px`;
+    tmpWrap.style.height = `${h}px`;
+    tmpWrap.style.overflow = "hidden";
+    tmpWrap.style.pointerEvents = "none";
+    tmpWrap.style.zIndex = "-1";
+
+    const clone = renderRoot.cloneNode(true);
+    clone.style.position = "absolute";
+    clone.style.inset = "0";
+    clone.style.width = `${w}px`;
+    clone.style.height = `${h}px`;
+    tmpWrap.appendChild(clone);
+    document.body.appendChild(tmpWrap);
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    try{
+      return await html2canvasFn(tmpWrap, {
+        backgroundColor: "#000000",
+        width: w,
+        height: h,
+        scale: 1,
+        useCORS: true,
+        foreignObjectRendering: Boolean(preferForeignObject),
+        windowWidth: w,
+        windowHeight: h,
+        x: 0,
+        y: 0,
+        scrollX: 0,
+        scrollY: 0,
+        logging: false,
+      });
+    }finally{
+      document.body.removeChild(tmpWrap);
+    }
+  }
+
+  async function exportMp4(name){
+    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+    if(!outNode){ toast("No Output node found."); return; }
+    if(typeof VideoEncoder !== "function" || typeof VideoFrame !== "function"){
+      toast("MP4 export now requires WebCodecs support in this browser.");
+      return;
+    }
+
+    const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
+    const fps = 30;
+    const totalFrames = Math.max(1, Math.round(duration * fps));
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
+
+    const overlay = buildMp4ProgressOverlay();
+    document.body.appendChild(overlay);
+    let cancelled = false;
+    overlay.querySelector("#btnCancelMp4")?.addEventListener("click", () => { cancelled = true; }, { once: true });
+
+    let encoder = null;
+    let encoderFailure = null;
+    try{
+      updateMp4Progress(overlay, 0, totalFrames, "Loading encoder");
+      const [html2canvasFn, Mp4Muxer] = await Promise.all([
+        ensureHtml2CanvasLoaded(),
+        ensureMp4MuxerLoaded(),
+      ]);
+      const encoderConfig = await getSupportedMp4EncoderConfig(w, h, fps);
+      if(!encoderConfig){
+        throw new Error("H.264 MP4 encoding is not supported in this browser.");
+      }
+
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: { codec: "avc", width: w, height: h, frameRate: fps },
+        fastStart: "in-memory",
+      });
+
+      encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: err => { encoderFailure = err; }
+      });
+      encoder.configure(encoderConfig);
+
+      const frameCanvas = document.createElement("canvas");
+      frameCanvas.width = w;
+      frameCanvas.height = h;
+      const frameCtx = frameCanvas.getContext("2d", { alpha: false });
+      if(!frameCtx) throw new Error("Could not create MP4 frame canvas.");
+
+      const frameDurationUs = Math.round(1_000_000 / fps);
+      const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+
+      await evaluateAndRender();
+
+      for(let frameIdx = 0; frameIdx < totalFrames; frameIdx++){
+        if(cancelled) break;
+        if(encoderFailure) throw encoderFailure;
+        const t = frameIdx / fps;
+        updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and encoding");
+
+        freezeAnimationsAtTime(renderRoot, t);
+        let capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
+        if(!capturedCanvas){
+          capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene);
+        }
+
+        frameCtx.fillStyle = "#000000";
+        frameCtx.fillRect(0, 0, w, h);
+        frameCtx.drawImage(capturedCanvas, 0, 0, w, h);
+
+        const frame = new VideoFrame(frameCanvas, {
+          timestamp: frameIdx * frameDurationUs,
+          duration: frameDurationUs,
+        });
+        encoder.encode(frame, { keyFrame: frameIdx === 0 || (frameIdx % fps) === 0 });
+        frame.close();
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      await evaluateAndRender();
+
+      if(cancelled){
+        toast("Export cancelled.");
+        return;
+      }
+
+      updateMp4Progress(overlay, totalFrames, totalFrames, "Finalizing MP4");
+      await encoder.flush();
+      if(encoderFailure) throw encoderFailure;
+      muxer.finalize();
+
+      const buffer = muxer.target.buffer;
+      if(!buffer || !buffer.byteLength) throw new Error("MP4 output buffer was empty.");
+
+      const safeName = String(name || "animation").trim().replace(/[^\w\-]+/g, "_") || "animation";
+      const ts = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([buffer], { type: "video/mp4" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${safeName}_${ts}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast(`MP4 exported \u2705 (${totalFrames} frames, ${duration}s)`);
+    }catch(err){
+      console.error("MP4 export failed", err);
+      toast(`Export failed: ${String(err?.message || err || "Unknown error").slice(0, 120)}`);
+      try{ await evaluateAndRender(); }catch(_){}
+    }finally{
+      try{ encoder?.close?.(); }catch(_){}
+      overlay.remove();
+    }
   }
 
   const escapeAttr = window.oniwireEscapeAttr;
@@ -2655,6 +3224,8 @@ async function evaluate(){
   // Pan + Zoom controls for editor
   // -----------------------------
   window.addEventListener("keydown", (e) => {
+    if(helpVisible) return;
+
     // Undo (Ctrl+Z / Cmd+Z)
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z"){
       e.preventDefault();
@@ -2684,8 +3255,9 @@ async function evaluate(){
 
     if(e.code !== "Space") return;
 
-    // ✅ allow space to be typed inside inputs/textareas/contenteditable
+    // Allow space to type in inputs/textareas/contenteditable.
     if(isTypingTarget(e.target)) return;
+    if(isNodeSearchOpen()) return;
 
     state.spaceDown = true;
     editorEl.style.cursor = "grab";
@@ -2694,8 +3266,6 @@ async function evaluate(){
 
   window.addEventListener("keyup", (e) => {
     if(e.code !== "Space") return;
-
-    // ✅ same rule here, but harmless either way
     if(isTypingTarget(e.target)) return;
 
     state.spaceDown = false;
@@ -2705,7 +3275,7 @@ async function evaluate(){
   });
 
   editorEl.addEventListener("mousedown", (e) => {
-    // Middle mouse OR (left mouse + space) starts panning
+    // Middle mouse OR (left mouse + space) starts panning.
     const isMiddle = (e.button === 1);
     const isSpaceLeft = (e.button === 0 && state.spaceDown);
 
@@ -2718,39 +3288,36 @@ async function evaluate(){
       return;
     }
 
-    // Left click on background (not on nodes or dots) starts selection rectangle
+    // Left click on background starts selection rectangle.
     if(e.button === 0){
       const isDot = e.target.classList?.contains("dot");
       const isNode = e.target.closest?.(".node");
       const isNodeHeader = e.target.closest?.(".nh");
-      
-      // Don't start selection if clicking on a node or dot
+
       if(isDot || isNodeHeader || isNode) return;
-      
-      // Allow selection on editor, stage, wires, or nodes container
-      const isEditorArea = e.target === editorEl || 
-                           e.target.id === 'stage' || 
-                           e.target.id === 'wires' || 
-                           e.target.id === 'nodes';
-      
+
+      const isEditorArea = e.target === editorEl
+        || e.target.id === "stage"
+        || e.target.id === "wires"
+        || e.target.id === "nodes";
+
       if(isEditorArea){
         const m = editorMouse(e);
         state.selecting = true;
         state.selectStart = m;
         state.selectCurrent = m;
-        
-        // Clear selection unless Shift/Ctrl is held
+
         if(!e.shiftKey && !e.ctrlKey && !e.metaKey){
           clearSelection();
         }
-        
+
         e.preventDefault();
       }
     }
   });
 
   editorEl.addEventListener("auxclick", (e) => {
-    // prevent browser autoscroll on middle click
+    // Prevent browser autoscroll on middle click.
     if(e.button === 1) e.preventDefault();
   });
 
@@ -2777,7 +3344,7 @@ async function evaluate(){
     // Dragging node (world coords)
     if(state.draggingNode){
       const mw = editorToWorld(m.x, m.y);
-      
+
       if(state.draggingNode.ids){
         // Drag multiple nodes
         for(const nid of state.draggingNode.ids){
@@ -3118,11 +3685,13 @@ function quickConnectSelectedToOutput(){
   renderInspector();
   requestWireDraw();
 
-  toast(`Connected ${node.id}.${outPort} → ${outputNode.id}.in`);
+  toast(`Connected ${node.id}.${outPort} -> ${outputNode.id}.in`);
 }
 
 // Delete / Backspace key handler
 window.addEventListener("keydown", (e) => {
+  if(helpVisible) return;
+
   // Don't delete when typing in inputs/fields
   if(isTypingTarget(e.target)) return;
 
@@ -3135,6 +3704,7 @@ window.addEventListener("keydown", (e) => {
 
 // Shift+O quick connect to Output
 window.addEventListener("keydown", (e) => {
+  if(helpVisible) return;
   if(isTypingTarget(e.target)) return;
   if(isNodeSearchOpen()) return;
 
@@ -3197,7 +3767,7 @@ function loadGraph(data){
   render();
   evaluateAndRender();
   renderInspector();
-  toast("Loaded ✅");
+  toast("Loaded OK");
 }
 
 
@@ -3217,6 +3787,14 @@ function loadGraph(data){
 
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
+  buildHelpNavigation();
+
+  helpBtn?.addEventListener("click", () => openHelp(activeHelpPage));
+  helpCloseBtn?.addEventListener("click", closeHelp);
+  helpStartBtn?.addEventListener("click", closeHelp);
+  helpOverlay?.addEventListener("mousedown", (e) => {
+    if(e.target === helpOverlay) closeHelp();
+  });
 
   document.getElementById("btnClearSel").addEventListener("click", () => {
     clearSelection();
@@ -3238,7 +3816,7 @@ function loadGraph(data){
   });
 
   document.getElementById("btnClearCache").addEventListener("click", () => {
-    if(confirm("Clear all saved projects from browser storage?\n\nThis will:\n• Delete all saved projects\n• Clear undo history\n• Keep your current work\n\nContinue?")){
+    if(confirm("Clear all saved projects from browser storage?\n\nThis will:\n- Delete all saved projects\n- Clear undo history\n- Keep your current work\n\nContinue?")){
       // Remove only Oniwire project keys.
       const projectIndexKey = "visual-node-app:saves:index";
       const projectPrefix = "visual-node-app:save:";
@@ -3258,7 +3836,7 @@ function loadGraph(data){
       // Refresh the project list dropdown to remove deleted projects
       refreshProjectList();
       
-      toast("✅ Cache cleared! All saved projects deleted.");
+      toast("Cache cleared! All saved projects deleted.");
       console.log("Browser cache cleared: localStorage emptied, undo history reset");
     }
   });

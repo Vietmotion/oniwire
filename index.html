@@ -16,12 +16,6 @@
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 
-    /* Layout sizing */
-    --leftW: 260px;
-    --rightW: 500px;
-    --topH: 54vh;
-    --gap: 14px;
-
     /* Node editor transform */
     --nx: 0px;
     --ny: 0px;
@@ -2030,6 +2024,8 @@ async function evaluate(){
           exportEmbedJS(projectName);
         }else if(exportType === "exportLottieJSON"){
           exportLottieJSON(projectName);
+        }else if(exportType === "exportMp4"){
+          exportMp4(projectName);
         }else{
           exportCanvasAsImage(exportType);
         }
@@ -2500,6 +2496,248 @@ async function evaluate(){
     exportCanvasWithBlend(format);
   }
 
+  // -----------------------------------------------
+  // MP4 Export
+  // -----------------------------------------------
+
+  let mp4MuxerLoadPromise = null;
+  function ensureMp4MuxerLoaded(){
+    if(window.Mp4Muxer?.Muxer) return Promise.resolve(window.Mp4Muxer);
+    if(mp4MuxerLoadPromise) return mp4MuxerLoadPromise;
+
+    mp4MuxerLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js";
+      script.onload = () => {
+        if(window.Mp4Muxer?.Muxer) resolve(window.Mp4Muxer);
+        else reject(new Error("mp4-muxer loaded but unavailable."));
+      };
+      script.onerror = () => reject(new Error("Failed to load MP4 muxer."));
+      document.head.appendChild(script);
+    });
+
+    return mp4MuxerLoadPromise;
+  }
+
+  async function getSupportedMp4EncoderConfig(w, h, fps){
+    if(typeof VideoEncoder !== "function" || typeof VideoEncoder.isConfigSupported !== "function") return null;
+    const candidates = [
+      { codec: "avc1.42001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+      { codec: "avc1.4d401f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+      { codec: "avc1.64001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
+    ];
+
+    for(const config of candidates){
+      try{
+        const support = await VideoEncoder.isConfigSupported(config);
+        if(support?.supported) return support.config || config;
+      }catch(_){}
+    }
+    return null;
+  }
+
+  function freezeAnimationsAtTime(el, t){
+    if(!el || typeof t !== "number") return;
+    const all = [el, ...el.querySelectorAll("*")];
+    for(const e of all){
+      if(!(e instanceof HTMLElement)) continue;
+      if(e.style.animation){
+        const count = (e.style.animation.match(/,/g) || []).length + 1;
+        e.style.animationPlayState = Array(count).fill("paused").join(", ");
+        e.style.animationDelay = Array(count).fill(`-${t.toFixed(6)}s`).join(", ");
+      }
+      if(typeof e.getAnimations === "function"){
+        for(const anim of e.getAnimations()){
+          const isCssAnim = typeof CSSAnimation !== "undefined" && anim instanceof CSSAnimation;
+          if(isCssAnim) continue;
+          try{
+            const timing = anim.effect?.getComputedTiming?.();
+            const dur = typeof timing?.duration === "number" ? timing.duration : 0;
+            anim.currentTime = dur > 0 ? (t * 1000) % dur : t * 1000;
+            anim.pause();
+          }catch(_){}
+        }
+      }
+    }
+  }
+
+  function buildMp4ProgressOverlay(){
+    const div = document.createElement("div");
+    div.id = "mp4ExportOverlay";
+    div.className = "mp4ProgressOverlay";
+    div.innerHTML = `
+      <div class="mp4ProgressDialog">
+        <div class="mp4ProgressIcon">🎬</div>
+        <div class="mp4ProgressTitle">Exporting Video</div>
+        <div class="mp4ProgressPhase" id="mp4ProgressPhase">Starting\u2026</div>
+        <div class="mp4ProgressSub" id="mp4ProgressSub"></div>
+        <div class="mp4ProgressBarTrack">
+          <div class="mp4ProgressBarFill" id="mp4ProgressBarFill" style="width:0%"></div>
+        </div>
+        <div class="mp4ProgressNote">Frame-accurate MP4 export in progress.</div>
+        <button type="button" id="btnCancelMp4" class="danger" style="margin-top:12px; width:100%;">Cancel</button>
+      </div>`;
+    return div;
+  }
+
+  function updateMp4Progress(overlay, current, total, phase){
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    const subEl = overlay.querySelector("#mp4ProgressSub");
+    const fillEl = overlay.querySelector("#mp4ProgressBarFill");
+    const phaseEl = overlay.querySelector("#mp4ProgressPhase");
+    if(phaseEl && phase) phaseEl.textContent = phase;
+    if(subEl) subEl.textContent = `Frame ${current} of ${total} (${pct}%)`;
+    if(fillEl) fillEl.style.width = `${pct}%`;
+  }
+
+  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn){
+    const tmpWrap = document.createElement("div");
+    tmpWrap.style.position = "fixed";
+    tmpWrap.style.left = "0";
+    tmpWrap.style.top = "-200vh";
+    tmpWrap.style.width = `${w}px`;
+    tmpWrap.style.height = `${h}px`;
+    tmpWrap.style.overflow = "hidden";
+    tmpWrap.style.pointerEvents = "none";
+    tmpWrap.style.zIndex = "-1";
+
+    const clone = renderRoot.cloneNode(true);
+    clone.style.position = "absolute";
+    clone.style.inset = "0";
+    clone.style.width = `${w}px`;
+    clone.style.height = `${h}px`;
+    tmpWrap.appendChild(clone);
+    document.body.appendChild(tmpWrap);
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    try{
+      return await html2canvasFn(tmpWrap, {
+        backgroundColor: "#000000",
+        width: w,
+        height: h,
+        scale: 1,
+        useCORS: true,
+        logging: false,
+      });
+    }finally{
+      document.body.removeChild(tmpWrap);
+    }
+  }
+
+  async function exportMp4(name){
+    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+    if(!outNode){ toast("No Output node found."); return; }
+    if(typeof VideoEncoder !== "function" || typeof VideoFrame !== "function"){
+      toast("MP4 export now requires WebCodecs support in this browser.");
+      return;
+    }
+
+    const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
+    const fps = 30;
+    const totalFrames = Math.max(1, Math.round(duration * fps));
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
+
+    const overlay = buildMp4ProgressOverlay();
+    document.body.appendChild(overlay);
+    let cancelled = false;
+    overlay.querySelector("#btnCancelMp4")?.addEventListener("click", () => { cancelled = true; }, { once: true });
+
+    let encoder = null;
+    let encoderFailure = null;
+    try{
+      updateMp4Progress(overlay, 0, totalFrames, "Loading encoder");
+      const [html2canvasFn, Mp4Muxer] = await Promise.all([
+        ensureHtml2CanvasLoaded(),
+        ensureMp4MuxerLoaded(),
+      ]);
+      const encoderConfig = await getSupportedMp4EncoderConfig(w, h, fps);
+      if(!encoderConfig){
+        throw new Error("H.264 MP4 encoding is not supported in this browser.");
+      }
+
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: { codec: "avc", width: w, height: h, frameRate: fps },
+        fastStart: "in-memory",
+      });
+
+      encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: err => { encoderFailure = err; }
+      });
+      encoder.configure(encoderConfig);
+
+      const frameCanvas = document.createElement("canvas");
+      frameCanvas.width = w;
+      frameCanvas.height = h;
+      const frameCtx = frameCanvas.getContext("2d", { alpha: false });
+      if(!frameCtx) throw new Error("Could not create MP4 frame canvas.");
+
+      const frameDurationUs = Math.round(1_000_000 / fps);
+
+      await evaluateAndRender();
+
+      for(let frameIdx = 0; frameIdx < totalFrames; frameIdx++){
+        if(cancelled) break;
+        if(encoderFailure) throw encoderFailure;
+        const t = frameIdx / fps;
+        updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and encoding");
+
+        freezeAnimationsAtTime(renderRoot, t);
+        const capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn);
+
+        frameCtx.fillStyle = "#000000";
+        frameCtx.fillRect(0, 0, w, h);
+        frameCtx.drawImage(capturedCanvas, 0, 0, w, h);
+
+        const frame = new VideoFrame(frameCanvas, {
+          timestamp: frameIdx * frameDurationUs,
+          duration: frameDurationUs,
+        });
+        encoder.encode(frame, { keyFrame: frameIdx === 0 || (frameIdx % fps) === 0 });
+        frame.close();
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      await evaluateAndRender();
+
+      if(cancelled){
+        toast("Export cancelled.");
+        return;
+      }
+
+      updateMp4Progress(overlay, totalFrames, totalFrames, "Finalizing MP4");
+      await encoder.flush();
+      if(encoderFailure) throw encoderFailure;
+      muxer.finalize();
+
+      const buffer = muxer.target.buffer;
+      if(!buffer || !buffer.byteLength) throw new Error("MP4 output buffer was empty.");
+
+      const safeName = String(name || "animation").trim().replace(/[^\w\-]+/g, "_") || "animation";
+      const ts = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([buffer], { type: "video/mp4" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${safeName}_${ts}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast(`MP4 exported \u2705 (${totalFrames} frames, ${duration}s)`);
+    }catch(err){
+      console.error("MP4 export failed", err);
+      toast(`Export failed: ${String(err?.message || err || "Unknown error").slice(0, 120)}`);
+      try{ await evaluateAndRender(); }catch(_){}
+    }finally{
+      try{ encoder?.close?.(); }catch(_){}
+      overlay.remove();
+    }
+  }
+
   const escapeAttr = window.oniwireEscapeAttr;
 
   // -----------------------------
@@ -2548,128 +2786,10 @@ async function evaluate(){
       const nodeTop = node.pos.y;
       const nodeRight = nodeLeft + nodeWidth;
       const nodeBottom = nodeTop + nodeHeight;
-
-      // Check if node overlaps with selection rectangle
-      const overlaps = !(nodeRight < topLeft.x || 
-                         nodeLeft > bottomRight.x || 
-                         nodeBottom < topLeft.y || 
-                         nodeTop > bottomRight.y);
-
-      if(overlaps){
-        state.selectedNodes.add(node.id);
-        state.selected = node.id; // Keep last selected as primary
-        selectedAny = true;
-      }
-    }
-
-    if(selectedAny){
       render();
       renderInspector();
     }
   }
-
-  // -----------------------------
-  // Pan + Zoom controls for editor
-  // -----------------------------
-  window.addEventListener("keydown", (e) => {
-    // Undo (Ctrl+Z / Cmd+Z)
-    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z"){
-      e.preventDefault();
-      const snap = state.history.pop();
-      restoreSnapshot(snap);
-      evaluateAndRender();
-      return;
-    }
-
-    if((e.ctrlKey || e.metaKey) && !e.shiftKey){
-      const key = e.key.toLowerCase();
-
-      if(key === "c"){
-        if(isTypingTarget(e.target)) return;
-        e.preventDefault();
-        copySelectedNodes();
-        return;
-      }
-
-      if(key === "v"){
-        if(isTypingTarget(e.target)) return;
-        e.preventDefault();
-        pasteCopiedNodes();
-        return;
-      }
-    }
-
-    if(e.code !== "Space") return;
-
-    // ✅ allow space to be typed inside inputs/textareas/contenteditable
-    if(isTypingTarget(e.target)) return;
-
-    state.spaceDown = true;
-    editorEl.style.cursor = "grab";
-    e.preventDefault();
-  });
-
-  window.addEventListener("keyup", (e) => {
-    if(e.code !== "Space") return;
-
-    // ✅ same rule here, but harmless either way
-    if(isTypingTarget(e.target)) return;
-
-    state.spaceDown = false;
-    state.isPanning = false;
-    state.panStart = null;
-    editorEl.style.cursor = "default";
-  });
-
-  editorEl.addEventListener("mousedown", (e) => {
-    // Middle mouse OR (left mouse + space) starts panning
-    const isMiddle = (e.button === 1);
-    const isSpaceLeft = (e.button === 0 && state.spaceDown);
-
-    if(isMiddle || isSpaceLeft){
-      const m = editorMouse(e);
-      state.isPanning = true;
-      state.panStart = { x: m.x, y: m.y, panX: state.panX, panY: state.panY };
-      editorEl.style.cursor = "grabbing";
-      e.preventDefault();
-      return;
-    }
-
-    // Left click on background (not on nodes or dots) starts selection rectangle
-    if(e.button === 0){
-      const isDot = e.target.classList?.contains("dot");
-      const isNode = e.target.closest?.(".node");
-      const isNodeHeader = e.target.closest?.(".nh");
-      
-      // Don't start selection if clicking on a node or dot
-      if(isDot || isNodeHeader || isNode) return;
-      
-      // Allow selection on editor, stage, wires, or nodes container
-      const isEditorArea = e.target === editorEl || 
-                           e.target.id === 'stage' || 
-                           e.target.id === 'wires' || 
-                           e.target.id === 'nodes';
-      
-      if(isEditorArea){
-        const m = editorMouse(e);
-        state.selecting = true;
-        state.selectStart = m;
-        state.selectCurrent = m;
-        
-        // Clear selection unless Shift/Ctrl is held
-        if(!e.shiftKey && !e.ctrlKey && !e.metaKey){
-          clearSelection();
-        }
-        
-        e.preventDefault();
-      }
-    }
-  });
-
-  editorEl.addEventListener("auxclick", (e) => {
-    // prevent browser autoscroll on middle click
-    if(e.button === 1) e.preventDefault();
-  });
 
   window.addEventListener("mousemove", (e) => {
     const m = editorMouse(e);
@@ -2694,7 +2814,7 @@ async function evaluate(){
     // Dragging node (world coords)
     if(state.draggingNode){
       const mw = editorToWorld(m.x, m.y);
-      
+
       if(state.draggingNode.ids){
         // Drag multiple nodes
         for(const nid of state.draggingNode.ids){

@@ -33,6 +33,13 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             buttons: [
               { label: "Lottie JSON", id: "exportLottieJSON" }
             ]
+          },
+          {
+            title: "MP4 Video",
+            hint: "Frame-by-frame render · 30 fps",
+            buttons: [
+              { label: "Export MP4", id: "exportMp4" }
+            ]
           }
         ]
       }

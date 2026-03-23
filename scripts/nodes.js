@@ -22,7 +22,8 @@ window.createOniwireNodeDefsApi = function createOniwireNodeDefsApi(deps){
 
 	const motionGlowNodes = {
 		Motion: window.createOniwireMotionNodeDef({ ensureMotionStyles, measureLayerBounds, clamp }),
-		Glow: window.createOniwireGlowNodeDef({ propagateMotionFlag, clamp, parseHexColor })
+		Glow: window.createOniwireGlowNodeDef({ propagateMotionFlag, clamp, parseHexColor }),
+		ColorCorrect: window.createOniwireColorCorrectNodeDef({ propagateMotionFlag, clamp })
 	};
 
 	return {
