@@ -21,14 +21,24 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
   let nodeSearchOpen = false;
   let nodeSpawnEditorPos = { x: 0, y: 0 };
 
+  const NODE_LABELS = {
+    ColorCorrect: "Color Corrector"
+  };
+
+  function getNodeDisplayName(type){
+    return NODE_LABELS[type] || type;
+  }
+
   function getAllNodesForSearch(){
     return Object.keys(NODE_DEFS).map(type => {
       const def = NODE_DEFS[type];
+      const displayName = getNodeDisplayName(type);
       return {
         type,
+        displayName,
         icon: def.icon || "⬛",
         category: NODE_CATEGORIES[type] || "Other",
-        haystack: `${type} ${(NODE_CATEGORIES[type] || "")}`.toLowerCase()
+        haystack: `${type} ${displayName} ${(NODE_CATEGORIES[type] || "")}`.toLowerCase()
       };
     }).sort((a, b) => (a.category + a.type).localeCompare(b.category + b.type));
   }
@@ -78,8 +88,10 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
     const scored = [];
     for(const n of all){
       const name = n.type.toLowerCase();
+      const displayName = n.displayName.toLowerCase();
       let score = 0;
       if(name.startsWith(q)) score += 100;
+      if(displayName.startsWith(q)) score += 100;
       if(n.haystack.includes(q)) score += 10;
       if((n.category || "").toLowerCase().includes(q)) score += 5;
       if(score > 0) scored.push({ n, score });
@@ -111,7 +123,7 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
         <div class="nodeLeft">
           <div class="nodeIcon">${item.icon}</div>
           <div class="nodeText">
-            <div class="nodeName">${item.type}</div>
+            <div class="nodeName">${item.displayName}</div>
             <div class="nodeCat">${item.category}</div>
           </div>
         </div>
@@ -158,9 +170,9 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
     const created = addNode(type, { x: world.x, y: world.y });
     close();
     if(created){
-      toast(`Added: ${type}`);
+      toast(`Added: ${getNodeDisplayName(type)}`);
     }else{
-      toast(`Cannot add ${type} in current export mode.`);
+      toast(`Cannot add ${getNodeDisplayName(type)} in current export mode.`);
     }
   }
 

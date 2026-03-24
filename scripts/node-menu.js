@@ -9,10 +9,14 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
 
   const NODE_GROUPS = {
     generator: ["Color", "Gradient", "Ramp", "Shape", "Text", "Image"],
-    operation: ["Transform", "Clone", "Composite", "Mask", "Freeze"],
+    operation: ["Transform", "Clone", "Composite", "Mask", "Freeze", "ColorCorrect"],
     motion: ["Motion"],
-    effect: ["Glow"],
+    effect: ["Glow", "Curves"],
     output: ["Output"]
+  };
+
+  const NODE_LABELS = {
+    ColorCorrect: "Color Corrector"
   };
 
   let activeGroup = "generator";
@@ -42,7 +46,7 @@ window.createOniwireNodeMenuApi = function createOniwireNodeMenuApi(deps){
       const item = document.createElement("button");
       item.type = "button";
       item.className = "nodeDropdownItem";
-      item.textContent = type;
+      item.textContent = NODE_LABELS[type] || type;
       item.dataset.node = type;
       if(gate && gate.ok === false){
         item.disabled = true;

@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Oniwire (v0.2.2)</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=Montserrat:wght@100;200;300;400;500;600;700;800;900&family=Roboto:wght@100;300;400;500;700;900&family=Open+Sans:wght@300;400;500;600;700;800&family=Lato:wght@100;300;400;700;900&family=Nunito:wght@200;300;400;500;600;700;800;900&family=Raleway:wght@100;200;300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Source+Sans+3:wght@200;300;400;500;600;700;800;900&family=Ubuntu:wght@300;400;500;700&family=Work+Sans:wght@100;200;300;400;500;600;700;800;900&family=DM+Sans:wght@100;200;300;400;500;600;700;800;900&family=Manrope:wght@200;300;400;500;600;700;800&family=Mulish:wght@200;300;400;500;600;700;800;900&family=Oswald:wght@200;300;400;500;600;700&family=Bebas+Neue&family=Fira+Sans:wght@100;200;300;400;500;600;700;800;900&family=PT+Sans:wght@400;700&family=Noto+Sans:wght@100;200;300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700;800;900&family=Karla:wght@200;300;400;500;600;700;800&family=Inconsolata:wght@200;300;400;500;600;700;800;900&display=swap">
   <style>
     :root{
     --bg:#0b0f14;
@@ -36,6 +39,7 @@
   <script src="scripts/nodes/motion.js?v=20260319a"></script>
   <script src="scripts/nodes/glow.js"></script>
   <script src="scripts/nodes/color_correct.js"></script>
+  <script src="scripts/nodes/curves.js"></script>
   <script src="scripts/nodes/clone.js"></script>
   <script src="scripts/nodes/composite.js"></script>
   <script src="scripts/nodes/mask.js"></script>
@@ -674,22 +678,22 @@ utilsApi.initProjectUtils();
 
   function buildShapeMaskUrl(meta, invert){
     if(!meta) return null;
-    const { shapeType, size, x, y } = meta;
+    const { shapeType, width, height, x, y } = meta;
 
     const w = renderRoot?.clientWidth || 800;
     const h = renderRoot?.clientHeight || 600;
 
     const baseFill = invert ? "white" : "black";
     const shapeFill = invert ? "black" : "white";
-    const r = size / 2;
+    const r = Math.max(width, height) / 2;
 
     let shapeSvg = "";
     switch(shapeType){
       case "circle":
         shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
         break;
-      case "square":
-        shapeSvg = `<rect x="${x - r}" y="${y - r}" width="${size}" height="${size}" fill="${shapeFill}" />`;
+      case "rectangle":
+        shapeSvg = `<rect x="${x - width / 2}" y="${y - height / 2}" width="${width}" height="${height}" fill="${shapeFill}" />`;
         break;
       case "triangle":
         shapeSvg = `<polygon points="${[
@@ -1187,6 +1191,11 @@ const NODE_TIPS = {
     "Controls: Brightness | Contrast | Saturation | Hue Rotate | Temperature (warm/cool).",
     "<em>in</em> -> the layer to correct."
   ],
+  Curves: [
+    "<strong>Curves</strong> - Fine-tunes tonal response using channel curves.",
+    "Modes: RGB (master), R, G, B. Use Shadows, Midtones, Highlights sliders per mode.",
+    "<em>in</em> -> the layer to remap with curve adjustments."
+  ],
   Clone: [
     "<strong>Clone</strong> - Duplicates a layer in a grid, line, or radial pattern.",
     "<em>in</em> -> the layer to clone. Set count, spacing, and layout in the inspector."
@@ -1325,27 +1334,37 @@ const NODE_CATEGORIES = {
   Composite: "Operations",
   Mask: "Operations",
   ColorCorrect: "Operations",
+  Curves: "Operations",
   Output: "Output",
 };
+
+const NODE_DISPLAY_NAMES = {
+  ColorCorrect: "Color Corrector"
+};
+
+function getNodeDisplayName(nodeType){
+  return NODE_DISPLAY_NAMES[nodeType] || nodeType;
+}
 
 function getHelpPageData(pageKey){
   if(HELP_GENERAL_PAGES[pageKey]) return HELP_GENERAL_PAGES[pageKey];
 
   if(pageKey.startsWith("node:")){
     const nodeType = pageKey.slice(5);
+    const displayName = getNodeDisplayName(nodeType);
     const lines = NODE_TIPS[nodeType] || [];
     const def = NODE_DEFS[nodeType];
     const category = NODE_CATEGORIES[nodeType] || "Node";
     return {
-      eyebrow: `Node Help - ${nodeType}`,
-      title: `${def?.icon || "*"} ${nodeType}`,
-      subtitle: `${nodeType} is part of ${category.toLowerCase()}. Use this page as a quick reference while building your graph.`,
+      eyebrow: `Node Help - ${displayName}`,
+      title: `${def?.icon || "*"} ${displayName}`,
+      subtitle: `${displayName} is part of ${category.toLowerCase()}. Use this page as a quick reference while building your graph.`,
       body: `
         <div class="helpSection">
           <div class="helpNodeHeader">
             <div class="helpNodeIcon">${def?.icon || "*"}</div>
             <div>
-              <h3 class="helpSectionTitle" style="margin-bottom:4px;">${nodeType}</h3>
+              <h3 class="helpSectionTitle" style="margin-bottom:4px;">${displayName}</h3>
               <div class="helpNodeMeta">Category: ${category}</div>
             </div>
           </div>
@@ -1375,7 +1394,7 @@ function renderHelpPage(pageKey){
 function buildHelpNavigation(){
   if(helpNodeNavEl && !helpNodeNavEl.dataset.ready){
     helpNodeNavEl.innerHTML = Object.keys(NODE_TIPS).map(nodeType => (
-      `<button type="button" class="helpNavBtn" data-help-page="node:${nodeType}">${nodeType}</button>`
+      `<button type="button" class="helpNavBtn" data-help-page="node:${nodeType}">${getNodeDisplayName(nodeType)}</button>`
     )).join("");
     helpNodeNavEl.dataset.ready = "true";
   }
@@ -1607,7 +1626,7 @@ async function evaluate(){
       { x: left + width, y: top + height }
     ];
 
-    const hasSize = typeof node.params?.size !== "undefined";
+    const hasSize = (typeof node.params?.width !== "undefined" && typeof node.params?.height !== "undefined") || typeof node.params?.size !== "undefined";
     const hasScale = typeof node.params?.scale !== "undefined";
     if(!hasSize && !hasScale) return;
 
@@ -1645,6 +1664,8 @@ async function evaluate(){
         const startDist = Math.hypot(startPt.x - center.x, startPt.y - center.y) || 1;
 
         const startSize = Number(node.params?.size ?? 0);
+        const startWidth = Number(node.params?.width ?? 100);
+        const startHeight = Number(node.params?.height ?? 100);
         const startScale = Number(node.params?.scale ?? 1);
         const startX = Number(node.params?.x ?? 0);
         const startY = Number(node.params?.y ?? 0);
@@ -1657,9 +1678,18 @@ async function evaluate(){
           const factor = clamp(dist / startDist, 0.1, 10);
 
           if(hasSize){
-            const nextSize = Math.max(1, startSize * factor);
-            node.params.size = nextSize;
-            syncInspectorValue("size", Math.round(nextSize));
+            if(node.type === "Shape"){
+              const nextWidth = Math.max(1, startWidth * factor);
+              const nextHeight = Math.max(1, startHeight * factor);
+              node.params.width = nextWidth;
+              node.params.height = nextHeight;
+              syncInspectorValue("width", Math.round(nextWidth));
+              syncInspectorValue("height", Math.round(nextHeight));
+            }else if(typeof node.params?.size !== "undefined"){
+              const nextSize = Math.max(1, startSize * factor);
+              node.params.size = nextSize;
+              syncInspectorValue("size", Math.round(nextSize));
+            }
 
             if(node.type === "Text"){
               const nextW = startW * factor;
@@ -1844,7 +1874,9 @@ async function evaluate(){
     for(const node of state.nodes.values()){
       const def = NODE_DEFS[node.type];
       if(!def) continue;
-      const nodeName = String(node.name || "").trim() || node.type;
+      const rawName = String(node.name || "").trim();
+      const defaultName = getNodeDisplayName(node.type);
+      const nodeName = (!rawName || rawName === node.type) ? defaultName : rawName;
 
       const el = document.createElement("div");
       const isSelected = state.selected === node.id;
@@ -2188,6 +2220,40 @@ async function evaluate(){
           <button class="rampAddBtn" type="button">Add stop</button>
         </div>
       `;
+    } else if(f.type === "curvesGraph"){
+      const mode = String(node.params.mode || "RGB");
+      const modeMeta = mode === "R"
+        ? { kS: "rShadows", kM: "rMidtones", kH: "rHighlights", stroke: "#ff6b6b", channel: "Red" }
+        : (mode === "G"
+          ? { kS: "gShadows", kM: "gMidtones", kH: "gHighlights", stroke: "#7ee787", channel: "Green" }
+          : (mode === "B"
+            ? { kS: "bShadows", kM: "bMidtones", kH: "bHighlights", stroke: "#79a8ff", channel: "Blue" }
+            : { kS: "rgbShadows", kM: "rgbMidtones", kH: "rgbHighlights", stroke: "#d7dfff", channel: "RGB" }));
+
+      const vS = clamp(Number(node.params[modeMeta.kS] || 0), -100, 100);
+      const vM = clamp(Number(node.params[modeMeta.kM] || 0), -100, 100);
+      const vH = clamp(Number(node.params[modeMeta.kH] || 0), -100, 100);
+
+      const yS = Math.round((1 - clamp(0.25 + (vS / 100), 0, 1)) * 100);
+      const yM = Math.round((1 - clamp(0.5 + (vM / 100), 0, 1)) * 100);
+      const yH = Math.round((1 - clamp(0.75 + (vH / 100), 0, 1)) * 100);
+
+      controlHtml = `
+        <div class="curvesEditor" data-k-shadows="${modeMeta.kS}" data-k-midtones="${modeMeta.kM}" data-k-highlights="${modeMeta.kH}">
+          <svg viewBox="0 0 100 100" style="width:100%; height:160px; border:1px solid rgba(255,255,255,.14); border-radius:10px; background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)); touch-action:none;">
+            <path class="curvesGuideDiagonal" d="M0 100 L100 0" stroke="rgba(255,255,255,.22)" stroke-width="1" stroke-dasharray="3 3" fill="none"></path>
+            <path class="curvesGuideGrid" d="M25 0 L25 100 M50 0 L50 100 M75 0 L75 100 M0 25 L100 25 M0 50 L100 50 M0 75 L100 75" stroke="rgba(255,255,255,.09)" stroke-width="1" fill="none"></path>
+            <path class="curvesPath" d="M0 100 L25 ${yS} L50 ${yM} L75 ${yH} L100 0" stroke="${modeMeta.stroke}" stroke-width="2.5" fill="none"></path>
+            <circle class="curvesHandle" data-target="shadows" cx="25" cy="${yS}" r="3.2" fill="#fff" stroke="${modeMeta.stroke}" stroke-width="2"></circle>
+            <circle class="curvesHandle" data-target="midtones" cx="50" cy="${yM}" r="3.2" fill="#fff" stroke="${modeMeta.stroke}" stroke-width="2"></circle>
+            <circle class="curvesHandle" data-target="highlights" cx="75" cy="${yH}" r="3.2" fill="#fff" stroke="${modeMeta.stroke}" stroke-width="2"></circle>
+          </svg>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; gap:10px;">
+            <span style="font-size:11px; color:#9db4d7;">${modeMeta.channel} curve: drag points vertically</span>
+            <button type="button" data-curves-reset="1" style="padding:4px 10px;">Reset</button>
+          </div>
+        </div>
+      `;
     } else if(f.type === "textarea"){
       const val = escapeAttr(node.params[f.k] ?? '');
       controlHtml = `
@@ -2266,7 +2332,7 @@ async function evaluate(){
 
     const header = `
       <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-        <div class="pill">${def.icon} ${node.type}</div>
+        <div class="pill">${def.icon} ${getNodeDisplayName(node.type)}</div>
         <div class="pill">id: ${node.id}</div>
       </div>
     `;
@@ -2275,7 +2341,7 @@ async function evaluate(){
       <div class="kv">
         <div class="row">
           <label>Name</label>
-          <input data-node-name type="text" value="${escapeAttr(String(node.name || node.type))}" placeholder="${escapeAttr(node.type)}" />
+          <input data-node-name type="text" value="${escapeAttr(String(node.name || getNodeDisplayName(node.type)))}" placeholder="${escapeAttr(getNodeDisplayName(node.type))}" />
         </div>
         ${fields.map(f => renderInspectorField(node, f)).join("")}
       </div>
@@ -2291,14 +2357,14 @@ async function evaluate(){
 
       nameInput.addEventListener('input', () => {
         const next = String(nameInput.value || "").trim();
-        node.name = next || node.type;
+        node.name = next || getNodeDisplayName(node.type);
         render();
       });
 
       nameInput.addEventListener('blur', () => {
         nameInput.dataset.historyPushed = "0";
         const next = String(nameInput.value || "").trim();
-        node.name = next || node.type;
+        node.name = next || getNodeDisplayName(node.type);
         nameInput.value = node.name;
       });
     }
@@ -2520,6 +2586,19 @@ async function evaluate(){
           }
         });
 
+        // Handle Shape node uniform scaling
+        if(node.type === "Shape" && node.params.uniform && (k === "width" || k === "height")){
+          const otherKey = k === "width" ? "height" : "width";
+          node.params[otherKey] = v;
+          inspectorBody.querySelectorAll(`[data-k="${otherKey}"]`).forEach(el => {
+            if(el.type === "checkbox"){
+              el.checked = Boolean(v);
+            } else {
+              el.value = v;
+            }
+          });
+        }
+
         evaluateAndRender();
 
         // Update preview screen when ratio changes
@@ -2679,6 +2758,115 @@ async function evaluate(){
         syncStops(stops, true);
         renderInspector();
       });
+    });
+
+    inspectorBody.querySelectorAll('.curvesEditor').forEach(editor => {
+      const svg = editor.querySelector('svg');
+      const path = editor.querySelector('.curvesPath');
+      const handles = editor.querySelectorAll('.curvesHandle');
+      if(!svg || !path || handles.length < 3) return;
+
+      const keyByTarget = {
+        shadows: editor.getAttribute('data-k-shadows') || '',
+        midtones: editor.getAttribute('data-k-midtones') || '',
+        highlights: editor.getAttribute('data-k-highlights') || ''
+      };
+      const baseByTarget = { shadows: 0.25, midtones: 0.5, highlights: 0.75 };
+      const posByTarget = { shadows: 0.25, midtones: 0.5, highlights: 0.75 };
+
+      const getValue = (target) => clamp(Number(node.params[keyByTarget[target]] || 0), -100, 100);
+      const setValue = (target, value, commit = false) => {
+        const key = keyByTarget[target];
+        if(!key) return;
+        const v = clamp(Math.round(value), -100, 100);
+        node.params[key] = v;
+        inspectorBody.querySelectorAll(`[data-k="${key}"]`).forEach(el => {
+          if(el.type === 'checkbox') el.checked = Boolean(v);
+          else el.value = v;
+        });
+        draw();
+        evaluateAndRender();
+        if(commit) pushHistory();
+      };
+
+      const draw = () => {
+        const rect = svg.getBoundingClientRect();
+        const w = Math.max(1, rect.width || 280);
+        const h = Math.max(1, rect.height || 160);
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+        const diag = editor.querySelector('.curvesGuideDiagonal');
+        const grid = editor.querySelector('.curvesGuideGrid');
+        if(diag) diag.setAttribute('d', `M0 ${h} L${w} 0`);
+        if(grid) grid.setAttribute('d', `M${w * 0.25} 0 L${w * 0.25} ${h} M${w * 0.5} 0 L${w * 0.5} ${h} M${w * 0.75} 0 L${w * 0.75} ${h} M0 ${h * 0.25} L${w} ${h * 0.25} M0 ${h * 0.5} L${w} ${h * 0.5} M0 ${h * 0.75} L${w} ${h * 0.75}`);
+
+        const yFrom = (target) => {
+          const yNorm = clamp(baseByTarget[target] + (getValue(target) / 100), 0, 1);
+          return (1 - yNorm) * h;
+        };
+        const yS = yFrom('shadows');
+        const yM = yFrom('midtones');
+        const yH = yFrom('highlights');
+        path.setAttribute('d', `M0 ${h} L${w * 0.25} ${yS} L${w * 0.5} ${yM} L${w * 0.75} ${yH} L${w} 0`);
+        handles.forEach(h => {
+          const target = h.getAttribute('data-target') || '';
+          if(!target) return;
+          h.setAttribute('cx', String(posByTarget[target] * w));
+          h.setAttribute('cy', String(yFrom(target)));
+        });
+      };
+
+      const pointerToValue = (ev, target) => {
+        const rect = svg.getBoundingClientRect();
+        const y = clamp((ev.clientY - rect.top) / rect.height, 0, 1);
+        const yNorm = 1 - y;
+        return (yNorm - baseByTarget[target]) * 100;
+      };
+
+      handles.forEach(handle => {
+        handle.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          const target = handle.getAttribute('data-target') || '';
+          if(!target) return;
+          handle.setPointerCapture(ev.pointerId);
+
+          const onMove = (eMove) => setValue(target, pointerToValue(eMove, target), false);
+          const onUp = (eUp) => {
+            handle.releasePointerCapture(eUp.pointerId);
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            pushHistory();
+          };
+
+          onMove(ev);
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+      });
+
+      editor.querySelector('[data-curves-reset]')?.addEventListener('click', () => {
+        pushHistory();
+        Object.values(keyByTarget).forEach(k => {
+          if(!k) return;
+          node.params[k] = 0;
+          inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(el => {
+            if(el.type === 'checkbox') el.checked = false;
+            else el.value = 0;
+          });
+        });
+        draw();
+        evaluateAndRender();
+      });
+
+      Object.values(keyByTarget).forEach(k => {
+        if(!k) return;
+        inspectorBody.querySelectorAll(`[data-k="${k}"]`).forEach(inp => {
+          inp.addEventListener('input', draw);
+          inp.addEventListener('change', draw);
+        });
+      });
+
+      draw();
     });
 
     // Auto-resize textarea fields and initialize their height
@@ -3864,7 +4052,7 @@ function loadGraph(data){
     const node = {
       id,
       type,
-      name: type,
+      name: getNodeDisplayName(type),
       pos: pos || { x: 60 + Math.random()*420, y: 60 + Math.random()*220 },
       params: { ...(def.defaults || {}) }
     };

@@ -2,7 +2,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
   return {
     inputs: ["fill"],
     outputs: ["layer"],
-    defaults: { shape: "circle", size: 120, color: "#3b82f6", x: 100, y: 100 },
+    defaults: { shape: "circle", width: 120, height: 120, color: "#3b82f6", x: 100, y: 100, uniform: false },
     icon: "🔷",
     run: (node, inputs) => {
       const wrap = document.createElement("div");
@@ -13,7 +13,8 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       shape.style.position = "absolute";
       shape.dataset.boundId = node.id;
 
-      const size = Number(node.params.size) || 100;
+      const width = Number(node.params.width) || 100;
+      const height = Number(node.params.height) || 100;
       const x = Number(node.params.x) || 0;
       const y = Number(node.params.y) || 0;
       const fallbackColor = String(node.params.color || "#3b82f6");
@@ -45,15 +46,16 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       }
 
       wrap.dataset.maskShape = shapeType;
-      wrap.dataset.maskSize = String(size);
+      wrap.dataset.maskWidth = String(width);
+      wrap.dataset.maskHeight = String(height);
       wrap.dataset.maskX = String(x);
       wrap.dataset.maskY = String(y);
       wrap.dataset.maskColor = fallbackColor;
 
-      shape.style.left = (x - size / 2) + "px";
-      shape.style.top = (y - size / 2) + "px";
-      shape.style.width = size + "px";
-      shape.style.height = size + "px";
+      shape.style.left = (x - width / 2) + "px";
+      shape.style.top = (y - height / 2) + "px";
+      shape.style.width = width + "px";
+      shape.style.height = height + "px";
       shape.style.background = fillValue;
       shape.style.backgroundColor = fallbackColor;
       shape.style.borderLeft = "none";
@@ -66,7 +68,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
         case "circle":
           shape.style.borderRadius = "50%";
           break;
-        case "square":
+        case "rectangle":
           shape.style.borderRadius = "0";
           break;
         case "triangle":
@@ -90,8 +92,10 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       return { el: wrap };
     },
     inspector: () => ([
-      { k: "shape", type: "select", label: "Shape", options: ["circle", "square", "triangle", "diamond", "hexagon", "star"] },
-      { k: "size", type: "range", label: "Size", min: 10, max: 1500, step: 1 },
+      { k: "shape", type: "select", label: "Shape", options: ["circle", "rectangle", "triangle", "diamond", "hexagon", "star"] },
+      { k: "width", type: "range", label: "Width", min: 10, max: 1500, step: 1 },
+      { k: "height", type: "range", label: "Height", min: 10, max: 1500, step: 1 },
+      { k: "uniform", type: "checkbox", label: "Uniform" },
       { k: "color", type: "color", label: "Color" },
       { k: "x", type: "range", label: "X", min: 0, max: 1200, step: 1 },
       { k: "y", type: "range", label: "Y", min: 0, max: 1200, step: 1 }
