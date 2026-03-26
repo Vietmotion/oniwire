@@ -28,7 +28,9 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         .filter(Boolean);
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
       const liveMaskEl = inputs.mask?.el || null;
-      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true";
+      const hasAnimatedMask = hasMotionFlag(liveMaskEl);
+      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask;
+      let liveMaskSourceEl = liveMaskEl;
 
       const frozenUrl = inputs.mask?.dataUrl || inputs.mask?.el?.dataset?.frozenUrl;
       const maskMeta = inputs.mask?.el ? {
@@ -44,6 +46,17 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       wrap.style.inset = "0";
       if(layerPorts.some(port => hasMotionFlag(inputs[port]?.el)) || hasMotionFlag(inputs.mask?.el)){
         wrap.dataset.hasMotion = "true";
+      }
+
+      if(hasAnimatedMask && liveMaskEl){
+        const liveMaskDriver = liveMaskEl.cloneNode(true);
+        liveMaskDriver.style.position = "absolute";
+        liveMaskDriver.style.inset = "0";
+        liveMaskDriver.style.pointerEvents = "none";
+        liveMaskDriver.style.transform = "translate(-200vw, -200vh)";
+        liveMaskDriver.setAttribute("aria-hidden", "true");
+        wrap.appendChild(liveMaskDriver);
+        liveMaskSourceEl = liveMaskDriver;
       }
 
       const blendMode = node.params.blend || "normal";
@@ -63,9 +76,9 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.appendChild(layerClones[i]);
       }
 
-      const liveUrl = isLiveMask ? (liveMaskEl?.dataset?.frozenUrl || "") : "";
+        const liveUrl = isLiveMask ? (liveMaskSourceEl?.dataset?.frozenUrl || "") : "";
       const maskUrl = isLiveMask
-        ? (liveUrl ? `url(${liveUrl})` : null)
+          ? (liveUrl ? `url(${liveUrl})` : null)
         : ((frozenUrl && frozenUrl.length > 0)
             ? `url(${frozenUrl})`
             : (rampStops.length
@@ -75,15 +88,15 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       if(maskUrl || isLiveMask){
         wrap.style.maskImage = maskUrl;
         wrap.style.webkitMaskImage = maskUrl;
-        wrap.style.maskMode = "luminance";
-        wrap.style.webkitMaskMode = "luminance";
+        wrap.style.maskMode = isLiveMask ? "alpha" : "luminance";
+        wrap.style.webkitMaskMode = isLiveMask ? "alpha" : "luminance";
         wrap.style.maskRepeat = "no-repeat";
         wrap.style.webkitMaskRepeat = "no-repeat";
         wrap.style.maskPosition = "0 0";
         wrap.style.webkitMaskPosition = "0 0";
         wrap.style.maskSize = "100% 100%";
         wrap.style.webkitMaskSize = "100% 100%";
-        if(isLiveMask) startLiveMaskUpdate(wrap, liveMaskEl, 15);
+        if(isLiveMask) startLiveMaskUpdate(wrap, liveMaskSourceEl, 15);
       } else if(M){
         setTimeout(() => {
           try {

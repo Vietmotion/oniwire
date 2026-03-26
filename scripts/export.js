@@ -1839,7 +1839,10 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			if(srcMI && srcMI.canvas){
 				var srcMIMeta = this.getTimelineMeta(srcMI);
 				var cIn = this.createLayer();
+				var inMode = String(params.mode || 'pop').toLowerCase();
+				var inDir = String(params.direction || 'top-down').toLowerCase();
 				var inDuration = Math.max(0.05, toNumber(params.duration, 0.6));
+				var overrideAct = Boolean(params.overrideAct);
 				var inAmount = clamp(toNumber(params.amount, 0.18), 0, 0.8);
 				var localInTime = Math.max(0, timeSec - srcMIMeta.intro);
 				var progressIn = clamp(localInTime / inDuration, 0, 1);
@@ -1852,14 +1855,42 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				var boundsIn = this.getMotionBounds(nodeId, srcMI.canvas);
 				var cxi = boundsIn ? boundsIn.cx : (cIn.canvas.width / 2);
 				var cyi = boundsIn ? boundsIn.cy : (cIn.canvas.height / 2);
+				var inOpacity = inMode === 'fade'
+					? (!introStarted ? 0 : (progressIn < 0.15 ? clamp(progressIn / 0.15, 0, 1) : 1))
+					: 1;
+
+				var flyTx = 0;
+				var flyTy = 0;
+				if(inMode === 'fly'){
+					var minXIn = boundsIn ? boundsIn.minX : (cIn.canvas.width * 0.4);
+					var minYIn = boundsIn ? boundsIn.minY : (cIn.canvas.height * 0.4);
+					var maxXIn = boundsIn ? boundsIn.maxX : (cIn.canvas.width * 0.6);
+					var maxYIn = boundsIn ? boundsIn.maxY : (cIn.canvas.height * 0.6);
+					var padIn = 24;
+					var startTx = 0;
+					var startTy = 0;
+					if(inDir === 'bottom-up'){
+						startTy = Math.max(0, (cIn.canvas.height - minYIn) + padIn);
+					}else if(inDir === 'left'){
+						startTx = -Math.max(0, maxXIn + padIn);
+					}else if(inDir === 'right'){
+						startTx = Math.max(0, (cIn.canvas.width - minXIn) + padIn);
+					}else{
+						startTy = -Math.max(0, maxYIn + padIn);
+					}
+					var easeIn = 1 - Math.pow(1 - progressIn, 3);
+					flyTx = startTx * (1 - easeIn);
+					flyTy = startTy * (1 - easeIn);
+				}
 				cIn.ctx.save();
-				cIn.ctx.globalAlpha = opacityIn;
+				cIn.ctx.globalAlpha = inOpacity;
 				cIn.ctx.translate(cxi, cyi);
-				cIn.ctx.scale(scaleIn, scaleIn);
+				if(inMode === 'pop') cIn.ctx.scale(scaleIn, scaleIn);
 				cIn.ctx.translate(-cxi, -cyi);
+				if(inMode === 'fly') cIn.ctx.translate(flyTx, flyTy);
 				cIn.ctx.drawImage(srcMI.canvas, 0, 0);
 				cIn.ctx.restore();
-				result = this.attachTimelineMeta({ canvas: cIn.canvas }, srcMIMeta.intro + inDuration, srcMIMeta.outro);
+				result = this.attachTimelineMeta({ canvas: cIn.canvas }, srcMIMeta.intro + (overrideAct ? inDuration : 0), srcMIMeta.outro);
 			}
 		}
 		else if(node.type === 'Motion'){
@@ -1916,24 +1947,60 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			if(srcMO && srcMO.canvas){
 				var srcMOMeta = this.getTimelineMeta(srcMO);
 				var cOut = this.createLayer();
+				var outMode = String(params.mode || 'fade').toLowerCase();
+				var outDirRaw = String(params.direction || 'top-up').toLowerCase();
+				var outDir = outDirRaw === 'top-down'
+					? 'top-up'
+					: (outDirRaw === 'bottom-up' ? 'bottom-down' : outDirRaw);
 				var outDuration = Math.max(0.05, toNumber(params.duration, 0.6));
 				var outAmount = clamp(toNumber(params.amount, 0.18), 0, 0.8);
+				var useStartTime = Boolean(params.useStartTime);
+				var requestedStart = Math.max(0, toNumber(params.startTime, 0));
 				var totalOutDur = Math.max(0.5, toNumber(this.duration, 5));
-				var outStart = Math.max(0, totalOutDur - srcMOMeta.outro - outDuration);
+				var outStart = useStartTime
+					? clamp(requestedStart, srcMOMeta.intro, Math.max(srcMOMeta.intro, totalOutDur - 0.001))
+					: Math.max(0, totalOutDur - srcMOMeta.outro - outDuration);
 				var progressOut = clamp((timeSec - outStart) / outDuration, 0, 1);
 				var outScale = 1 + ((Math.max(0.01, 1 - outAmount) - 1) * progressOut);
 				var outOpacity = 1 - progressOut;
 				var boundsOut = this.getMotionBounds(nodeId, srcMO.canvas);
 				var cxo = boundsOut ? boundsOut.cx : (cOut.canvas.width / 2);
 				var cyo = boundsOut ? boundsOut.cy : (cOut.canvas.height / 2);
+				var flyTxOut = 0;
+				var flyTyOut = 0;
+				if(outMode === 'fly'){
+					var minXOut = boundsOut ? boundsOut.minX : (cOut.canvas.width * 0.4);
+					var minYOut = boundsOut ? boundsOut.minY : (cOut.canvas.height * 0.4);
+					var maxXOut = boundsOut ? boundsOut.maxX : (cOut.canvas.width * 0.6);
+					var maxYOut = boundsOut ? boundsOut.maxY : (cOut.canvas.height * 0.6);
+					var padOut = 24;
+					var endTxOut = 0;
+					var endTyOut = 0;
+					if(outDir === 'bottom-down'){
+						endTyOut = Math.max(0, (cOut.canvas.height - minYOut) + padOut);
+					}else if(outDir === 'left'){
+						endTxOut = -Math.max(0, maxXOut + padOut);
+					}else if(outDir === 'right'){
+						endTxOut = Math.max(0, (cOut.canvas.width - minXOut) + padOut);
+					}else{
+						endTyOut = -Math.max(0, maxYOut + padOut);
+					}
+					var easeOut = 1 - Math.pow(1 - progressOut, 3);
+					flyTxOut = endTxOut * easeOut;
+					flyTyOut = endTyOut * easeOut;
+				}
 				cOut.ctx.save();
 				cOut.ctx.globalAlpha = outOpacity;
 				cOut.ctx.translate(cxo, cyo);
-				cOut.ctx.scale(outScale, outScale);
+				if(outMode === 'pop') cOut.ctx.scale(outScale, outScale);
 				cOut.ctx.translate(-cxo, -cyo);
+				if(outMode === 'fly') cOut.ctx.translate(flyTxOut, flyTyOut);
 				cOut.ctx.drawImage(srcMO.canvas, 0, 0);
 				cOut.ctx.restore();
-				result = this.attachTimelineMeta({ canvas: cOut.canvas }, srcMOMeta.intro, srcMOMeta.outro + outDuration);
+				var nextOutMeta = useStartTime
+					? Math.max(srcMOMeta.outro, Math.max(0, totalOutDur - outStart))
+					: (srcMOMeta.outro + outDuration);
+				result = this.attachTimelineMeta({ canvas: cOut.canvas }, srcMOMeta.intro, nextOutMeta);
 			}
 		}
 		else if(node.type === 'Glow'){

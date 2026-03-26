@@ -17,7 +17,9 @@ window.createOniwireMaskNodeDef = function createOniwireMaskNodeDef({
       const source = inputs.source?.el ? inputs.source.el.cloneNode(true) : null;
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
       const liveMaskEl = inputs.mask?.el || null;
-      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true";
+      const hasAnimatedMask = hasMotionFlag(liveMaskEl);
+      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask;
+      let liveMaskSourceEl = liveMaskEl;
 
       const frozenUrl = inputs.mask?.dataUrl || inputs.mask?.el?.dataset?.frozenUrl;
       const maskMeta = inputs.mask?.el ? {
@@ -30,7 +32,7 @@ window.createOniwireMaskNodeDef = function createOniwireMaskNodeDef({
       if(!source) return null;
       if(!mask && rampStops.length === 0 && !(frozenUrl && frozenUrl.length > 0)) return { el: source };
 
-      const liveUrl = isLiveMask ? (liveMaskEl?.dataset?.frozenUrl || "") : "";
+      const liveUrl = isLiveMask ? (liveMaskSourceEl?.dataset?.frozenUrl || "") : "";
       const maskUrl = isLiveMask
         ? (liveUrl ? `url(${liveUrl})` : null)
         : ((frozenUrl && frozenUrl.length > 0)
@@ -48,13 +50,36 @@ window.createOniwireMaskNodeDef = function createOniwireMaskNodeDef({
         wrap.dataset.hasMotion = "true";
       }
 
+      if(hasAnimatedMask && liveMaskEl){
+        const liveMaskHost = document.createElement("div");
+        liveMaskHost.style.position = "fixed";
+        liveMaskHost.style.left = "-200vw";
+        liveMaskHost.style.top = "-200vh";
+        liveMaskHost.style.width = "1280px";
+        liveMaskHost.style.height = "720px";
+        liveMaskHost.style.overflow = "hidden";
+        liveMaskHost.style.pointerEvents = "none";
+        liveMaskHost.style.zIndex = "-1";
+        liveMaskHost.setAttribute("aria-hidden", "true");
+
+        const liveMaskDriver = liveMaskEl.cloneNode(true);
+        liveMaskDriver.style.position = "absolute";
+        liveMaskDriver.style.inset = "0";
+        liveMaskDriver.style.pointerEvents = "none";
+        liveMaskDriver.setAttribute("aria-hidden", "true");
+
+        liveMaskHost.appendChild(liveMaskDriver);
+        wrap.appendChild(liveMaskHost);
+        liveMaskSourceEl = liveMaskDriver;
+      }
+
       const layerContainer = document.createElement("div");
       layerContainer.style.position = "absolute";
       layerContainer.style.inset = "0";
       layerContainer.style.maskImage = maskUrl;
       layerContainer.style.webkitMaskImage = maskUrl;
-      layerContainer.style.maskMode = "luminance";
-      layerContainer.style.webkitMaskMode = "luminance";
+      layerContainer.style.maskMode = isLiveMask ? "alpha" : "luminance";
+      layerContainer.style.webkitMaskMode = isLiveMask ? "alpha" : "luminance";
       layerContainer.style.webkitMaskComposite = "source-over";
       layerContainer.style.maskRepeat = "no-repeat";
       layerContainer.style.webkitMaskRepeat = "no-repeat";
@@ -62,7 +87,7 @@ window.createOniwireMaskNodeDef = function createOniwireMaskNodeDef({
       layerContainer.style.webkitMaskPosition = "0 0";
       layerContainer.style.maskSize = "100% 100%";
       layerContainer.style.webkitMaskSize = "100% 100%";
-      if(isLiveMask) startLiveMaskUpdate(layerContainer, liveMaskEl, 15);
+      if(isLiveMask) startLiveMaskUpdate(layerContainer, liveMaskSourceEl, 15);
 
       const sourceClone = source.cloneNode(true);
       sourceClone.style.position = "absolute";

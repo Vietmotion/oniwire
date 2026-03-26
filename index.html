@@ -210,6 +210,22 @@
       </div>
     </section>
 
+    <!-- PLAYBACK CONTROL BAR -->
+    <div id="playbackBar" class="playbackBar">
+      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">⏮</button>
+      <button id="pbPlayPause" class="pbBtn" title="Play">⏵</button>
+      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">⏹</button>
+      <button id="pbNextFrame" class="pbBtn" title="Next frame">⏭</button>
+      <input id="pbScrub" class="pbScrub" type="range" min="0" max="10000" value="0" step="1">
+      <span id="pbTimeDisplay" class="pbTimeDisplay">0.00 s</span>
+      <span class="pbSep">/</span>
+      <span id="pbDurDisplay" class="pbDurDisplay">5.00 s</span>
+      <div class="pbModeToggle">
+        <button id="pbModeS" class="pbModeBtn active" title="Seconds view">s</button>
+        <button id="pbModeF" class="pbModeBtn" title="Frames view">f</button>
+      </div>
+    </div>
+
   </div>
 
 <!-- Node Search (Tab Menu) -->
@@ -310,6 +326,8 @@
   const appEl = document.querySelector(".app");
   const colSplitter = document.getElementById("colSplitter");
   const rowSplitter = document.getElementById("rowSplitter");
+  const previewPanelEl = document.querySelector(".panel.preview");
+  const inspectorPanelEl = document.querySelector(".panel.inspector");
   let storedLeftPanelWidth = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim() || "260px";
 
   const editorEl = document.getElementById("editor");
@@ -338,6 +356,26 @@
     if(helpBtn) helpBtn.setAttribute("aria-pressed", helpVisible ? "true" : "false");
   }
 
+  function syncLayoutSplitters(){
+    if(!appEl) return;
+    const appRect = appEl.getBoundingClientRect();
+
+    if(colSplitter && previewPanelEl && inspectorPanelEl){
+      const previewRect = previewPanelEl.getBoundingClientRect();
+      const inspectorRect = inspectorPanelEl.getBoundingClientRect();
+      const gutterMidX = ((previewRect.right + inspectorRect.left) / 2) - appRect.left;
+      colSplitter.style.left = `${gutterMidX}px`;
+    }
+
+    if(rowSplitter && previewPanelEl){
+      const previewRect = previewPanelEl.getBoundingClientRect();
+      const leftPx = previewRect.left - appRect.left;
+      const rightPx = appRect.right - previewRect.right;
+      rowSplitter.style.left = `${leftPx}px`;
+      rowSplitter.style.right = `${rightPx}px`;
+    }
+  }
+
   function setInspectorExpanded(expanded){
     const isExpanded = Boolean(expanded);
     appEl?.classList.toggle("inspectorExpanded", isExpanded);
@@ -347,6 +385,7 @@
       inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
       inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
     }
+    syncLayoutSplitters();
   }
 
   function setLeftPanelCollapsed(collapsed){
@@ -368,6 +407,7 @@
       leftPanelToggleBtn.setAttribute("title", isCollapsed ? "Expand left panel" : "Collapse left panel");
     }
 
+    syncLayoutSplitters();
     applyPreviewTransform();
   }
 
@@ -547,6 +587,8 @@
     const offsetY = (vh - scaledH) / 2;
     previewInner.style.transform =
       `translate(${offsetX + pan.x}px, ${offsetY + pan.y}px) scale(${scale})`;
+
+    syncLayoutSplitters();
   }
 
   previewZoomSel.addEventListener("change", applyPreviewTransform);
@@ -916,6 +958,33 @@ utilsApi.initProjectUtils();
     targetEl.dataset.liveMaskBound = "true";
     const interval = 1000 / Math.max(1, Number(fps) || 15);
     let lastTime = 0;
+    let captureBusy = false;
+
+    const applyMaskUrl = (url) => {
+      if(!url) return;
+      targetEl.style.maskImage = `url(${url})`;
+      targetEl.style.webkitMaskImage = `url(${url})`;
+    };
+
+    const captureLiveMask = async () => {
+      if(captureBusy) return;
+      if(!targetEl.isConnected || !maskEl.isConnected) return;
+      if(typeof renderLayerToDataUrl !== "function") return;
+      captureBusy = true;
+      try{
+        const dataUrl = await renderLayerToDataUrl(maskEl, {
+          useSimpleShapeRender: false,
+          timeoutMs: 300,
+          bakeComputedStyles: true,
+          backgroundColor: null
+        });
+        if(dataUrl) applyMaskUrl(dataUrl);
+      }catch(_){
+        // Best-effort live mask capture.
+      }finally{
+        captureBusy = false;
+      }
+    };
 
     const tick = (t) => {
       if(!targetEl.isConnected) return;
@@ -923,8 +992,9 @@ utilsApi.initProjectUtils();
         lastTime = t;
         const liveUrl = maskEl.dataset?.frozenUrl || "";
         if(liveUrl){
-          targetEl.style.maskImage = `url(${liveUrl})`;
-          targetEl.style.webkitMaskImage = `url(${liveUrl})`;
+          applyMaskUrl(liveUrl);
+        }else{
+          captureLiveMask();
         }
       }
       requestAnimationFrame(tick);
@@ -1039,6 +1109,8 @@ utilsApi.initProjectUtils();
     const useSimpleShapeRender = options.useSimpleShapeRender !== false;
     const timeoutMs = Math.max(100, Number(options.timeoutMs) || 200);
     const bakeComputedStyles = options.bakeComputedStyles === true;
+    const bgOpt = Object.prototype.hasOwnProperty.call(options, "backgroundColor") ? options.backgroundColor : "#000";
+    const bgColor = (bgOpt === null || bgOpt === "transparent") ? null : String(bgOpt || "#000");
     const targetW = Math.max(1, Math.round(layerEl.clientWidth || previewBase?.w || 1280));
     const targetH = Math.max(1, Math.round(layerEl.clientHeight || previewBase?.h || 720));
 
@@ -1046,8 +1118,12 @@ utilsApi.initProjectUtils();
     canvas.width = targetW;
     canvas.height = targetH;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, targetW, targetH);
+    if(bgColor){
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, targetW, targetH);
+    }else{
+      ctx.clearRect(0, 0, targetW, targetH);
+    }
 
     const tempDiv = document.createElement("div");
     tempDiv.style.position = "fixed";
@@ -1056,7 +1132,7 @@ utilsApi.initProjectUtils();
     tempDiv.style.width = `${targetW}px`;
     tempDiv.style.height = `${targetH}px`;
     tempDiv.style.overflow = "hidden";
-    tempDiv.style.background = "#000";
+    tempDiv.style.background = bgColor || "transparent";
     tempDiv.style.zIndex = "-10000";
     tempDiv.style.pointerEvents = "none";
     tempDiv.style.visibility = "hidden";
@@ -1102,7 +1178,7 @@ utilsApi.initProjectUtils();
       const serializer = new XMLSerializer();
       let svgMarkup = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${targetW}\" height=\"${targetH}\">` +
         `<foreignObject width=\"100%\" height=\"100%\">` +
-          `<div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"width:${targetW}px; height:${targetH}px; background:#000;\">`;
+          `<div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"width:${targetW}px; height:${targetH}px; background:${bgColor || "transparent"};\">`;
 
       try {
         for(let child of tempDiv.children) {
@@ -1120,8 +1196,12 @@ utilsApi.initProjectUtils();
           if(resolved) return;
           resolved = true;
           try {
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, targetW, targetH);
+            if(bgColor){
+              ctx.fillStyle = bgColor;
+              ctx.fillRect(0, 0, targetW, targetH);
+            }else{
+              ctx.clearRect(0, 0, targetW, targetH);
+            }
             ctx.drawImage(img, 0, 0, targetW, targetH);
             resolve(canvas.toDataURL("image/png"));
           } catch {
@@ -2670,8 +2750,24 @@ async function evaluate(){
     });
 
     inspectorBody.querySelectorAll('input[data-k], textarea[data-k], select[data-k]').forEach(inp => {
-      const handler = () => {
+      const beginHistorySession = () => {
+        if(inp.dataset.historyPushed === "1") return;
         pushHistory();
+        inp.dataset.historyPushed = "1";
+      };
+
+      const endHistorySession = () => {
+        inp.dataset.historyPushed = "0";
+      };
+
+      const handler = (opts = {}) => {
+        const shouldCommit = Boolean(opts.commit);
+        if(shouldCommit){
+          pushHistory();
+        }else{
+          beginHistorySession();
+        }
+
         const k = inp.getAttribute("data-k");
         let v = inp.value;
 
@@ -2748,13 +2844,30 @@ async function evaluate(){
           renderInspector();
         }
 
+        if(node.type === "MotionOut" && k === "useStartTime"){
+          renderInspector();
+        }
+
         if(node.type === "Output" && (k === "exportEmbedMode" || k === "exportLottieMode")){
           renderInspector();
         }
       };
 
-      // Use change for selects, input for inputs/textarea
-      inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", handler);
+      const isCommitOnly = inp.tagName === "SELECT" || inp.type === "checkbox";
+
+      if(isCommitOnly){
+        inp.addEventListener("change", () => handler({ commit: true }));
+      }else{
+        // Continuous edits (typing, dragging range) share one undo snapshot.
+        inp.addEventListener("focus", beginHistorySession);
+        inp.addEventListener("input", () => handler({ commit: false }));
+        inp.addEventListener("change", endHistorySession);
+        inp.addEventListener("blur", endHistorySession);
+        if(inp.type === "range"){
+          inp.addEventListener("pointerup", endHistorySession);
+          inp.addEventListener("pointercancel", endHistorySession);
+        }
+      }
     });
 
     inspectorBody.querySelectorAll('.knobWrap[data-k]').forEach(wrap => {
@@ -4164,6 +4277,7 @@ function loadGraph(data){
     requestWireDraw();
     try{ renderInspector(); }catch(e){/* ignore */}
     try{ applyPreviewTransform(); }catch(e){/* ignore */}
+    try{ syncLayoutSplitters(); }catch(e){/* ignore */}
   });
 
   // -----------------------------
@@ -4240,6 +4354,176 @@ function loadGraph(data){
       try{ render(); }catch{}
     }
   }
+
+  // ==================== PLAYBACK CONTROL BAR ====================
+  (function initPlaybackBar(){
+    const FPS_DEFAULT = 24;
+
+    const pb = {
+      playing:   false,
+      currentMs: 0,
+      rafId:     null,
+      lastTs:    null,
+      fps:       FPS_DEFAULT,
+      viewMode:  "s",   // "s" = seconds | "f" = frames
+      managed:   false  // true once user interacts vs natural auto-play
+    };
+
+    const pbBar        = document.getElementById("playbackBar");
+    const pbPlayPause  = document.getElementById("pbPlayPause");
+    const pbStop       = document.getElementById("pbStop");
+    const pbPrevFrame  = document.getElementById("pbPrevFrame");
+    const pbNextFrame  = document.getElementById("pbNextFrame");
+    const pbScrub      = document.getElementById("pbScrub");
+    const pbTimeDisp   = document.getElementById("pbTimeDisplay");
+    const pbDurDisp    = document.getElementById("pbDurDisplay");
+    const pbModeS      = document.getElementById("pbModeS");
+    const pbModeF      = document.getElementById("pbModeF");
+
+    if(!pbBar) return;  // guard if bar missing
+
+    function getTotalMs(){
+      const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+      return Math.max(500, (Number(outNode?.params?.duration) || 5) * 1000);
+    }
+
+    function formatTime(ms){
+      if(pb.viewMode === "f"){
+        return `F${String(Math.round(ms / 1000 * pb.fps)).padStart(4, "0")}`;
+      }
+      return `${(ms / 1000).toFixed(2)} s`;
+    }
+
+    function updateUI(){
+      const totalMs = getTotalMs();
+      const t = Math.max(0, Math.min(pb.currentMs, totalMs));
+      pbTimeDisp.textContent = formatTime(t);
+      pbDurDisp.textContent  = formatTime(totalMs);
+      pbScrub.value = String(Math.round((t / totalMs) * 10000));
+      pbPlayPause.textContent = pb.playing ? "\u23F8" : "\u23F5";
+      pbPlayPause.title       = pb.playing ? "Pause" : "Play";
+    }
+
+    // Use the existing freezeAnimationsAtTime helper from the export pipeline
+    function syncToTime(ms){
+      if(typeof freezeAnimationsAtTime === "function"){
+        freezeAnimationsAtTime(renderRoot, ms / 1000);
+      }
+    }
+
+    function enterManaged(){
+      pb.managed = true;
+    }
+
+    function rafLoop(ts){
+      if(!pb.playing){ pb.rafId = null; return; }
+      if(pb.lastTs === null) pb.lastTs = ts;
+      const dt = ts - pb.lastTs;
+      pb.lastTs = ts;
+
+      const totalMs = getTotalMs();
+      pb.currentMs += dt;
+      
+      // Loop: wrap to 0 when reaching the end
+      if(pb.currentMs >= totalMs){
+        pb.currentMs = pb.currentMs % totalMs;
+      }
+      
+      syncToTime(pb.currentMs);
+      updateUI();
+
+      pb.rafId = requestAnimationFrame(rafLoop);
+    }
+
+    function play(){
+      if(pb.playing) return;
+      enterManaged();
+      if(pb.currentMs >= getTotalMs()) pb.currentMs = 0;
+      pb.playing = true;
+      pb.lastTs  = null;
+      pb.rafId   = requestAnimationFrame(rafLoop);
+      updateUI();
+    }
+
+    function pause(){
+      pb.playing = false;
+      if(pb.rafId){ cancelAnimationFrame(pb.rafId); pb.rafId = null; }
+      updateUI();
+    }
+
+    function stop(){
+      pause();
+      enterManaged();
+      pb.currentMs = 0;
+      syncToTime(0);
+      updateUI();
+    }
+
+    function stepFrame(dir){
+      pause();
+      enterManaged();
+      const frameMs = 1000 / pb.fps;
+      pb.currentMs = Math.max(0, Math.min(pb.currentMs + dir * frameMs, getTotalMs()));
+      syncToTime(pb.currentMs);
+      updateUI();
+    }
+
+    // ---- Button Listeners ----
+    pbPlayPause.addEventListener("click", () => pb.playing ? pause() : play());
+    pbStop.addEventListener("click", stop);
+    pbPrevFrame.addEventListener("click", () => stepFrame(-1));
+    pbNextFrame.addEventListener("click", () => stepFrame(1));
+
+    // ---- Scrub Slider ----
+    let scrubbing = false;
+    pbScrub.addEventListener("pointerdown", () => {
+      scrubbing = true;
+      if(pb.playing) pause();
+      enterManaged();
+    });
+    pbScrub.addEventListener("input", () => {
+      if(!scrubbing) return;
+      const totalMs = getTotalMs();
+      pb.currentMs  = (parseInt(pbScrub.value, 10) / 10000) * totalMs;
+      syncToTime(pb.currentMs);
+      updateUI();
+    });
+    document.addEventListener("pointerup", () => { scrubbing = false; });
+
+    // ---- Mode Toggle ----
+    pbModeS.addEventListener("click", () => {
+      pb.viewMode = "s";
+      pbModeS.classList.add("active");
+      pbModeF.classList.remove("active");
+      updateUI();
+    });
+    pbModeF.addEventListener("click", () => {
+      pb.viewMode = "f";
+      pbModeF.classList.add("active");
+      pbModeS.classList.remove("active");
+      updateUI();
+    });
+
+    // ---- Hook into evaluateAndRender ----
+    // After each graph re-render, re-apply the frozen frame so new
+    // elements don't auto-play when in managed mode.
+    const _origEAR = evaluateAndRender;
+    evaluateAndRender = async function(...args){
+      const wasPlaying = pb.playing;
+      if(wasPlaying) pause();
+      await _origEAR.apply(this, args);
+      // Give the browser one frame to attach CSS animations before we freeze them
+      requestAnimationFrame(() => {
+        if(pb.managed){
+          syncToTime(pb.currentMs);
+        }
+        updateUI();
+      });
+    };
+
+    // Initial display update
+    updateUI();
+  })();
 
   // Init
   resetGraph();
