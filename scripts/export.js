@@ -85,49 +85,61 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		];
 	}
 
-	function polygonPoints(shapeType, size, cx, cy){
-		const r = size / 2;
+	function getShapeDimensions(params){
+		const p = params || {};
+		const size = Math.max(1, Number(p.size) || 100);
+		const width = Math.max(1, Number(p.width) || size);
+		const height = Math.max(1, Number(p.height) || size);
+		return { width, height };
+	}
+
+	function polygonPoints(shapeType, width, height, cx, cy){
+		const rx = width / 2;
+		const ry = height / 2;
 		if(shapeType === "triangle"){
-			return [[cx, cy - r], [cx + r, cy + r], [cx - r, cy + r]];
+			return [[cx, cy - ry], [cx + rx, cy + ry], [cx - rx, cy + ry]];
 		}
 		if(shapeType === "diamond"){
-			return [[cx, cy - r], [cx + r, cy], [cx, cy + r], [cx - r, cy]];
+			return [[cx, cy - ry], [cx + rx, cy], [cx, cy + ry], [cx - rx, cy]];
 		}
 		if(shapeType === "hexagon"){
 			const pts = [];
 			for(let i = 0; i < 6; i++){
 				const a = (Math.PI / 3) * i - Math.PI / 6;
-				pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+				pts.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]);
 			}
 			return pts;
 		}
 		if(shapeType === "star"){
 			const pts = [];
-			const r2 = r * 0.5;
+			const irx = rx * 0.5;
+			const iry = ry * 0.5;
 			for(let i = 0; i < 10; i++){
 				const a = (Math.PI / 5) * i - Math.PI / 2;
-				const rr = i % 2 === 0 ? r : r2;
-				pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)]);
+				const rrX = i % 2 === 0 ? rx : irx;
+				const rrY = i % 2 === 0 ? ry : iry;
+				pts.push([cx + rrX * Math.cos(a), cy + rrY * Math.sin(a)]);
 			}
 			return pts;
 		}
 		return [];
 	}
 
-	function traceShapePath(ctx, shapeType, size, cx, cy){
-		const r = size / 2;
+	function traceShapePath(ctx, shapeType, width, height, cx, cy){
+		const rx = width / 2;
+		const ry = height / 2;
 		ctx.beginPath();
-		if(shapeType === "square"){
-			ctx.rect(cx - r, cy - r, size, size);
+		if(shapeType === "square" || shapeType === "rectangle"){
+			ctx.rect(cx - rx, cy - ry, width, height);
 			return;
 		}
 		if(shapeType === "circle"){
-			ctx.arc(cx, cy, r, 0, Math.PI * 2);
+			ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
 			return;
 		}
-		const points = polygonPoints(shapeType, size, cx, cy);
+		const points = polygonPoints(shapeType, width, height, cx, cy);
 		if(points.length < 3){
-			ctx.arc(cx, cy, r, 0, Math.PI * 2);
+			ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
 			return;
 		}
 		for(let i = 0; i < points.length; i++){
@@ -200,31 +212,31 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	function buildShapeItem(shapeNode, fillSpec){
 		const p = shapeNode.params || {};
 		const shapeType = String(p.shape || "circle");
-		const size = Math.max(1, Number(p.size) || 100);
+		const { width, height } = getShapeDimensions(p);
 		const fillColor = String(fillSpec?.color || p.color || "#3b82f6");
 		const color = hexToRgb01(fillColor);
 
 		if(shapeType === "circle"){
 			return {
 				items: [
-					{ ty: "el", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [size, size] }, d: 1, nm: "Ellipse Path 1" },
+					{ ty: "el", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [width, height] }, d: 1, nm: "Ellipse Path 1" },
 					{ ty: "fl", c: { a: 0, k: color }, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: "Fill 1" }
 				],
 				ok: true
 			};
 		}
 
-		if(shapeType === "square"){
+		if(shapeType === "square" || shapeType === "rectangle"){
 			return {
 				items: [
-					{ ty: "rc", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [size, size] }, r: { a: 0, k: 0 }, d: 1, nm: "Rect Path 1" },
+					{ ty: "rc", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [width, height] }, r: { a: 0, k: 0 }, d: 1, nm: "Rect Path 1" },
 					{ ty: "fl", c: { a: 0, k: color }, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: "Fill 1" }
 				],
 				ok: true
 			};
 		}
 
-		const points = polygonPoints(shapeType, size, 0, 0);
+		const points = polygonPoints(shapeType, width, height, 0, 0);
 		if(points.length < 3){
 			return { ok: false, reason: `Unsupported shape type '${shapeType}'.` };
 		}
@@ -499,29 +511,29 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 	function renderShapeAsImageAsset(shapeNode, fillSpec){
 		const p = shapeNode.params || {};
 		const shapeType = String(p.shape || "circle");
-		const size = Math.max(1, Number(p.size) || 100);
+		const { width, height } = getShapeDimensions(p);
 		const x = Number(p.x) || 0;
 		const y = Number(p.y) || 0;
 		const fallbackColor = String(p.color || "#3b82f6");
-		const padding = Math.max(2, Math.ceil(size * 0.05));
+		const padding = Math.max(2, Math.ceil(Math.max(width, height) * 0.05));
 		const canvas = document.createElement("canvas");
-		canvas.width = Math.max(1, Math.ceil(size + (padding * 2)));
-		canvas.height = Math.max(1, Math.ceil(size + (padding * 2)));
+		canvas.width = Math.max(1, Math.ceil(width + (padding * 2)));
+		canvas.height = Math.max(1, Math.ceil(height + (padding * 2)));
 		const ctx = canvas.getContext("2d");
 		if(!ctx) return null;
 
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		applyCanvasFillStyle(ctx, fillSpec, fallbackColor, canvas.width, canvas.height);
-		traceShapePath(ctx, shapeType, size, canvas.width / 2, canvas.height / 2);
+		traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2);
 		ctx.fill();
 
 		return {
 			dataUrl: canvas.toDataURL("image/png"),
 			bounds: {
-				x: x - (size / 2),
-				y: y - (size / 2),
-				width: size,
-				height: size
+				x: x - (width / 2),
+				y: y - (height / 2),
+				width,
+				height
 			},
 			assetWidth: canvas.width,
 			assetHeight: canvas.height,
@@ -849,15 +861,16 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			const ty = Number(item.transform?.ty || 0);
 
 			if(item.type === "shape"){
-				const size = Math.max(1, Number(item.node?.params?.size) || 100);
+				const { width: shapeWidth, height: shapeHeight } = getShapeDimensions(item.node?.params || {});
 				const cx = Number(item.node?.params?.x || 0) + tx;
 				const cy = Number(item.node?.params?.y || 0) + ty;
-				const half = size / 2;
+				const halfW = shapeWidth / 2;
+				const halfH = shapeHeight / 2;
 				return {
-					minX: cx - half,
-					minY: cy - half,
-					maxX: cx + half,
-					maxY: cy + half
+					minX: cx - halfW,
+					minY: cy - halfH,
+					maxX: cx + halfW,
+					maxY: cy + halfH
 				};
 			}
 
@@ -1551,6 +1564,31 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return safeScale;
 	};
 
+	CompactGraphPlayer.prototype.getTimelineMeta = function(rendered){
+		return {
+			intro: Math.max(0, toNumber(rendered && rendered.motionIntroSec, 0)),
+			outro: Math.max(0, toNumber(rendered && rendered.motionOutroSec, 0))
+		};
+	};
+
+	CompactGraphPlayer.prototype.attachTimelineMeta = function(rendered, intro, outro){
+		if(!rendered) return rendered;
+		rendered.motionIntroSec = Math.max(0, toNumber(intro, 0));
+		rendered.motionOutroSec = Math.max(0, toNumber(outro, 0));
+		return rendered;
+	};
+
+	CompactGraphPlayer.prototype.mergeTimelineMeta = function(items){
+		var intro = 0;
+		var outro = 0;
+		for(var i = 0; i < items.length; i++){
+			var meta = this.getTimelineMeta(items[i]);
+			intro = Math.max(intro, meta.intro);
+			outro = Math.max(outro, meta.outro);
+		}
+		return { intro: intro, outro: outro };
+	};
+
 	CompactGraphPlayer.prototype.getImageAsset = function(nodeId, src){
 		var key = String(nodeId);
 		var existing = this.imageAssetCache.get(key);
@@ -1601,7 +1639,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			var c0 = this.createLayer();
 			c0.ctx.fillStyle = params.color || '#000000';
 			c0.ctx.fillRect(0, 0, c0.canvas.width, c0.canvas.height);
-			result = { canvas: c0.canvas };
+			result = this.attachTimelineMeta({ canvas: c0.canvas }, 0, 0);
 		}
 		else if(node.type === 'Gradient'){
 			var c1 = this.createLayer();
@@ -1627,7 +1665,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				c1.ctx.fillStyle = lg;
 			}
 			c1.ctx.fillRect(0, 0, c1.canvas.width, c1.canvas.height);
-			result = { canvas: c1.canvas };
+			result = this.attachTimelineMeta({ canvas: c1.canvas }, 0, 0);
 		}
 		else if(node.type === 'Image'){
 			var cImg = this.createLayer();
@@ -1662,7 +1700,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				}
 				cImg.ctx.restore();
 			}
-			result = { canvas: cImg.canvas };
+			result = this.attachTimelineMeta({ canvas: cImg.canvas }, 0, 0);
 		}
 		else if(node.type === 'Shape'){
 			var c2 = this.createLayer();
@@ -1684,7 +1722,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				this.drawShape(c2.ctx, params.shape || 'circle', x, y, size);
 				c2.ctx.fill();
 			}
-			result = { canvas: c2.canvas };
+			result = this.attachTimelineMeta({ canvas: c2.canvas }, 0, 0);
 		}
 		else if(node.type === 'Text'){
 			var cText = this.createLayer();
@@ -1730,11 +1768,12 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				cText.ctx.fillStyle = params.color || '#ffffff';
 				lines.forEach(function(line, i){ cText.ctx.fillText(line, getLineX(lineWidths[i] || 0), ty + i * lineHeight); });
 			}
-			result = { canvas: cText.canvas };
+			result = this.attachTimelineMeta({ canvas: cText.canvas }, 0, 0);
 		}
 		else if(node.type === 'Transform'){
 			var srcT = this.getInput(nodeId, ['in','layer','source'], timeSec, cache);
 			if(srcT && srcT.canvas){
+				var srcTMeta = this.getTimelineMeta(srcT);
 				var c3 = this.createLayer();
 				var xx = toNumber(params.x, 0);
 				var yy = toNumber(params.y, 0);
@@ -1751,12 +1790,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				c3.ctx.translate(-px, -py);
 				c3.ctx.drawImage(srcT.canvas, 0, 0);
 				c3.ctx.restore();
-				result = { canvas: c3.canvas };
+				result = this.attachTimelineMeta({ canvas: c3.canvas }, srcTMeta.intro, srcTMeta.outro);
 			}
 		}
 		else if(node.type === 'Clone'){
 			var srcC = this.getInput(nodeId, ['in','source'], timeSec, cache);
 			if(srcC && srcC.canvas){
+				var srcCMeta = this.getTimelineMeta(srcC);
 				var c4 = this.createLayer();
 				var mode = params.mode || 'x';
 				var countX = Math.max(1, Math.round(toNumber(params.countX, 1)));
@@ -1791,15 +1831,49 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				}else{
 					for(var xx3=0; xx3<countX; xx3++) drawAt(xx3*stepX, 0);
 				}
-				result = { canvas: c4.canvas };
+				result = this.attachTimelineMeta({ canvas: c4.canvas }, srcCMeta.intro, srcCMeta.outro);
+			}
+		}
+		else if(node.type === 'MotionIn'){
+			var srcMI = this.getInput(nodeId, ['in','source'], timeSec, cache);
+			if(srcMI && srcMI.canvas){
+				var srcMIMeta = this.getTimelineMeta(srcMI);
+				var cIn = this.createLayer();
+				var inDuration = Math.max(0.05, toNumber(params.duration, 0.6));
+				var inAmount = clamp(toNumber(params.amount, 0.18), 0, 0.8);
+				var localInTime = Math.max(0, timeSec - srcMIMeta.intro);
+				var progressIn = clamp(localInTime / inDuration, 0, 1);
+				var introScale = 1 - inAmount;
+				var scaleIn = progressIn < 0.7
+					? introScale + ((1 + (inAmount * 0.35) - introScale) * (progressIn / 0.7))
+					: (1 + (inAmount * 0.35)) + ((1 - (1 + (inAmount * 0.35))) * ((progressIn - 0.7) / 0.3));
+				var introStarted = timeSec >= srcMIMeta.intro;
+				var opacityIn = !introStarted ? 0 : (progressIn < 0.15 ? clamp(progressIn / 0.15, 0, 1) : 1);
+				var boundsIn = this.getMotionBounds(nodeId, srcMI.canvas);
+				var cxi = boundsIn ? boundsIn.cx : (cIn.canvas.width / 2);
+				var cyi = boundsIn ? boundsIn.cy : (cIn.canvas.height / 2);
+				cIn.ctx.save();
+				cIn.ctx.globalAlpha = opacityIn;
+				cIn.ctx.translate(cxi, cyi);
+				cIn.ctx.scale(scaleIn, scaleIn);
+				cIn.ctx.translate(-cxi, -cyi);
+				cIn.ctx.drawImage(srcMI.canvas, 0, 0);
+				cIn.ctx.restore();
+				result = this.attachTimelineMeta({ canvas: cIn.canvas }, srcMIMeta.intro + inDuration, srcMIMeta.outro);
 			}
 		}
 		else if(node.type === 'Motion'){
 			var srcM = this.getInput(nodeId, ['in','source'], timeSec, cache);
 			if(srcM && srcM.canvas){
+				var srcMMeta = this.getTimelineMeta(srcM);
 				var c5 = this.createLayer();
+				var motionMode = String(params.mode || 'breath');
 				var amount = clamp(toNumber(params.amount, 0.08), 0, 0.5);
-				var speed = Math.max(0.2, toNumber(params.speed, 2));
+				var speed = Math.max(0.1, toNumber(params.speed, 1));
+				var random = clamp(toNumber(params.random, 0), 0, 1);
+				var direction = String(params.direction || 'clockwise').toLowerCase() === 'counter-clockwise' ? -1 : 1;
+				var totalDur = Math.max(0.5, toNumber(this.duration, 5));
+				var activeTime = Math.max(0, timeSec - srcMMeta.intro);
 				var minScale = Math.max(0.01, 1 - amount);
 				var maxScale = 1 + amount;
 				var bounds = this.getMotionBounds(nodeId, srcM.canvas);
@@ -1808,22 +1882,64 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					maxScale = Math.min(maxScale, Math.max(0.01, safeScale * 0.999));
 					minScale = Math.min(minScale, maxScale);
 				}
-				var wave = (1 - Math.cos((2 * Math.PI * timeSec) / speed)) / 2;
+				var wave = (1 - Math.cos((2 * Math.PI * activeTime) / speed)) / 2;
 				var scale = minScale + (maxScale - minScale) * wave;
 				var cxm = bounds ? bounds.cx : (c5.canvas.width / 2);
 				var cym = bounds ? bounds.cy : (c5.canvas.height / 2);
+				var actVisible = timeSec >= srcMMeta.intro && timeSec <= Math.max(srcMMeta.intro, totalDur - srcMMeta.outro);
 				c5.ctx.save();
 				c5.ctx.translate(cxm, cym);
-				c5.ctx.scale(scale, scale);
+				if(actVisible && motionMode === 'circle'){
+					c5.ctx.rotate(direction * ((activeTime / speed) * Math.PI * 2));
+				}else if(actVisible && motionMode === 'wiggle'){
+					var baseSize = bounds ? Math.max(1, Math.min(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)) : 100;
+					var radius = Math.max(0, baseSize * amount);
+					var jitter = radius * random;
+					var tx = Math.cos((activeTime / speed) * Math.PI * 2) * radius;
+					var ty = Math.sin((activeTime / speed) * Math.PI * 2) * radius;
+					if(jitter > 0){
+						tx += Math.sin((activeTime / speed) * Math.PI * 11) * jitter;
+						ty += Math.cos((activeTime / speed) * Math.PI * 7) * jitter;
+					}
+					c5.ctx.translate(tx, ty);
+				}else{
+					c5.ctx.scale(actVisible ? scale : 1, actVisible ? scale : 1);
+				}
 				c5.ctx.translate(-cxm, -cym);
 				c5.ctx.drawImage(srcM.canvas, 0, 0);
 				c5.ctx.restore();
-				result = { canvas: c5.canvas };
+				result = this.attachTimelineMeta({ canvas: c5.canvas }, srcMMeta.intro, srcMMeta.outro);
+			}
+		}
+		else if(node.type === 'MotionOut'){
+			var srcMO = this.getInput(nodeId, ['in','source'], timeSec, cache);
+			if(srcMO && srcMO.canvas){
+				var srcMOMeta = this.getTimelineMeta(srcMO);
+				var cOut = this.createLayer();
+				var outDuration = Math.max(0.05, toNumber(params.duration, 0.6));
+				var outAmount = clamp(toNumber(params.amount, 0.18), 0, 0.8);
+				var totalOutDur = Math.max(0.5, toNumber(this.duration, 5));
+				var outStart = Math.max(0, totalOutDur - srcMOMeta.outro - outDuration);
+				var progressOut = clamp((timeSec - outStart) / outDuration, 0, 1);
+				var outScale = 1 + ((Math.max(0.01, 1 - outAmount) - 1) * progressOut);
+				var outOpacity = 1 - progressOut;
+				var boundsOut = this.getMotionBounds(nodeId, srcMO.canvas);
+				var cxo = boundsOut ? boundsOut.cx : (cOut.canvas.width / 2);
+				var cyo = boundsOut ? boundsOut.cy : (cOut.canvas.height / 2);
+				cOut.ctx.save();
+				cOut.ctx.globalAlpha = outOpacity;
+				cOut.ctx.translate(cxo, cyo);
+				cOut.ctx.scale(outScale, outScale);
+				cOut.ctx.translate(-cxo, -cyo);
+				cOut.ctx.drawImage(srcMO.canvas, 0, 0);
+				cOut.ctx.restore();
+				result = this.attachTimelineMeta({ canvas: cOut.canvas }, srcMOMeta.intro, srcMOMeta.outro + outDuration);
 			}
 		}
 		else if(node.type === 'Glow'){
 			var srcG = this.getInput(nodeId, ['in','source'], timeSec, cache);
 			if(srcG && srcG.canvas){
+				var srcGMeta = this.getTimelineMeta(srcG);
 				var c6 = this.createLayer();
 				var blur = Math.max(0, toNumber(params.blur, 24));
 				var strength = clamp(toNumber(params.strength, 70) / 100, 0, 1);
@@ -1834,13 +1950,14 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				c6.ctx.drawImage(srcG.canvas, 0, 0);
 				c6.ctx.restore();
 				c6.ctx.drawImage(srcG.canvas, 0, 0);
-				result = { canvas: c6.canvas };
+				result = this.attachTimelineMeta({ canvas: c6.canvas }, srcGMeta.intro, srcGMeta.outro);
 			}
 		}
 		else if(node.type === 'Mask'){
 			var source = this.getInput(nodeId, ['source','in','a'], timeSec, cache);
 			var mask = this.getInput(nodeId, ['mask','b'], timeSec, cache);
 			if(source && source.canvas){
+				var sourceMeta = this.getTimelineMeta(source);
 				var c7 = this.createLayer();
 				c7.ctx.drawImage(source.canvas, 0, 0);
 				if(mask && mask.canvas){
@@ -1848,7 +1965,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					c7.ctx.drawImage(mask.canvas, 0, 0);
 					c7.ctx.globalCompositeOperation = 'source-over';
 				}
-				result = { canvas: c7.canvas };
+				result = this.attachTimelineMeta({ canvas: c7.canvas }, sourceMeta.intro, sourceMeta.outro);
 			}
 		}
 		else if(node.type === 'Composite'){
@@ -1859,6 +1976,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			var hasLayer = layerInputs.some(function(v){ return v && v.canvas; });
 			var m = this.getInput(nodeId, ['mask','m'], timeSec, cache);
 			if(hasLayer){
+				var compositeMeta = this.mergeTimelineMeta(layerInputs.filter(function(v){ return v && v.canvas; }));
 				var c8 = this.createLayer();
 				var blend = params.blend || params.mode || 'normal';
 				var opacity = clamp(toNumber(params.opacity, 100) / 100, 0, 1);
@@ -1890,7 +2008,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					c8.ctx.drawImage(m.canvas, 0, 0);
 					c8.ctx.globalCompositeOperation = 'source-over';
 				}
-				result = { canvas: c8.canvas };
+				result = this.attachTimelineMeta({ canvas: c8.canvas }, compositeMeta.intro, compositeMeta.outro);
 			}
 		}
 		else if(node.type === 'Freeze'){

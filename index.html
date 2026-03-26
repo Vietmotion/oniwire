@@ -1589,13 +1589,15 @@ async function evaluate(){
       width = tRect.width / previewScale;
       height = tRect.height / previewScale;
     }else if(node.type === "Shape"){
-      const size = Math.max(1, Number(node.params?.size) || 1);
+      const fallbackSize = Math.max(1, Number(node.params?.size) || 1);
+      const widthParam = Math.max(1, Number(node.params?.width) || fallbackSize);
+      const heightParam = Math.max(1, Number(node.params?.height) || fallbackSize);
       const x = Number(node.params?.x) || 0;
       const y = Number(node.params?.y) || 0;
-      left = x - (size / 2);
-      top = y - (size / 2);
-      width = size;
-      height = size;
+      left = x - (widthParam / 2);
+      top = y - (heightParam / 2);
+      width = widthParam;
+      height = heightParam;
     }else{
       return;
     }

@@ -254,6 +254,37 @@ body{
   position: relative;
 }
 
+.app.leftCollapsed .left{
+  overflow: hidden;
+}
+
+.app.leftCollapsed .left .content{
+  display: none;
+}
+
+.app.leftCollapsed .left .hdr{
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 14px 6px;
+  gap: 12px;
+  border-bottom: none;
+}
+
+.app.leftCollapsed .left .title{
+  display: none;
+}
+
+.app.leftCollapsed .left .btns{
+  margin-left: 0 !important;
+  width: 100%;
+  justify-content: center;
+}
+
+.app.leftCollapsed .left .logoFrame{
+  margin-right: 0;
+}
+
 .rowSplitter{
   position: absolute;
   left: calc(var(--leftW) + var(--gap));
@@ -273,6 +304,31 @@ body{
   content: "";
   width: 140px;
   height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+
+.colSplitter{
+  position: absolute;
+  top: var(--gap);
+  left: calc(100% - var(--rightW) - (var(--gap) * 1.5));
+  width: 10px;
+  height: var(--topH);
+  transform: translateX(-50%);
+  cursor: col-resize;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.colSplitter::before{
+  content: "";
+  width: 4px;
+  height: 120px;
   border-radius: 999px;
   background: rgba(255,255,255,.10);
   border: 1px solid rgba(255,255,255,.16);
@@ -673,6 +729,34 @@ select option{
   grid-row: 1;
   background: rgba(255,255,255,.02);
     
+}
+
+.inspector .hdr .btns{
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+#btnClearSel{
+  min-width: 36px;
+  padding: 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.app.inspectorExpanded .inspector{
+  grid-row: 1 / span 2;
+}
+
+.app.inspectorExpanded .editorWrap{
+  grid-column: 2;
+}
+
+.app.inspectorExpanded .rowSplitter{
+  display: none;
+}
+
+.app.inspectorExpanded .colSplitter{
+  display: none;
 }
 
 .kv{ display:grid; gap:10px; }
@@ -1547,6 +1631,10 @@ select optgroup{
   .inspector{ grid-row: 3; grid-column:1; }
   .editorWrap{ grid-row: 4; grid-column:1; height: 650px; }
   .rowSplitter{ display:none; }
+  .colSplitter{ display:none; }
+
+  .app.inspectorExpanded .inspector{ grid-row: 3; grid-column:1; }
+  .app.inspectorExpanded .editorWrap{ grid-row: 4; grid-column:1; }
 
   .helpOverlay{
     padding: 12px;

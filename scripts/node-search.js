@@ -22,7 +22,10 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
   let nodeSpawnEditorPos = { x: 0, y: 0 };
 
   const NODE_LABELS = {
-    ColorCorrect: "Color Corrector"
+    ColorCorrect: "Color Corrector",
+    MotionIn: "Motion - In",
+    Motion: "Motion - Act",
+    MotionOut: "Motion - Out"
   };
 
   function getNodeDisplayName(type){

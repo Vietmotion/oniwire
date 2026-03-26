@@ -1,4 +1,41 @@
-window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ propagateMotionFlag, state }){
+window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ propagateMotionFlag, state, measureLayerBounds, getCanvasSize }){
+  function getTransformedBounds(bounds, { x, y, scale, rotateDeg, pivotX, pivotY }){
+    if(!bounds) return null;
+
+    const rad = (rotateDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const points = [
+      { x: bounds.x, y: bounds.y },
+      { x: bounds.x + bounds.width, y: bounds.y },
+      { x: bounds.x, y: bounds.y + bounds.height },
+      { x: bounds.x + bounds.width, y: bounds.y + bounds.height }
+    ].map((point) => {
+      const dx = point.x - pivotX;
+      const dy = point.y - pivotY;
+      const scaledX = dx * scale;
+      const scaledY = dy * scale;
+      return {
+        x: pivotX + x + (scaledX * cos) - (scaledY * sin),
+        y: pivotY + y + (scaledX * sin) + (scaledY * cos)
+      };
+    });
+
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    const right = Math.max(...xs);
+    const bottom = Math.max(...ys);
+
+    return {
+      left,
+      top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top)
+    };
+  }
+
   return {
     inputs: ["in"],
     outputs: ["layer"],
@@ -26,11 +63,41 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
 
       const oxPercent = (ox + 100) / 2;
       const oyPercent = (oy + 100) / 2;
+      const canvasSize = typeof getCanvasSize === "function"
+        ? (getCanvasSize() || {})
+        : {};
+      const canvasWidth = Number(canvasSize.width) || src.el.clientWidth || 1280;
+      const canvasHeight = Number(canvasSize.height) || src.el.clientHeight || 720;
+      const pivotX = canvasWidth * (oxPercent / 100);
+      const pivotY = canvasHeight * (oyPercent / 100);
 
       clone.style.transformOrigin = `${oxPercent}% ${oyPercent}%`;
       clone.style.transform = `translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
 
       if(state.selected === node.id){
+        const sourceBounds = typeof measureLayerBounds === "function" ? measureLayerBounds(src.el) : null;
+        const transformedBounds = getTransformedBounds(sourceBounds, {
+          x,
+          y,
+          scale: s,
+          rotateDeg: r,
+          pivotX,
+          pivotY
+        });
+
+        if(transformedBounds){
+          const boundsTarget = document.createElement("div");
+          boundsTarget.dataset.boundId = node.id;
+          boundsTarget.style.position = "absolute";
+          boundsTarget.style.left = `${transformedBounds.left}px`;
+          boundsTarget.style.top = `${transformedBounds.top}px`;
+          boundsTarget.style.width = `${transformedBounds.width}px`;
+          boundsTarget.style.height = `${transformedBounds.height}px`;
+          boundsTarget.style.visibility = "hidden";
+          boundsTarget.style.pointerEvents = "none";
+          wrap.appendChild(boundsTarget);
+        }
+
         const pivot = document.createElement("div");
         pivot.style.position = "absolute";
         pivot.style.left = `calc(${oxPercent}% + ${x}px)`;

@@ -26,7 +26,7 @@
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script src="scripts/export.js?v=20260319e"></script>
+  <script src="scripts/export.js?v=20260325a"></script>
   <script src="scripts/node-menu.js"></script>
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
@@ -36,7 +36,7 @@
   <script src="scripts/nodes/text.js"></script>
   <script src="scripts/nodes/image.js"></script>
   <script src="scripts/nodes/transform.js"></script>
-  <script src="scripts/nodes/motion.js?v=20260319a"></script>
+  <script src="scripts/nodes/motion.js?v=20260325a"></script>
   <script src="scripts/nodes/glow.js"></script>
   <script src="scripts/nodes/color_correct.js"></script>
   <script src="scripts/nodes/curves.js"></script>
@@ -57,6 +57,9 @@
       <div class="hdr">
         <iframe src="logo.html" class="logoFrame"></iframe>
         <div class="title">ONIWIRE</div> 
+        <div class="btns" style="margin-left:auto;">
+          <button id="btnToggleLeftPanel" aria-pressed="false" aria-label="Collapse left panel" title="Collapse left panel"><</button>
+        </div>
       </div>
       <div class="content">
         <div class="menuGrid">
@@ -153,7 +156,7 @@
       <div class="hdr">
         <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
-          <button id="btnClearSel">Clear</button>
+          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">⤢</button>
         </div>
       </div>
       <div class="content" id="inspectorBody">
@@ -167,6 +170,8 @@
         </div>
       </div>
     </section>
+
+    <div id="colSplitter" class="colSplitter" aria-hidden="true"></div>
 
     <div id="rowSplitter" class="rowSplitter" aria-hidden="true"></div>
 
@@ -299,9 +304,13 @@
 
   const renderRoot = document.getElementById("renderRoot");
   const inspectorBody = document.getElementById("inspectorBody");
+  const inspectorExpandBtn = document.getElementById("btnClearSel");
+  const leftPanelToggleBtn = document.getElementById("btnToggleLeftPanel");
 
   const appEl = document.querySelector(".app");
+  const colSplitter = document.getElementById("colSplitter");
   const rowSplitter = document.getElementById("rowSplitter");
+  let storedLeftPanelWidth = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim() || "260px";
 
   const editorEl = document.getElementById("editor");
   const nodesEl  = document.getElementById("nodes");
@@ -327,6 +336,39 @@
     helpOverlay?.classList.toggle("isHidden", !helpVisible);
     helpOverlay?.setAttribute("aria-hidden", helpVisible ? "false" : "true");
     if(helpBtn) helpBtn.setAttribute("aria-pressed", helpVisible ? "true" : "false");
+  }
+
+  function setInspectorExpanded(expanded){
+    const isExpanded = Boolean(expanded);
+    appEl?.classList.toggle("inspectorExpanded", isExpanded);
+    if(inspectorExpandBtn){
+      inspectorExpandBtn.textContent = isExpanded ? "⤡" : "⤢";
+      inspectorExpandBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
+      inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
+      inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
+    }
+  }
+
+  function setLeftPanelCollapsed(collapsed){
+    const isCollapsed = Boolean(collapsed);
+    if(isCollapsed){
+      const currentLeftW = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim();
+      if(currentLeftW && currentLeftW !== "0px") storedLeftPanelWidth = currentLeftW;
+      document.documentElement.style.setProperty("--leftW", "52px");
+    }else{
+      document.documentElement.style.setProperty("--leftW", storedLeftPanelWidth || "260px");
+    }
+
+    appEl?.classList.toggle("leftCollapsed", isCollapsed);
+
+    if(leftPanelToggleBtn){
+      leftPanelToggleBtn.textContent = isCollapsed ? ">" : "<";
+      leftPanelToggleBtn.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
+      leftPanelToggleBtn.setAttribute("aria-label", isCollapsed ? "Expand left panel" : "Collapse left panel");
+      leftPanelToggleBtn.setAttribute("title", isCollapsed ? "Expand left panel" : "Collapse left panel");
+    }
+
+    applyPreviewTransform();
   }
 
   function openHelp(pageKey = activeHelpPage){
@@ -670,7 +712,8 @@ utilsApi.initProjectUtils();
 
     return {
       shapeType: target.dataset.maskShape || "circle",
-      size: Number(target.dataset.maskSize || 120),
+      width: Number(target.dataset.maskWidth || target.dataset.maskSize || 120),
+      height: Number(target.dataset.maskHeight || target.dataset.maskSize || 120),
       x: Number(target.dataset.maskX || 100),
       y: Number(target.dataset.maskY || 100)
     };
@@ -996,7 +1039,6 @@ utilsApi.initProjectUtils();
     const useSimpleShapeRender = options.useSimpleShapeRender !== false;
     const timeoutMs = Math.max(100, Number(options.timeoutMs) || 200);
     const bakeComputedStyles = options.bakeComputedStyles === true;
-
     const targetW = Math.max(1, Math.round(layerEl.clientWidth || previewBase?.w || 1280));
     const targetH = Math.max(1, Math.round(layerEl.clientHeight || previewBase?.h || 720));
 
@@ -1113,7 +1155,11 @@ utilsApi.initProjectUtils();
     measureLayerBounds,
     propagateMotionFlag,
     clamp,
-    parseHexColor
+    parseHexColor,
+    getOutputDuration: () => {
+      const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+      return Math.max(0.5, Number(outNode?.params?.duration) || 5);
+    }
   });
   const BASIC_NODE_DEFS = nodeDefsApi.basicNodes;
   const SHAPE_TEXT_NODE_DEFS = nodeDefsApi.shapeTextNodes;
@@ -1134,7 +1180,12 @@ utilsApi.initProjectUtils();
   const NODE_DEFS = {
     ...BASIC_NODE_DEFS,
     ...SHAPE_TEXT_NODE_DEFS,
-    Transform: window.createOniwireTransformNodeDef({ propagateMotionFlag, state }),
+    Transform: window.createOniwireTransformNodeDef({
+      propagateMotionFlag,
+      state,
+      measureLayerBounds,
+      getCanvasSize: () => ({ width: previewBase?.w || 1280, height: previewBase?.h || 720 })
+    }),
     ...MOTION_GLOW_NODE_DEFS,
     ...CLONE_COMPOSITE_NODE_DEFS,
     Mask: window.createOniwireMaskNodeDef({
@@ -1180,6 +1231,19 @@ const NODE_TIPS = {
   Transform: [
     "<strong>Transform</strong> - Moves, scales, and rotates a layer.",
     "<em>in</em> -> the layer to transform. Set Pivot X/Y to control transform origin."
+  ],
+  MotionIn: [
+    "<strong>Motion - In</strong> - Plays the entrance animation for a layer.",
+    "<em>Pop</em>: scales up from 0 with a bounce overshoot. <em>Fade</em>: fades in from transparent.",
+    "<em>in</em> -> the layer to introduce. Connect <em>Motion - Act</em> after this to add looping motion."
+  ],
+  Motion: [
+    "<strong>Motion - Act</strong> - Adds looping motion while the layer is on screen.",
+    "Use after <em>Motion - In</em>. Breath, circle-spin, and wiggle modes loop continuously."
+  ],
+  MotionOut: [
+    "<strong>Motion - Out</strong> - Plays the exit animation for a layer.",
+    "Use after <em>Motion - Act</em>. It automatically starts at the end of the Output duration."
   ],
   Glow: [
     "<strong>Glow</strong> - Adds a glow effect to a layer.",
@@ -1330,6 +1394,9 @@ const NODE_CATEGORIES = {
   Text: "Generators",
   Image: "Generators",
   Transform: "Operations",
+  MotionIn: "Motion",
+  Motion: "Motion",
+  MotionOut: "Motion",
   Glow: "Operations",
   Composite: "Operations",
   Mask: "Operations",
@@ -1339,7 +1406,10 @@ const NODE_CATEGORIES = {
 };
 
 const NODE_DISPLAY_NAMES = {
-  ColorCorrect: "Color Corrector"
+  ColorCorrect: "Color Corrector",
+  MotionIn: "Motion - In",
+  Motion: "Motion - Act",
+  MotionOut: "Motion - Out"
 };
 
 function getNodeDisplayName(nodeType){
@@ -1598,13 +1668,15 @@ async function evaluate(){
       width = tRect.width / previewScale;
       height = tRect.height / previewScale;
     }else if(node.type === "Shape"){
-      const size = Math.max(1, Number(node.params?.size) || 1);
+      const fallbackSize = Math.max(1, Number(node.params?.size) || 1);
+      const widthParam = Math.max(1, Number(node.params?.width) || fallbackSize);
+      const heightParam = Math.max(1, Number(node.params?.height) || fallbackSize);
       const x = Number(node.params?.x) || 0;
       const y = Number(node.params?.y) || 0;
-      left = x - (size / 2);
-      top = y - (size / 2);
-      width = size;
-      height = size;
+      left = x - (widthParam / 2);
+      top = y - (heightParam / 2);
+      width = widthParam;
+      height = heightParam;
     }else{
       return;
     }
@@ -1740,6 +1812,19 @@ async function evaluate(){
   let splitDragging = false;
   let splitStartY = 0;
   let splitStartTop = 0;
+  let colSplitDragging = false;
+  let colSplitStartX = 0;
+  let colSplitStartRight = 0;
+
+  const parseCssLengthPx = (raw, basePx) => {
+    const value = String(raw || "").trim();
+    if(!value) return 0;
+    if(value.endsWith("px")) return Number(value.replace("px", "")) || 0;
+    if(value.endsWith("vw")) return (Number(value.replace("vw", "")) || 0) * (window.innerWidth / 100);
+    if(value.endsWith("vh")) return (Number(value.replace("vh", "")) || 0) * (window.innerHeight / 100);
+    if(value.endsWith("%")) return (Number(value.replace("%", "")) || 0) * (basePx / 100);
+    return Number(value) || 0;
+  };
 
   if(rowSplitter && appEl){
     rowSplitter.addEventListener("mousedown", (e) => {
@@ -1772,6 +1857,46 @@ async function evaluate(){
       splitDragging = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+    });
+  }
+
+  if(colSplitter && appEl){
+    colSplitter.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      colSplitDragging = true;
+      colSplitStartX = e.clientX;
+
+      const appRect = appEl.getBoundingClientRect();
+      const cssRightW = getComputedStyle(document.documentElement).getPropertyValue("--rightW");
+      colSplitStartRight = parseCssLengthPx(cssRightW, appRect.width);
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if(!colSplitDragging) return;
+      const appRect = appEl.getBoundingClientRect();
+      const cssLeftW = getComputedStyle(document.documentElement).getPropertyValue("--leftW");
+      const leftWidth = parseCssLengthPx(cssLeftW, appRect.width);
+
+      const dx = e.clientX - colSplitStartX;
+      let newRight = colSplitStartRight - dx;
+      const minRight = 280;
+      const minCenter = 420;
+      const maxRight = Math.max(minRight + 40, appRect.width - leftWidth - minCenter);
+      newRight = clamp(newRight, minRight, maxRight);
+
+      document.documentElement.style.setProperty("--rightW", `${newRight}px`);
+      applyPreviewTransform();
+    });
+
+    window.addEventListener("mouseup", () => {
+      if(!colSplitDragging) return;
+      colSplitDragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      applyPreviewTransform();
     });
   }
 
@@ -2503,7 +2628,7 @@ async function evaluate(){
             next = `layer${n}`;
           }
 
-          currentPorts.push(next);
+          currentPorts.unshift(next);
           node.params.inputPorts = currentPorts;
           render();
           evaluateAndRender();
@@ -2520,7 +2645,7 @@ async function evaluate(){
             return;
           }
 
-          const removed = currentPorts.pop();
+          const removed = currentPorts.shift();
           node.params.inputPorts = currentPorts;
           state.wires = state.wires.filter(w => !(String(w.to.nodeId) === String(node.id) && w.to.port === removed));
           render();
@@ -2619,7 +2744,7 @@ async function evaluate(){
           renderInspector();
         }
 
-        if(node.type === "Motion" && k === "mode"){
+        if((node.type === "Motion" || node.type === "MotionIn" || node.type === "MotionOut") && k === "mode"){
           renderInspector();
         }
 
@@ -3984,8 +4109,14 @@ function loadGraph(data){
     if(e.target === helpOverlay) closeHelp();
   });
 
-  document.getElementById("btnClearSel").addEventListener("click", () => {
-    clearSelection();
+  inspectorExpandBtn?.addEventListener("click", () => {
+    const expanded = appEl?.classList.contains("inspectorExpanded");
+    setInspectorExpanded(!expanded);
+  });
+
+  leftPanelToggleBtn?.addEventListener("click", () => {
+    const collapsed = appEl?.classList.contains("leftCollapsed");
+    setLeftPanelCollapsed(!collapsed);
   });
 
   document.getElementById("btnNew").addEventListener("click", () => {
