@@ -751,14 +751,6 @@ select option{
   grid-column: 2;
 }
 
-.app.inspectorExpanded .rowSplitter{
-  display: none;
-}
-
-.app.inspectorExpanded .colSplitter{
-  display: none;
-}
-
 .kv{ display:grid; gap:10px; }
 .kv .row{
   display:grid;

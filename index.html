@@ -26,7 +26,7 @@
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script src="scripts/export.js?v=20260319e"></script>
+  <script src="scripts/export.js?v=20260325a"></script>
   <script src="scripts/node-menu.js"></script>
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
@@ -36,7 +36,7 @@
   <script src="scripts/nodes/text.js"></script>
   <script src="scripts/nodes/image.js"></script>
   <script src="scripts/nodes/transform.js"></script>
-  <script src="scripts/nodes/motion.js?v=20260319a"></script>
+  <script src="scripts/nodes/motion.js?v=20260325a"></script>
   <script src="scripts/nodes/glow.js"></script>
   <script src="scripts/nodes/color_correct.js"></script>
   <script src="scripts/nodes/curves.js"></script>
@@ -57,6 +57,9 @@
       <div class="hdr">
         <iframe src="logo.html" class="logoFrame"></iframe>
         <div class="title">ONIWIRE</div> 
+        <div class="btns" style="margin-left:auto;">
+          <button id="btnToggleLeftPanel" aria-pressed="false" aria-label="Collapse left panel" title="Collapse left panel"><</button>
+        </div>
       </div>
       <div class="content">
         <div class="menuGrid">
@@ -153,7 +156,7 @@
       <div class="hdr">
         <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
-          <button id="btnClearSel">Clear</button>
+          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">⤢</button>
         </div>
       </div>
       <div class="content" id="inspectorBody">
@@ -167,6 +170,8 @@
         </div>
       </div>
     </section>
+
+    <div id="colSplitter" class="colSplitter" aria-hidden="true"></div>
 
     <div id="rowSplitter" class="rowSplitter" aria-hidden="true"></div>
 
@@ -299,9 +304,13 @@
 
   const renderRoot = document.getElementById("renderRoot");
   const inspectorBody = document.getElementById("inspectorBody");
+  const inspectorExpandBtn = document.getElementById("btnClearSel");
+  const leftPanelToggleBtn = document.getElementById("btnToggleLeftPanel");
 
   const appEl = document.querySelector(".app");
+  const colSplitter = document.getElementById("colSplitter");
   const rowSplitter = document.getElementById("rowSplitter");
+  let storedLeftPanelWidth = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim() || "260px";
 
   const editorEl = document.getElementById("editor");
   const nodesEl  = document.getElementById("nodes");
@@ -327,6 +336,39 @@
     helpOverlay?.classList.toggle("isHidden", !helpVisible);
     helpOverlay?.setAttribute("aria-hidden", helpVisible ? "false" : "true");
     if(helpBtn) helpBtn.setAttribute("aria-pressed", helpVisible ? "true" : "false");
+  }
+
+  function setInspectorExpanded(expanded){
+    const isExpanded = Boolean(expanded);
+    appEl?.classList.toggle("inspectorExpanded", isExpanded);
+    if(inspectorExpandBtn){
+      inspectorExpandBtn.textContent = isExpanded ? "⤡" : "⤢";
+      inspectorExpandBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
+      inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
+      inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
+    }
+  }
+
+  function setLeftPanelCollapsed(collapsed){
+    const isCollapsed = Boolean(collapsed);
+    if(isCollapsed){
+      const currentLeftW = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim();
+      if(currentLeftW && currentLeftW !== "0px") storedLeftPanelWidth = currentLeftW;
+      document.documentElement.style.setProperty("--leftW", "52px");
+    }else{
+      document.documentElement.style.setProperty("--leftW", storedLeftPanelWidth || "260px");
+    }
+
+    appEl?.classList.toggle("leftCollapsed", isCollapsed);
+
+    if(leftPanelToggleBtn){
+      leftPanelToggleBtn.textContent = isCollapsed ? ">" : "<";
+      leftPanelToggleBtn.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
+      leftPanelToggleBtn.setAttribute("aria-label", isCollapsed ? "Expand left panel" : "Collapse left panel");
+      leftPanelToggleBtn.setAttribute("title", isCollapsed ? "Expand left panel" : "Collapse left panel");
+    }
+
+    applyPreviewTransform();
   }
 
   function openHelp(pageKey = activeHelpPage){
@@ -670,7 +712,8 @@ utilsApi.initProjectUtils();
 
     return {
       shapeType: target.dataset.maskShape || "circle",
-      size: Number(target.dataset.maskSize || 120),
+      width: Number(target.dataset.maskWidth || target.dataset.maskSize || 120),
+      height: Number(target.dataset.maskHeight || target.dataset.maskSize || 120),
       x: Number(target.dataset.maskX || 100),
       y: Number(target.dataset.maskY || 100)
     };
@@ -678,22 +721,22 @@ utilsApi.initProjectUtils();
 
   function buildShapeMaskUrl(meta, invert){
     if(!meta) return null;
-    const { shapeType, size, x, y } = meta;
+    const { shapeType, width, height, x, y } = meta;
 
     const w = renderRoot?.clientWidth || 800;
     const h = renderRoot?.clientHeight || 600;
 
     const baseFill = invert ? "white" : "black";
     const shapeFill = invert ? "black" : "white";
-    const r = size / 2;
+    const r = Math.max(width, height) / 2;
 
     let shapeSvg = "";
     switch(shapeType){
       case "circle":
         shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
         break;
-      case "square":
-        shapeSvg = `<rect x="${x - r}" y="${y - r}" width="${size}" height="${size}" fill="${shapeFill}" />`;
+      case "rectangle":
+        shapeSvg = `<rect x="${x - width / 2}" y="${y - height / 2}" width="${width}" height="${height}" fill="${shapeFill}" />`;
         break;
       case "triangle":
         shapeSvg = `<polygon points="${[
@@ -996,7 +1039,6 @@ utilsApi.initProjectUtils();
     const useSimpleShapeRender = options.useSimpleShapeRender !== false;
     const timeoutMs = Math.max(100, Number(options.timeoutMs) || 200);
     const bakeComputedStyles = options.bakeComputedStyles === true;
-
     const targetW = Math.max(1, Math.round(layerEl.clientWidth || previewBase?.w || 1280));
     const targetH = Math.max(1, Math.round(layerEl.clientHeight || previewBase?.h || 720));
 
@@ -1113,7 +1155,11 @@ utilsApi.initProjectUtils();
     measureLayerBounds,
     propagateMotionFlag,
     clamp,
-    parseHexColor
+    parseHexColor,
+    getOutputDuration: () => {
+      const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+      return Math.max(0.5, Number(outNode?.params?.duration) || 5);
+    }
   });
   const BASIC_NODE_DEFS = nodeDefsApi.basicNodes;
   const SHAPE_TEXT_NODE_DEFS = nodeDefsApi.shapeTextNodes;
@@ -1134,7 +1180,12 @@ utilsApi.initProjectUtils();
   const NODE_DEFS = {
     ...BASIC_NODE_DEFS,
     ...SHAPE_TEXT_NODE_DEFS,
-    Transform: window.createOniwireTransformNodeDef({ propagateMotionFlag, state }),
+    Transform: window.createOniwireTransformNodeDef({
+      propagateMotionFlag,
+      state,
+      measureLayerBounds,
+      getCanvasSize: () => ({ width: previewBase?.w || 1280, height: previewBase?.h || 720 })
+    }),
     ...MOTION_GLOW_NODE_DEFS,
     ...CLONE_COMPOSITE_NODE_DEFS,
     Mask: window.createOniwireMaskNodeDef({
@@ -1180,6 +1231,19 @@ const NODE_TIPS = {
   Transform: [
     "<strong>Transform</strong> - Moves, scales, and rotates a layer.",
     "<em>in</em> -> the layer to transform. Set Pivot X/Y to control transform origin."
+  ],
+  MotionIn: [
+    "<strong>Motion - In</strong> - Plays the entrance animation for a layer.",
+    "<em>Pop</em>: scales up from 0 with a bounce overshoot. <em>Fade</em>: fades in from transparent.",
+    "<em>in</em> -> the layer to introduce. Connect <em>Motion - Act</em> after this to add looping motion."
+  ],
+  Motion: [
+    "<strong>Motion - Act</strong> - Adds looping motion while the layer is on screen.",
+    "Use after <em>Motion - In</em>. Breath, circle-spin, and wiggle modes loop continuously."
+  ],
+  MotionOut: [
+    "<strong>Motion - Out</strong> - Plays the exit animation for a layer.",
+    "Use after <em>Motion - Act</em>. It automatically starts at the end of the Output duration."
   ],
   Glow: [
     "<strong>Glow</strong> - Adds a glow effect to a layer.",
@@ -1330,6 +1394,9 @@ const NODE_CATEGORIES = {
   Text: "Generators",
   Image: "Generators",
   Transform: "Operations",
+  MotionIn: "Motion",
+  Motion: "Motion",
+  MotionOut: "Motion",
   Glow: "Operations",
   Composite: "Operations",
   Mask: "Operations",
@@ -1338,24 +1405,36 @@ const NODE_CATEGORIES = {
   Output: "Output",
 };
 
+const NODE_DISPLAY_NAMES = {
+  ColorCorrect: "Color Corrector",
+  MotionIn: "Motion - In",
+  Motion: "Motion - Act",
+  MotionOut: "Motion - Out"
+};
+
+function getNodeDisplayName(nodeType){
+  return NODE_DISPLAY_NAMES[nodeType] || nodeType;
+}
+
 function getHelpPageData(pageKey){
   if(HELP_GENERAL_PAGES[pageKey]) return HELP_GENERAL_PAGES[pageKey];
 
   if(pageKey.startsWith("node:")){
     const nodeType = pageKey.slice(5);
+    const displayName = getNodeDisplayName(nodeType);
     const lines = NODE_TIPS[nodeType] || [];
     const def = NODE_DEFS[nodeType];
     const category = NODE_CATEGORIES[nodeType] || "Node";
     return {
-      eyebrow: `Node Help - ${nodeType}`,
-      title: `${def?.icon || "*"} ${nodeType}`,
-      subtitle: `${nodeType} is part of ${category.toLowerCase()}. Use this page as a quick reference while building your graph.`,
+      eyebrow: `Node Help - ${displayName}`,
+      title: `${def?.icon || "*"} ${displayName}`,
+      subtitle: `${displayName} is part of ${category.toLowerCase()}. Use this page as a quick reference while building your graph.`,
       body: `
         <div class="helpSection">
           <div class="helpNodeHeader">
             <div class="helpNodeIcon">${def?.icon || "*"}</div>
             <div>
-              <h3 class="helpSectionTitle" style="margin-bottom:4px;">${nodeType}</h3>
+              <h3 class="helpSectionTitle" style="margin-bottom:4px;">${displayName}</h3>
               <div class="helpNodeMeta">Category: ${category}</div>
             </div>
           </div>
@@ -1385,7 +1464,7 @@ function renderHelpPage(pageKey){
 function buildHelpNavigation(){
   if(helpNodeNavEl && !helpNodeNavEl.dataset.ready){
     helpNodeNavEl.innerHTML = Object.keys(NODE_TIPS).map(nodeType => (
-      `<button type="button" class="helpNavBtn" data-help-page="node:${nodeType}">${nodeType}</button>`
+      `<button type="button" class="helpNavBtn" data-help-page="node:${nodeType}">${getNodeDisplayName(nodeType)}</button>`
     )).join("");
     helpNodeNavEl.dataset.ready = "true";
   }
@@ -1619,7 +1698,7 @@ async function evaluate(){
       { x: left + width, y: top + height }
     ];
 
-    const hasSize = typeof node.params?.size !== "undefined";
+    const hasSize = (typeof node.params?.width !== "undefined" && typeof node.params?.height !== "undefined") || typeof node.params?.size !== "undefined";
     const hasScale = typeof node.params?.scale !== "undefined";
     if(!hasSize && !hasScale) return;
 
@@ -1657,6 +1736,8 @@ async function evaluate(){
         const startDist = Math.hypot(startPt.x - center.x, startPt.y - center.y) || 1;
 
         const startSize = Number(node.params?.size ?? 0);
+        const startWidth = Number(node.params?.width ?? 100);
+        const startHeight = Number(node.params?.height ?? 100);
         const startScale = Number(node.params?.scale ?? 1);
         const startX = Number(node.params?.x ?? 0);
         const startY = Number(node.params?.y ?? 0);
@@ -1669,9 +1750,18 @@ async function evaluate(){
           const factor = clamp(dist / startDist, 0.1, 10);
 
           if(hasSize){
-            const nextSize = Math.max(1, startSize * factor);
-            node.params.size = nextSize;
-            syncInspectorValue("size", Math.round(nextSize));
+            if(node.type === "Shape"){
+              const nextWidth = Math.max(1, startWidth * factor);
+              const nextHeight = Math.max(1, startHeight * factor);
+              node.params.width = nextWidth;
+              node.params.height = nextHeight;
+              syncInspectorValue("width", Math.round(nextWidth));
+              syncInspectorValue("height", Math.round(nextHeight));
+            }else if(typeof node.params?.size !== "undefined"){
+              const nextSize = Math.max(1, startSize * factor);
+              node.params.size = nextSize;
+              syncInspectorValue("size", Math.round(nextSize));
+            }
 
             if(node.type === "Text"){
               const nextW = startW * factor;
@@ -1722,6 +1812,19 @@ async function evaluate(){
   let splitDragging = false;
   let splitStartY = 0;
   let splitStartTop = 0;
+  let colSplitDragging = false;
+  let colSplitStartX = 0;
+  let colSplitStartRight = 0;
+
+  const parseCssLengthPx = (raw, basePx) => {
+    const value = String(raw || "").trim();
+    if(!value) return 0;
+    if(value.endsWith("px")) return Number(value.replace("px", "")) || 0;
+    if(value.endsWith("vw")) return (Number(value.replace("vw", "")) || 0) * (window.innerWidth / 100);
+    if(value.endsWith("vh")) return (Number(value.replace("vh", "")) || 0) * (window.innerHeight / 100);
+    if(value.endsWith("%")) return (Number(value.replace("%", "")) || 0) * (basePx / 100);
+    return Number(value) || 0;
+  };
 
   if(rowSplitter && appEl){
     rowSplitter.addEventListener("mousedown", (e) => {
@@ -1754,6 +1857,46 @@ async function evaluate(){
       splitDragging = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+    });
+  }
+
+  if(colSplitter && appEl){
+    colSplitter.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      colSplitDragging = true;
+      colSplitStartX = e.clientX;
+
+      const appRect = appEl.getBoundingClientRect();
+      const cssRightW = getComputedStyle(document.documentElement).getPropertyValue("--rightW");
+      colSplitStartRight = parseCssLengthPx(cssRightW, appRect.width);
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if(!colSplitDragging) return;
+      const appRect = appEl.getBoundingClientRect();
+      const cssLeftW = getComputedStyle(document.documentElement).getPropertyValue("--leftW");
+      const leftWidth = parseCssLengthPx(cssLeftW, appRect.width);
+
+      const dx = e.clientX - colSplitStartX;
+      let newRight = colSplitStartRight - dx;
+      const minRight = 280;
+      const minCenter = 420;
+      const maxRight = Math.max(minRight + 40, appRect.width - leftWidth - minCenter);
+      newRight = clamp(newRight, minRight, maxRight);
+
+      document.documentElement.style.setProperty("--rightW", `${newRight}px`);
+      applyPreviewTransform();
+    });
+
+    window.addEventListener("mouseup", () => {
+      if(!colSplitDragging) return;
+      colSplitDragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      applyPreviewTransform();
     });
   }
 
@@ -1856,7 +1999,9 @@ async function evaluate(){
     for(const node of state.nodes.values()){
       const def = NODE_DEFS[node.type];
       if(!def) continue;
-      const nodeName = String(node.name || "").trim() || node.type;
+      const rawName = String(node.name || "").trim();
+      const defaultName = getNodeDisplayName(node.type);
+      const nodeName = (!rawName || rawName === node.type) ? defaultName : rawName;
 
       const el = document.createElement("div");
       const isSelected = state.selected === node.id;
@@ -2312,7 +2457,7 @@ async function evaluate(){
 
     const header = `
       <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-        <div class="pill">${def.icon} ${node.type}</div>
+        <div class="pill">${def.icon} ${getNodeDisplayName(node.type)}</div>
         <div class="pill">id: ${node.id}</div>
       </div>
     `;
@@ -2321,7 +2466,7 @@ async function evaluate(){
       <div class="kv">
         <div class="row">
           <label>Name</label>
-          <input data-node-name type="text" value="${escapeAttr(String(node.name || node.type))}" placeholder="${escapeAttr(node.type)}" />
+          <input data-node-name type="text" value="${escapeAttr(String(node.name || getNodeDisplayName(node.type)))}" placeholder="${escapeAttr(getNodeDisplayName(node.type))}" />
         </div>
         ${fields.map(f => renderInspectorField(node, f)).join("")}
       </div>
@@ -2337,14 +2482,14 @@ async function evaluate(){
 
       nameInput.addEventListener('input', () => {
         const next = String(nameInput.value || "").trim();
-        node.name = next || node.type;
+        node.name = next || getNodeDisplayName(node.type);
         render();
       });
 
       nameInput.addEventListener('blur', () => {
         nameInput.dataset.historyPushed = "0";
         const next = String(nameInput.value || "").trim();
-        node.name = next || node.type;
+        node.name = next || getNodeDisplayName(node.type);
         nameInput.value = node.name;
       });
     }
@@ -2483,7 +2628,7 @@ async function evaluate(){
             next = `layer${n}`;
           }
 
-          currentPorts.push(next);
+          currentPorts.unshift(next);
           node.params.inputPorts = currentPorts;
           render();
           evaluateAndRender();
@@ -2500,7 +2645,7 @@ async function evaluate(){
             return;
           }
 
-          const removed = currentPorts.pop();
+          const removed = currentPorts.shift();
           node.params.inputPorts = currentPorts;
           state.wires = state.wires.filter(w => !(String(w.to.nodeId) === String(node.id) && w.to.port === removed));
           render();
@@ -2599,7 +2744,7 @@ async function evaluate(){
           renderInspector();
         }
 
-        if(node.type === "Motion" && k === "mode"){
+        if((node.type === "Motion" || node.type === "MotionIn" || node.type === "MotionOut") && k === "mode"){
           renderInspector();
         }
 
@@ -3964,8 +4109,14 @@ function loadGraph(data){
     if(e.target === helpOverlay) closeHelp();
   });
 
-  document.getElementById("btnClearSel").addEventListener("click", () => {
-    clearSelection();
+  inspectorExpandBtn?.addEventListener("click", () => {
+    const expanded = appEl?.classList.contains("inspectorExpanded");
+    setInspectorExpanded(!expanded);
+  });
+
+  leftPanelToggleBtn?.addEventListener("click", () => {
+    const collapsed = appEl?.classList.contains("leftCollapsed");
+    setLeftPanelCollapsed(!collapsed);
   });
 
   document.getElementById("btnNew").addEventListener("click", () => {
@@ -4032,7 +4183,7 @@ function loadGraph(data){
     const node = {
       id,
       type,
-      name: type,
+      name: getNodeDisplayName(type),
       pos: pos || { x: 60 + Math.random()*420, y: 60 + Math.random()*220 },
       params: { ...(def.defaults || {}) }
     };
