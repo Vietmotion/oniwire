@@ -1597,6 +1597,73 @@ select optgroup{
   }
 }
 
+/* ── Shape Manager (Pen node) ────────────────────── */
+.shapeManager{ display:grid; gap:8px; }
+
+.smList{
+  display:grid;
+  gap:3px;
+  min-height:36px;
+  max-height:200px;
+  overflow-y:auto;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:10px;
+  padding:4px;
+  background:rgba(0,0,0,.22);
+}
+
+.smItem{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 8px;
+  border-radius:7px;
+  cursor:pointer;
+  font-size:12px;
+  user-select:none;
+  transition:background 0.1s;
+  border:1px solid transparent;
+}
+.smItem:hover{ background:rgba(255,255,255,.07); }
+.smItem.smActive{
+  background:rgba(90,140,255,.18);
+  border-color:rgba(100,155,255,.35);
+}
+
+.smVis{
+  background:none; border:none;
+  color:rgba(255,255,255,.5);
+  font-size:11px; cursor:pointer;
+  padding:0 2px; line-height:1; flex-shrink:0;
+}
+.smVis:hover{ color:#ffffff; }
+
+.smLabel{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+
+.smDel{
+  background:none; border:none;
+  color:rgba(255,75,75,.55);
+  font-size:13px; cursor:pointer;
+  padding:0 2px; flex-shrink:0; line-height:1;
+}
+.smDel:hover{ color:rgba(255,75,75,1); }
+
+.smProps{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:10px;
+  padding:10px 10px 8px;
+  background:rgba(0,0,0,.15);
+  display:grid;
+  gap:8px;
+}
+.smPropsTitle{
+  font-size:11px;
+  color:rgba(140,180,255,.9);
+  font-weight:600;
+  letter-spacing:.02em;
+}
+/* ─────────────────────────────────────────────────── */
+
 @media (max-width: 1100px){
   :root{ --leftW: 220px; --rightW: 320px; }
 }

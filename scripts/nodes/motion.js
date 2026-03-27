@@ -40,6 +40,18 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
     return { wrap, clone, motionLayer };
   }
 
+  function cloneWithoutAnimation(srcEl){
+    const clone = srcEl.cloneNode(true);
+    const all = [clone, ...clone.querySelectorAll("*")];
+    for(const el of all){
+      if(!(el instanceof HTMLElement)) continue;
+      el.style.animation = "none";
+      el.style.transition = "none";
+      el.style.animationDelay = "0s";
+    }
+    return clone;
+  }
+
   function applyTransformOrigin(layer, sourceEl){
     const bounds = measureLayerBounds(sourceEl);
     const center = getBoundsCenter(bounds);
@@ -86,7 +98,15 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
 
     ensureMotionStyles();
     const { wrap, motionLayer } = createMotionWrap(src.el);
-    const bounds = applyTransformOrigin(motionLayer, src.el);
+    // When input is already wrapped (from Motion-In), don't recalculate transform origin.
+    // Just use the default center to avoid compounding transforms with wrong pivot.
+    const isWrapped = src.el.dataset?.hasMotion === "true";
+    let bounds = null;
+    if(!isWrapped){
+      bounds = applyTransformOrigin(motionLayer, src.el);
+    }else{
+      motionLayer.style.transformOrigin = "50% 50%";
+    }
     const upstreamTimeline = getTimelineMeta(src.el);
 
     const mode = node.params.mode || "breath";
@@ -101,8 +121,8 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
     const actDelaySec = clamp(Number(upstreamTimeline.intro) || 0, 0, Math.max(0, outputDuration - 0.05));
     const useDelayedAct = actDelaySec > 0;
 
-    // Always use CSS animations (start when element enters DOM; reliable; clone-safe).
-    // When upstream intro exists, bake a per-cycle hold so Motion-In can finish first.
+    // Override behavior: hold still during Motion-In, then Motion-Act takes over.
+    // Build this over one full output cycle so playback freeze/scrub stays correct.
     if(mode === "breath"){
       const minScale = Math.max(0.01, 1 - amount);
       const maxScale = 1 + amount;
@@ -111,18 +131,19 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
       if(!useDelayedAct){
         motionLayer.style.animation = `oniwire-breath ${cycleSeconds}s ease-in-out infinite`;
       }else{
-        const cycleDur = Math.max(outputDuration, actDelaySec + 0.05);
+        const cycleDur = outputDuration;
         const holdPct = (actDelaySec / cycleDur) * 100;
         const activeDur = Math.max(0.05, cycleDur - actDelaySec);
-        const steps = 24;
+        const steps = Math.max(24, Math.ceil(activeDur * 60));
         let frames = `0%{transform:scale(1)}${holdPct.toFixed(2)}%{transform:scale(1)}`;
         for(let i = 0; i <= steps; i++){
           const localSec = (i / steps) * activeDur;
-          const wave = (1 - Math.cos((2 * Math.PI * localSec) / cycleSeconds)) / 2;
-          const scale = minScale + (maxScale - minScale) * wave;
+          const wave = Math.sin((2 * Math.PI * localSec) / cycleSeconds);
+          const scale = 1 + amount * wave;
           const pct = holdPct + ((100 - holdPct) * (i / steps));
           frames += `${pct.toFixed(2)}%{transform:scale(${scale.toFixed(5)})}`;
         }
+        frames += `100%{transform:scale(1)}`;
         const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
         motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
       }
@@ -132,11 +153,11 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
         motionLayer.style.animation = `oniwire-circle ${cycleSeconds}s linear infinite`;
         motionLayer.style.animationDirection = aDir;
       }else{
-        const cycleDur = Math.max(outputDuration, actDelaySec + 0.05);
+        const cycleDur = outputDuration;
         const holdPct = (actDelaySec / cycleDur) * 100;
         const activeDur = Math.max(0.05, cycleDur - actDelaySec);
         const dirSign = aDir === "reverse" ? -1 : 1;
-        const steps = 24;
+        const steps = Math.max(24, Math.ceil(activeDur * 60));
         let frames = `0%{transform:rotate(0deg)}${holdPct.toFixed(2)}%{transform:rotate(0deg)}`;
         for(let i = 0; i <= steps; i++){
           const localSec = (i / steps) * activeDur;
@@ -145,6 +166,7 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
           const pct = holdPct + ((100 - holdPct) * (i / steps));
           frames += `${pct.toFixed(2)}%{transform:rotate(${deg.toFixed(3)}deg)}`;
         }
+        frames += `100%{transform:rotate(0deg)}`;
         const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
         motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
       }
@@ -168,21 +190,22 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
         })());
         motionLayer.style.animation = `${kfName} ${cycleSeconds}s linear infinite`;
       }else{
-        const cycleDur = Math.max(outputDuration, actDelaySec + 0.05);
+        const cycleDur = outputDuration;
         const holdPct = (actDelaySec / cycleDur) * 100;
         const activeDur = Math.max(0.05, cycleDur - actDelaySec);
-        const steps = 24;
+        const steps = Math.max(24, Math.ceil(activeDur * 60));
         let frames = `0%{transform:translate(0px,0px)}${holdPct.toFixed(2)}%{transform:translate(0px,0px)}`;
-        for(let i = 0; i <= steps; i++){
+        for(let i = 1; i <= steps; i++){
           const localSec = (i / steps) * activeDur;
           const phase = (localSec / cycleSeconds) * Math.PI * 2;
           const noiseX = Math.sin(localSec * 11.73) * jitter;
-          const noiseY = Math.cos(localSec * 7.31) * jitter;
+          const noiseY = Math.sin(localSec * 7.31) * jitter;
           const x = (Math.cos(phase) * radius) + noiseX;
           const y = (Math.sin(phase) * radius) + noiseY;
           const pct = holdPct + ((100 - holdPct) * (i / steps));
           frames += `${pct.toFixed(2)}%{transform:translate(${x.toFixed(2)}px,${y.toFixed(2)}px)}`;
         }
+        frames += `100%{transform:translate(0px,0px)}`;
         const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
         motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
       }
@@ -290,9 +313,17 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
     if(!src?.el) return null;
 
     const { wrap, motionLayer } = createMotionWrap(src.el);
-    const bounds = applyTransformOrigin(motionLayer, src.el);
     const upstreamTimeline = getTimelineMeta(src.el);
     const mode = String(node.params.mode || "fade").toLowerCase();
+    // Pop/Fade should always use stable center pivot to avoid drift from measured coords.
+    // Only fly-out needs geometric bounds for directional offsets.
+    let bounds = null;
+    if(mode === "fly"){
+      const staticFlySource = cloneWithoutAnimation(src.el);
+      bounds = applyTransformOrigin(motionLayer, staticFlySource);
+    }else{
+      motionLayer.style.transformOrigin = "50% 50%";
+    }
     const rawDirection = String(node.params.direction || "top-up").toLowerCase();
     const direction = rawDirection === "top-down"
       ? "top-up"
@@ -341,8 +372,10 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
             endX = -Math.max(0, maxX + pad);
           }else if(direction === "right"){
             endX = Math.max(0, (frameW - minX) + pad);
+          }else if(direction === "top-up"){
+            endY = -(frameH + pad);
           }else{
-            // top-down
+            // Fallback to top-up for legacy or unknown values.
             endY = -Math.max(0, maxY + pad);
           }
 

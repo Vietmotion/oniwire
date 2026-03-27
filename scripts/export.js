@@ -1982,6 +1982,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						endTxOut = -Math.max(0, maxXOut + padOut);
 					}else if(outDir === 'right'){
 						endTxOut = Math.max(0, (cOut.canvas.width - minXOut) + padOut);
+					}else if(outDir === 'top-up'){
+						endTyOut = -(cOut.canvas.height + padOut);
 					}else{
 						endTyOut = -Math.max(0, maxYOut + padOut);
 					}

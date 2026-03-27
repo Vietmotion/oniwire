@@ -6,6 +6,7 @@ window.createOniwireImageNodeDef = function createOniwireImageNodeDef(){
       src: "",
       fileName: "",
       mimeType: "",
+      imageUrl: "",
       x: 40,
       y: 40,
       width: 320,
@@ -15,7 +16,9 @@ window.createOniwireImageNodeDef = function createOniwireImageNodeDef(){
     },
     icon: "🖼️",
     run: (node) => {
-      const src = String(node.params?.src || "").trim();
+      // Prioritize URL if provided, otherwise fall back to uploaded src
+      const imageUrl = String(node.params?.imageUrl || "").trim();
+      const src = imageUrl || String(node.params?.src || "").trim();
       if(!src) return null;
 
       const wrap = document.createElement("div");
@@ -43,6 +46,7 @@ window.createOniwireImageNodeDef = function createOniwireImageNodeDef(){
     },
     inspector: () => ([
       { k: "src", type: "imageUpload", label: "Image", accept: "image/*" },
+      { k: "imageUrl", type: "text", label: "Image URL", placeholder: "https://example.com/image.jpg" },
       {
         k: "fit",
         type: "options",

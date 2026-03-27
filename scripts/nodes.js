@@ -18,7 +18,8 @@ window.createOniwireNodeDefsApi = function createOniwireNodeDefsApi(deps){
 	const shapeTextNodes = {
 		Shape: window.createOniwireShapeNodeDef(),
 		Text: window.createOniwireTextNodeDef(),
-		Image: window.createOniwireImageNodeDef()
+		Image: window.createOniwireImageNodeDef(),
+		Pen: window.createOniwirePenNodeDef()
 	};
 
 	const motionGlowNodes = {
