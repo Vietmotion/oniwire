@@ -26,6 +26,9 @@ window.createOniwireImageNodeDef = function createOniwireImageNodeDef(){
       wrap.style.inset = "0";
 
       const img = document.createElement("img");
+      if(/^https?:\/\//i.test(src)){
+        img.crossOrigin = "anonymous";
+      }
       img.src = src;
       img.alt = String(node.params?.fileName || node.name || "Image");
       img.draggable = false;

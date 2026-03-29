@@ -125,6 +125,120 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return [];
 	}
 
+	function clampPenValue(value, min, max){
+		return Math.max(min, Math.min(max, value));
+	}
+
+	function normalizePenPoints(raw){
+		const src = Array.isArray(raw) ? raw : [];
+		return src
+			.filter(p => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+			.map(p => {
+				const x = Number(p.x);
+				const y = Number(p.y);
+				return {
+					x,
+					y,
+					inX: Number.isFinite(Number(p.inX)) ? Number(p.inX) : x - 44,
+					inY: Number.isFinite(Number(p.inY)) ? Number(p.inY) : y,
+					outX: Number.isFinite(Number(p.outX)) ? Number(p.outX) : x + 44,
+					outY: Number.isFinite(Number(p.outY)) ? Number(p.outY) : y
+				};
+			});
+	}
+
+	function defaultPenPath(nameIndex){
+		return {
+			name: 'Path ' + String(nameIndex).padStart(2, '0'),
+			points: [
+				{ x: 220, y: 160, inX: 180, inY: 130, outX: 260, outY: 130 },
+				{ x: 330, y: 260, inX: 300, inY: 220, outX: 360, outY: 300 },
+				{ x: 180, y: 320, inX: 150, inY: 300, outX: 220, outY: 340 }
+			],
+			closed: true,
+			fillColor: '#ffffff',
+			fillOpacity: 0.8,
+			strokeColor: '#ffffff',
+			strokeWidth: 2,
+			strokeOpacity: 1,
+			visible: true
+		};
+	}
+
+	function normalizePenPaths(raw){
+		const src = Array.isArray(raw) ? raw : [];
+		const out = src.map(function(path, i){
+			return {
+				name: String(path.name || ('Path ' + String(i + 1).padStart(2, '0'))),
+				points: normalizePenPoints(path.points),
+				closed: Boolean(path.closed),
+				fillColor: String(path.fillColor || '#ffffff'),
+				fillOpacity: clampPenValue(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 0.8, 0, 1),
+				strokeColor: String(path.strokeColor || '#ffffff'),
+				strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
+				strokeOpacity: clampPenValue(Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1, 0, 1),
+				visible: path.visible !== false
+			};
+		});
+		return out.length ? out : [defaultPenPath(1)];
+	}
+
+	function migrateLegacyPenParams(params){
+		if(params && Array.isArray(params.points) && !Array.isArray(params.paths)){
+			params.paths = [{
+				name: 'Path 01',
+				points: params.points,
+				closed: Boolean(params.closed),
+				fillColor: String(params.fillColor || '#ffffff'),
+				fillOpacity: clampPenValue(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 0.8, 0, 1),
+				strokeColor: String(params.strokeColor || '#ffffff'),
+				strokeWidth: Math.max(0.1, Number(params.strokeWidth) || 2),
+				strokeOpacity: clampPenValue(Number.isFinite(Number(params.strokeOpacity)) ? Number(params.strokeOpacity) : 1, 0, 1),
+				visible: true
+			}];
+			params.activePath = 0;
+			delete params.points;
+			delete params.closed;
+			delete params.fillColor;
+			delete params.fillOpacity;
+			delete params.strokeColor;
+			delete params.strokeWidth;
+			delete params.strokeOpacity;
+		}
+	}
+
+	function tracePenPath(ctx, points, closed){
+		if(!Array.isArray(points) || !points.length) return false;
+		ctx.beginPath();
+		ctx.moveTo(Number(points[0].x) || 0, Number(points[0].y) || 0);
+		for(let i = 1; i < points.length; i++){
+			const prev = points[i - 1];
+			const curr = points[i];
+			ctx.bezierCurveTo(
+				Number(prev.outX) || Number(prev.x) || 0,
+				Number(prev.outY) || Number(prev.y) || 0,
+				Number(curr.inX) || Number(curr.x) || 0,
+				Number(curr.inY) || Number(curr.y) || 0,
+				Number(curr.x) || 0,
+				Number(curr.y) || 0
+			);
+		}
+		if(closed && points.length > 1){
+			const last = points[points.length - 1];
+			const first = points[0];
+			ctx.bezierCurveTo(
+				Number(last.outX) || Number(last.x) || 0,
+				Number(last.outY) || Number(last.y) || 0,
+				Number(first.inX) || Number(first.x) || 0,
+				Number(first.inY) || Number(first.y) || 0,
+				Number(first.x) || 0,
+				Number(first.y) || 0
+			);
+			ctx.closePath();
+		}
+		return true;
+	}
+
 	function traceShapePath(ctx, shapeType, width, height, cx, cy){
 		const rx = width / 2;
 		const ry = height / 2;
@@ -1604,6 +1718,9 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		var self = this;
 		var img = new Image();
 		entry.img = img;
+		if(/^https?:\/\//i.test(src)){
+			img.crossOrigin = 'anonymous';
+		}
 		img.onload = function(){
 			entry.loaded = true;
 			entry.error = false;
@@ -1723,6 +1840,75 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				c2.ctx.fill();
 			}
 			result = this.attachTimelineMeta({ canvas: c2.canvas }, 0, 0);
+		}
+		else if(node.type === 'Pen'){
+			migrateLegacyPenParams(params);
+			var cPen = this.createLayer();
+			var penPaths = normalizePenPaths(params.paths);
+			var penX = toNumber(params.x, 0);
+			var penY = toNumber(params.y, 0);
+			var penScale = Math.max(0.01, toNumber(params.scale, 1));
+
+			cPen.ctx.save();
+			cPen.ctx.translate(penX, penY);
+
+			if(penScale !== 1){
+				var minX = Infinity;
+				var minY = Infinity;
+				var maxX = -Infinity;
+				var maxY = -Infinity;
+				for(var pIdx = 0; pIdx < penPaths.length; pIdx++){
+					var boundsPath = penPaths[pIdx];
+					if(!boundsPath || boundsPath.visible === false || !Array.isArray(boundsPath.points)) continue;
+					for(var pointIdx = 0; pointIdx < boundsPath.points.length; pointIdx++){
+						var point = boundsPath.points[pointIdx];
+						var coords = [
+							[point.x, point.y],
+							[point.inX, point.inY],
+							[point.outX, point.outY]
+						];
+						for(var coordIdx = 0; coordIdx < coords.length; coordIdx++){
+							var coord = coords[coordIdx];
+							var bx = Number(coord[0]);
+							var by = Number(coord[1]);
+							if(!Number.isFinite(bx) || !Number.isFinite(by)) continue;
+							if(bx < minX) minX = bx;
+							if(by < minY) minY = by;
+							if(bx > maxX) maxX = bx;
+							if(by > maxY) maxY = by;
+						}
+					}
+				}
+				if(Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY)){
+					var penCx = (minX + maxX) / 2;
+					var penCy = (minY + maxY) / 2;
+					cPen.ctx.translate(penCx, penCy);
+					cPen.ctx.scale(penScale, penScale);
+					cPen.ctx.translate(-penCx, -penCy);
+				}
+			}
+
+			for(var pathIndex = 0; pathIndex < penPaths.length; pathIndex++){
+				var penPath = penPaths[pathIndex];
+				if(!penPath || penPath.visible === false) continue;
+				if(!tracePenPath(cPen.ctx, penPath.points, penPath.closed)) continue;
+				if(penPath.closed && penPath.fillOpacity > 0){
+					cPen.ctx.fillStyle = penPath.fillColor || '#ffffff';
+					cPen.ctx.globalAlpha = clamp(penPath.fillOpacity, 0, 1);
+					cPen.ctx.fill();
+				}
+				if(penPath.strokeOpacity > 0 && penPath.strokeWidth > 0){
+					cPen.ctx.strokeStyle = penPath.strokeColor || '#ffffff';
+					cPen.ctx.lineWidth = Math.max(0.1, Number(penPath.strokeWidth) || 2);
+					cPen.ctx.lineCap = 'round';
+					cPen.ctx.lineJoin = 'round';
+					cPen.ctx.globalAlpha = clamp(penPath.strokeOpacity, 0, 1);
+					cPen.ctx.stroke();
+				}
+			}
+
+			cPen.ctx.restore();
+			result = this.attachTimelineMeta({ canvas: cPen.canvas }, 0, 0);
 		}
 		else if(node.type === 'Text'){
 			var cText = this.createLayer();

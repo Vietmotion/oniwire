@@ -44,6 +44,23 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
+      if(maskMeta?.shape){
+        const shapeMeta = maskMeta.shape;
+        wrap.dataset.maskShape = String(shapeMeta.shapeType || "circle");
+        if(shapeMeta.shapeType === "path" && Array.isArray(shapeMeta.paths) && shapeMeta.paths.length){
+          wrap.dataset.maskPathData = JSON.stringify(shapeMeta.paths);
+          wrap.dataset.maskX = String(Number(shapeMeta.x || 0));
+          wrap.dataset.maskY = String(Number(shapeMeta.y || 0));
+          wrap.dataset.maskScale = String(Number(shapeMeta.scale || 1));
+          wrap.dataset.maskCx = String(Number(shapeMeta.cx || 0));
+          wrap.dataset.maskCy = String(Number(shapeMeta.cy || 0));
+        }else{
+          wrap.dataset.maskWidth = String(Number(shapeMeta.width || shapeMeta.size || 120));
+          wrap.dataset.maskHeight = String(Number(shapeMeta.height || shapeMeta.size || 120));
+          wrap.dataset.maskX = String(Number(shapeMeta.x || 100));
+          wrap.dataset.maskY = String(Number(shapeMeta.y || 100));
+        }
+      }
       if(layerPorts.some(port => hasMotionFlag(inputs[port]?.el)) || hasMotionFlag(inputs.mask?.el)){
         wrap.dataset.hasMotion = "true";
       }

@@ -91,6 +91,19 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
     return d;
   }
 
+  function serializeMaskPaths(paths){
+    return (Array.isArray(paths) ? paths : [])
+      .filter(path => path && path.visible !== false)
+      .map(path => ({
+        d: buildPathD(path.points, path.closed),
+        closed: Boolean(path.closed),
+        strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
+        fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 0.8, 0, 1),
+        strokeOpacity: clamp(Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1, 0, 1)
+      }))
+      .filter(path => path.d);
+  }
+
   function getPathBounds(paths){
     const allPaths = Array.isArray(paths) ? paths : [];
     const candidates = allPaths.filter(path => path && path.visible !== false && Array.isArray(path.points) && path.points.length);
@@ -144,11 +157,21 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       node.params.paths = paths;
       const activeIdx = clamp(Number(node.params?.activePath) || 0, 0, Math.max(0, paths.length - 1));
       node.params.activePath = activeIdx;
+      const scale = Number(node.params?.scale) || 1;
+      const bounds = getPathBounds(paths);
+      const maskPaths = serializeMaskPaths(paths);
 
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
       wrap.style.overflow = "visible";
+      wrap.dataset.maskShape = "path";
+      wrap.dataset.maskPathData = JSON.stringify(maskPaths);
+      wrap.dataset.maskX = String(Number(node.params?.x) || 0);
+      wrap.dataset.maskY = String(Number(node.params?.y) || 0);
+      wrap.dataset.maskScale = String(scale);
+      wrap.dataset.maskCx = String(bounds.cx);
+      wrap.dataset.maskCy = String(bounds.cy);
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.style.position = "absolute";
@@ -161,10 +184,8 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       svg.setAttribute("width", "1280");
       svg.setAttribute("height", "720");
 
-      const scale = Number(node.params?.scale) || 1;
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       if(scale !== 1){
-        const bounds = getPathBounds(paths);
         g.setAttribute("transform", `translate(${bounds.cx} ${bounds.cy}) scale(${scale}) translate(${-bounds.cx} ${-bounds.cy})`);
       }
 

@@ -1427,10 +1427,32 @@ utilsApi.initProjectUtils();
   // -----------------------------
   function resolveMaskMetaFromEl(maskEl){
     if(!maskEl) return null;
-    const direct = maskEl.dataset?.maskShape ? maskEl : null;
-    const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape]");
+    const hasMaskData = Boolean(maskEl.dataset?.maskShape || maskEl.dataset?.maskPathData);
+    const direct = hasMaskData ? maskEl : null;
+    const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape], [data-mask-path-data]");
     const target = direct || nested;
     if(!target) return null;
+
+    if(target.dataset.maskPathData){
+      let paths = [];
+      try {
+        const parsed = JSON.parse(target.dataset.maskPathData || "[]");
+        paths = Array.isArray(parsed)
+          ? parsed.filter(path => path && typeof path.d === "string" && path.d.trim())
+          : [];
+      } catch(_err) {}
+      if(paths.length){
+        return {
+          shapeType: "path",
+          paths,
+          x: Number(target.dataset.maskX || 0),
+          y: Number(target.dataset.maskY || 0),
+          scale: Number(target.dataset.maskScale || 1),
+          cx: Number(target.dataset.maskCx || 0),
+          cy: Number(target.dataset.maskCy || 0)
+        };
+      }
+    }
 
     return {
       shapeType: target.dataset.maskShape || "circle",
@@ -1453,6 +1475,26 @@ utilsApi.initProjectUtils();
     const r = Math.max(width, height) / 2;
 
     let shapeSvg = "";
+    if(shapeType === "path"){
+      const paths = Array.isArray(meta.paths) ? meta.paths : [];
+      if(!paths.length) return null;
+      const translateX = Number(meta.x) || 0;
+      const translateY = Number(meta.y) || 0;
+      const scale = Number(meta.scale) || 1;
+      const cx = Number(meta.cx) || 0;
+      const cy = Number(meta.cy) || 0;
+      const pathMarkup = paths.map(path => {
+        const isClosed = path.closed !== false;
+        const fill = isClosed && (Number(path.fillOpacity) || 0) > 0 ? shapeFill : "none";
+        const stroke = !isClosed && (Number(path.strokeOpacity) || 0) > 0 ? shapeFill : "none";
+        const strokeWidth = Math.max(0.1, Number(path.strokeWidth) || 2);
+        return `<path d="${oniwireEscapeAttr(path.d)}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+      }).join("");
+      const scaleTransform = scale !== 1
+        ? `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`
+        : "";
+      shapeSvg = `<g transform="translate(${translateX} ${translateY})">${scaleTransform ? `<g transform="${scaleTransform}">${pathMarkup}</g>` : pathMarkup}</g>`;
+    }else{
     switch(shapeType){
       case "circle":
         shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
@@ -1498,6 +1540,7 @@ utilsApi.initProjectUtils();
       }
       default:
         shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+    }
     }
 
     const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>` +
@@ -1783,6 +1826,350 @@ utilsApi.initProjectUtils();
     return { x: rect.left, y: rect.top, width, height };
   }
 
+  async function waitForRenderableImages(rootEl, timeoutMs = 1200){
+    if(!(rootEl instanceof Element)) return;
+    const images = Array.from(rootEl.querySelectorAll("img"));
+    if(!images.length) return;
+
+    await Promise.all(images.map(img => new Promise(resolve => {
+      let settled = false;
+      const finish = () => {
+        if(settled) return;
+        settled = true;
+        resolve();
+      };
+
+      const timer = setTimeout(finish, Math.max(50, Number(timeoutMs) || 1200));
+      const done = () => {
+        clearTimeout(timer);
+        finish();
+      };
+
+      if(img.complete && (img.naturalWidth > 0 || img.naturalHeight > 0)){
+        if(typeof img.decode === "function"){
+          img.decode().catch(() => {}).finally(done);
+        }else{
+          done();
+        }
+        return;
+      }
+
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+    })));
+  }
+
+  // Builds a pre-computed alpha-mode mask canvas from the first CSS mask-image found in sourceRoot.
+  // Converts SVG luminance masks (white=visible, black=transparent) to canvas alpha masks.
+  // Returns null if no mask is found or loading fails. Used once per export, not per-frame.
+  function canvasHasOpaquePixels(canvas){
+    if(!(canvas instanceof HTMLCanvasElement)) return false;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if(!ctx) return false;
+    const { width, height } = canvas;
+    if(width <= 0 || height <= 0) return false;
+    const imgData = ctx.getImageData(0, 0, width, height).data;
+    for(let i = 3; i < imgData.length; i += 4){
+      if(imgData[i] > 0) return true;
+    }
+    return false;
+  }
+
+  function drawShapeMaskToContext(ctx, meta){
+    if(!ctx || !meta) return false;
+    const shapeType = String(meta.shapeType || "circle");
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if(shapeType === "path"){
+      const paths = Array.isArray(meta.paths) ? meta.paths : [];
+      if(!paths.length){
+        ctx.restore();
+        return false;
+      }
+      const tx = Number(meta.x || 0);
+      const ty = Number(meta.y || 0);
+      const scale = Number(meta.scale || 1);
+      const cx = Number(meta.cx || 0);
+      const cy = Number(meta.cy || 0);
+      ctx.translate(tx, ty);
+      if(scale !== 1){
+        ctx.translate(cx, cy);
+        ctx.scale(scale, scale);
+        ctx.translate(-cx, -cy);
+      }
+      let drew = false;
+      for(const path of paths){
+        if(!path || !path.d) continue;
+        let path2d = null;
+        try{
+          path2d = new Path2D(String(path.d));
+        }catch(_){
+          path2d = null;
+        }
+        if(!path2d) continue;
+        const isClosed = path.closed !== false;
+        const fillOpacity = Math.max(0, Math.min(1, Number(path.fillOpacity ?? 1)));
+        const strokeOpacity = Math.max(0, Math.min(1, Number(path.strokeOpacity ?? 1)));
+        const strokeWidth = Math.max(0.1, Number(path.strokeWidth) || 2);
+        if(isClosed && fillOpacity > 0){
+          ctx.globalAlpha = 1;
+          ctx.fill(path2d);
+          drew = true;
+        }
+        if((!isClosed || strokeOpacity > 0) && strokeWidth > 0){
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = strokeWidth;
+          ctx.stroke(path2d);
+          drew = true;
+        }
+      }
+      ctx.restore();
+      return drew;
+    }
+
+    const width = Number(meta.width || meta.size || 120);
+    const height = Number(meta.height || meta.size || width);
+    const x = Number(meta.x || 100);
+    const y = Number(meta.y || 100);
+    const r = Math.max(width, height) / 2;
+
+    ctx.beginPath();
+    switch(shapeType){
+      case "circle":
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        break;
+      case "rectangle":
+        ctx.rect(x - width / 2, y - height / 2, width, height);
+        break;
+      case "triangle":
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y + r);
+        ctx.lineTo(x - r, y + r);
+        ctx.closePath();
+        break;
+      case "diamond":
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r, y);
+        ctx.closePath();
+        break;
+      default:
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        break;
+    }
+    ctx.fill();
+    ctx.restore();
+    return true;
+  }
+
+  async function buildLuminanceMaskCanvas(sourceRoot, w, h){
+    if(!(sourceRoot instanceof HTMLElement)) return null;
+
+    const extractMaskUrl = (rawValue) => {
+      const value = String(rawValue || "").trim();
+      if(!value || value === "none") return "";
+      const urlIndex = value.indexOf("url(");
+      if(urlIndex < 0) return "";
+      const start = urlIndex + 4;
+      const end = value.lastIndexOf(")");
+      if(end <= start) return "";
+      let inner = value.slice(start, end).trim();
+      if((inner.startsWith('"') && inner.endsWith('"')) || (inner.startsWith("'") && inner.endsWith("'"))){
+        inner = inner.slice(1, -1).trim();
+      }
+      return inner;
+    };
+
+    const combinedMaskCanvas = document.createElement("canvas");
+    combinedMaskCanvas.width = w;
+    combinedMaskCanvas.height = h;
+    const combinedCtx = combinedMaskCanvas.getContext("2d", { willReadFrequently: true });
+    if(!combinedCtx) return null;
+    combinedCtx.clearRect(0, 0, w, h);
+
+    let foundMask = false;
+    const all = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+    for(const el of all){
+      if(!(el instanceof HTMLElement)) continue;
+
+      const shapeMeta = resolveMaskMetaFromEl(el);
+      if(shapeMeta && drawShapeMaskToContext(combinedCtx, shapeMeta)){
+        foundMask = true;
+        continue;
+      }
+
+      let maskValue = el.style.maskImage || el.style.webkitMaskImage || "";
+      let maskMode = el.style.maskMode || el.style.webkitMaskMode || "";
+      try{
+        if(!maskValue || maskValue === "none"){
+          const cs = getComputedStyle(el);
+          maskValue = cs.maskImage || cs.webkitMaskImage || maskValue;
+          maskMode = cs.maskMode || cs.webkitMaskMode || maskMode;
+        }
+      }catch(_){ }
+
+      const maskUrl = extractMaskUrl(maskValue);
+      if(!maskUrl || !/^data:/i.test(maskUrl)) continue;
+
+      const maskImg = await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        setTimeout(() => resolve(null), 3000);
+        img.src = maskUrl;
+      });
+      if(!maskImg || !maskImg.naturalWidth) continue;
+
+      foundMask = true;
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+      const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
+      if(!maskCtx) continue;
+      maskCtx.drawImage(maskImg, 0, 0, w, h);
+
+      if(String(maskMode || "luminance").toLowerCase() !== "alpha"){
+        const imgData = maskCtx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        for(let i = 0; i < d.length; i += 4){
+          d[i + 3] = d[i];
+          d[i] = 255;
+          d[i + 1] = 255;
+          d[i + 2] = 255;
+        }
+        maskCtx.putImageData(imgData, 0, 0);
+      }
+
+      combinedCtx.drawImage(maskCanvas, 0, 0);
+    }
+
+    return foundMask && canvasHasOpaquePixels(combinedMaskCanvas) ? combinedMaskCanvas : null;
+  }
+
+  async function bakeMaskedElementsForHtml2canvas(rootEl, html2canvasFn){
+    if(!(rootEl instanceof HTMLElement) || typeof html2canvasFn !== "function") return false;
+
+    const maskedEls = Array.from(rootEl.querySelectorAll("[data-mask-shape], [data-mask-path-data]"));
+    if(!maskedEls.length) return false;
+
+    let bakedAny = false;
+    for(const maskedEl of maskedEls){
+      if(!(maskedEl instanceof HTMLElement)) continue;
+      const shapeMeta = resolveMaskMetaFromEl(maskedEl);
+      if(!shapeMeta) continue;
+
+      const elemW = Math.max(1, Math.round(maskedEl.clientWidth || rootEl.clientWidth || previewBase?.w || 1280));
+      const elemH = Math.max(1, Math.round(maskedEl.clientHeight || rootEl.clientHeight || previewBase?.h || 720));
+      const localMaskCanvas = document.createElement("canvas");
+      localMaskCanvas.width = elemW;
+      localMaskCanvas.height = elemH;
+      const localMaskCtx = localMaskCanvas.getContext("2d", { willReadFrequently: true });
+      if(!localMaskCtx) continue;
+      if(!drawShapeMaskToContext(localMaskCtx, shapeMeta) || !canvasHasOpaquePixels(localMaskCanvas)) continue;
+
+      let contentCanvas = null;
+      const isolatedWrap = document.createElement("div");
+      isolatedWrap.style.position = "fixed";
+      isolatedWrap.style.left = "-200vw";
+      isolatedWrap.style.top = "-200vh";
+      isolatedWrap.style.width = `${elemW}px`;
+      isolatedWrap.style.height = `${elemH}px`;
+      isolatedWrap.style.overflow = "hidden";
+      isolatedWrap.style.pointerEvents = "none";
+      isolatedWrap.style.zIndex = "-1";
+      isolatedWrap.style.background = "transparent";
+
+      const isolatedClone = maskedEl.cloneNode(true);
+      isolatedClone.style.position = "absolute";
+      isolatedClone.style.inset = "0";
+      isolatedClone.style.width = `${elemW}px`;
+      isolatedClone.style.height = `${elemH}px`;
+      isolatedClone.style.transform = "none";
+      isolatedClone.style.animation = "none";
+      isolatedClone.style.transition = "none";
+      isolatedClone.style.maskImage = "none";
+      isolatedClone.style.webkitMaskImage = "none";
+      isolatedClone.style.maskMode = "alpha";
+      isolatedClone.style.webkitMaskMode = "alpha";
+      isolatedWrap.appendChild(isolatedClone);
+      document.body.appendChild(isolatedWrap);
+
+      try{
+        bakeComputedStylesToClone(maskedEl, isolatedClone);
+        isolatedClone.style.transform = "none";
+        isolatedClone.style.animation = "none";
+        isolatedClone.style.transition = "none";
+        isolatedClone.style.maskImage = "none";
+        isolatedClone.style.webkitMaskImage = "none";
+        isolatedClone.style.maskMode = "alpha";
+        isolatedClone.style.webkitMaskMode = "alpha";
+
+        await waitForRenderableImages(isolatedWrap, 1200);
+
+        contentCanvas = await html2canvasFn(isolatedWrap, {
+          backgroundColor: null,
+          width: elemW,
+          height: elemH,
+          scale: 1,
+          useCORS: true,
+          foreignObjectRendering: false,
+          windowWidth: elemW,
+          windowHeight: elemH,
+          x: 0,
+          y: 0,
+          scrollX: 0,
+          scrollY: 0,
+          logging: false,
+        });
+      }catch(_){
+        contentCanvas = null;
+      }finally{
+        document.body.removeChild(isolatedWrap);
+      }
+
+      if(!contentCanvas) continue;
+
+      const bakedCanvas = document.createElement("canvas");
+      bakedCanvas.width = elemW;
+      bakedCanvas.height = elemH;
+      const bakedCtx = bakedCanvas.getContext("2d");
+      if(!bakedCtx) continue;
+
+      bakedCtx.clearRect(0, 0, elemW, elemH);
+      bakedCtx.drawImage(contentCanvas, 0, 0);
+      bakedCtx.globalCompositeOperation = "destination-in";
+      bakedCtx.drawImage(localMaskCanvas, 0, 0);
+      bakedCtx.globalCompositeOperation = "source-over";
+
+      const bakedUrl = bakedCanvas.toDataURL("image/png");
+      maskedEl.innerHTML = "";
+      maskedEl.style.maskImage = "none";
+      maskedEl.style.webkitMaskImage = "none";
+      maskedEl.style.maskMode = "alpha";
+      maskedEl.style.webkitMaskMode = "alpha";
+
+      const bakedImg = document.createElement("img");
+      bakedImg.src = bakedUrl;
+      bakedImg.alt = "";
+      bakedImg.draggable = false;
+      bakedImg.style.position = "absolute";
+      bakedImg.style.inset = "0";
+      bakedImg.style.width = "100%";
+      bakedImg.style.height = "100%";
+      bakedImg.style.objectFit = "fill";
+      bakedImg.style.pointerEvents = "none";
+      maskedEl.appendChild(bakedImg);
+      bakedAny = true;
+    }
+
+    return bakedAny;
+  }
+
   async function renderLayerToDataUrl(layerEl, options = {}){
     if(!layerEl) return null;
 
@@ -1828,6 +2215,7 @@ utilsApi.initProjectUtils();
       bakeComputedStylesToClone(layerEl, clone);
     }
 
+    await waitForRenderableImages(tempDiv, timeoutMs);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     let dataUrl = null;
@@ -2089,11 +2477,25 @@ const HELP_GENERAL_PAGES = {
   updates: {
     eyebrow: "Oniwire Help - Latest Update",
     title: "What changed in v0.2.2",
-    subtitle: "Recent improvements focused on color control, contextual guidance, and a tighter layout on laptop-sized screens.",
+    subtitle: "v0.2.2 now includes Pen-driven masking, stronger MP4 export behavior, contextual help, and the earlier color/layout improvements.",
     body: `
       <div class="helpSection">
         <h3 class="helpSectionTitle">Latest in v0.2.2</h3>
         <div class="helpUpdateGrid">
+          <div class="helpUpdateCard">
+            <span class="helpUpdateKicker">Masking</span>
+            <div>
+              <h4>Pen as Mask Source</h4>
+              <p>Pen paths can now drive Composite and Mask nodes, so custom drawn shapes work as real mask inputs instead of just visual layers.</p>
+            </div>
+          </div>
+          <div class="helpUpdateCard">
+            <span class="helpUpdateKicker">Export</span>
+            <div>
+              <h4>MP4 Mask + Image Fixes</h4>
+              <p>MP4 export now waits for cloned images, preserves masked image content more reliably, and keeps masked composites behaving closer to the live viewport during motion.</p>
+            </div>
+          </div>
           <div class="helpUpdateCard">
             <span class="helpUpdateKicker">New node</span>
             <div>
@@ -2105,14 +2507,14 @@ const HELP_GENERAL_PAGES = {
             <span class="helpUpdateKicker">UX</span>
             <div>
               <h4>Contextual Tips</h4>
-              <p>The Tips area now changes based on the selected node so users can understand what each node does faster.</p>
+              <p>The Tips area now changes based on the selected node so users can understand what each node does faster while building graphs.</p>
             </div>
           </div>
           <div class="helpUpdateCard">
             <span class="helpUpdateKicker">Layout</span>
             <div>
-              <h4>Laptop optimization</h4>
-              <p>Panel spacing and density were tuned for smaller screens so the workspace feels less crowded on MacBook-sized displays.</p>
+              <h4>Laptop Optimization</h4>
+              <p>Panel spacing and density were tuned for smaller screens so the workspace feels less crowded on laptop-sized displays.</p>
             </div>
           </div>
         </div>
@@ -4291,7 +4693,10 @@ async function evaluate(){
     return false;
   }
 
-  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject){
+  // premaskCanvas: optional pre-computed luminance mask canvas (alpha-mode) to apply after capture.
+  // foreignObjectRendering is always false here so html2canvas uses its own DOM renderer
+  // which correctly handles <img> elements; CSS mask-image is applied via premaskCanvas instead.
+  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject, premaskCanvas = null){
     const tmpWrap = document.createElement("div");
     tmpWrap.style.position = "fixed";
     tmpWrap.style.left = "0";
@@ -4310,16 +4715,18 @@ async function evaluate(){
     tmpWrap.appendChild(clone);
     document.body.appendChild(tmpWrap);
 
+    await waitForRenderableImages(tmpWrap, 1200);
+    const bakedMaskedEls = await bakeMaskedElementsForHtml2canvas(tmpWrap, html2canvasFn);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     try{
-      return await html2canvasFn(tmpWrap, {
+      const capturedCanvas = await html2canvasFn(tmpWrap, {
         backgroundColor: "#000000",
         width: w,
         height: h,
         scale: 1,
         useCORS: true,
-        foreignObjectRendering: Boolean(preferForeignObject),
+        foreignObjectRendering: false,
         windowWidth: w,
         windowHeight: h,
         x: 0,
@@ -4328,6 +4735,16 @@ async function evaluate(){
         scrollY: 0,
         logging: false,
       });
+      // Apply the pre-computed mask (built once before the frame loop) if present
+      if(!bakedMaskedEls && premaskCanvas && capturedCanvas){
+        const ctx = capturedCanvas.getContext("2d");
+        if(ctx){
+          ctx.globalCompositeOperation = "destination-in";
+          ctx.drawImage(premaskCanvas, 0, 0);
+          ctx.globalCompositeOperation = "source-over";
+        }
+      }
+      return capturedCanvas;
     }finally{
       document.body.removeChild(tmpWrap);
     }
@@ -4384,9 +4801,17 @@ async function evaluate(){
       if(!frameCtx) throw new Error("Could not create MP4 frame canvas.");
 
       const frameDurationUs = Math.round(1_000_000 / fps);
-      const hasCssMaskInScene = sceneHasCssMask(renderRoot);
 
       await evaluateAndRender();
+
+      // Detect scene characteristics after initial render
+      const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+      const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+      const hasImagesInScene = renderRoot.querySelector("img") !== null;
+      // Pre-build the luminance mask canvas once (reused every frame, avoids per-frame pixel work)
+      const premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
+        ? await buildLuminanceMaskCanvas(renderRoot, w, h)
+        : null;
 
       for(let frameIdx = 0; frameIdx < totalFrames; frameIdx++){
         if(cancelled) break;
@@ -4395,9 +4820,16 @@ async function evaluate(){
         updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and encoding");
 
         freezeAnimationsAtTime(renderRoot, t);
-        let capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
-        if(!capturedCanvas){
-          capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene);
+        let capturedCanvas;
+        if(hasImagesInScene){
+          // Images don't render via SVG foreignObject — use html2canvas directly.
+          // premaskCanvas applies the CSS mask (e.g. Pen shape) after capture.
+          capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
+        } else {
+          capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
+          if(!capturedCanvas){
+            capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
+          }
         }
 
         frameCtx.fillStyle = "#000000";
