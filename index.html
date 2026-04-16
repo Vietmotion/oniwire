@@ -25,7 +25,7 @@
     --nz: 1;
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="vendor/html2canvas.min.js"></script>
   <script src="scripts/export.js?v=20260325a"></script>
   <script src="scripts/node-menu.js"></script>
   <script src="scripts/node-search.js"></script>
@@ -4435,6 +4435,28 @@ async function evaluate(){
     return false;
   }
 
+  function loadScriptFromSources(sources){
+    const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
+    return new Promise((resolve, reject) => {
+      let idx = 0;
+      const tryNext = () => {
+        if(idx >= list.length){
+          reject(new Error("All script sources failed."));
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = list[idx++];
+        script.onload = () => resolve(script.src);
+        script.onerror = () => {
+          try{ script.remove(); }catch(_){ }
+          tryNext();
+        };
+        document.head.appendChild(script);
+      };
+      tryNext();
+    });
+  }
+
   let html2CanvasLoadPromise = null;
   function ensureHtml2CanvasLoaded(){
     if(typeof window.html2canvas === "function"){
@@ -4442,15 +4464,13 @@ async function evaluate(){
     }
     if(html2CanvasLoadPromise) return html2CanvasLoadPromise;
 
-    html2CanvasLoadPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
-      script.onload = () => {
-        if(typeof window.html2canvas === "function") resolve(window.html2canvas);
-        else reject(new Error("html2canvas loaded but unavailable."));
-      };
-      script.onerror = () => reject(new Error("Failed to load html2canvas."));
-      document.head.appendChild(script);
+    html2CanvasLoadPromise = loadScriptFromSources([
+      "vendor/html2canvas.min.js",
+      "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
+      "https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"
+    ]).then(() => {
+      if(typeof window.html2canvas === "function") return window.html2canvas;
+      throw new Error("html2canvas loaded but unavailable.");
     });
 
     return html2CanvasLoadPromise;
@@ -4458,8 +4478,8 @@ async function evaluate(){
 
   async function exportCanvasWithBlend(format){
     const exportScale = 2;
-    const w = previewBase.w;
-    const h = previewBase.h;
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
     const mimeType = format === "exportPNG" ? "image/png" : "image/jpeg";
     const ext = format === "exportPNG" ? "png" : "jpg";
     const quality = format === "exportPNG" ? undefined : 0.95;
@@ -4469,76 +4489,57 @@ async function evaluate(){
       return;
     }
 
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-    let dataUrl = await renderLayerToDataUrl(renderRoot);
-
-    if(!dataUrl && typeof html2canvas === "function"){
-      try{
-        const captured = await html2canvas(renderRoot, {
-          backgroundColor: format === "exportPNG" ? null : "#ffffff",
-          width: Math.max(1, Math.round(w)),
-          height: Math.max(1, Math.round(h)),
-          scale: exportScale,
-          useCORS: true,
-          logging: false
-        });
-        dataUrl = captured.toDataURL(mimeType, quality);
-      }catch(err){
-        console.warn("html2canvas export fallback failed", err);
-      }
+    await ensureHtml2CanvasLoaded();
+    const html2canvasFn = window.html2canvas;
+    if(typeof html2canvasFn !== "function"){
+      toast("html2canvas failed to load — cannot export.");
+      return;
     }
 
-    if(!dataUrl){
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    let capturedCanvas = null;
+    try{
+      capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, sceneHasCssMask(renderRoot));
+    }catch(err){
+      console.warn("exportCanvasWithBlend capture failed", err);
+    }
+
+    if(!capturedCanvas){
       toast("Export failed.");
       return;
     }
 
-    const img = new Image();
-    img.onload = () => {
-      const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = Math.max(1, Math.round(w * exportScale));
-      exportCanvas.height = Math.max(1, Math.round(h * exportScale));
-      const exportCtx = exportCanvas.getContext("2d");
-      if(!exportCtx){
+    // Scale up to exportScale for higher quality still image
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = w * exportScale;
+    exportCanvas.height = h * exportScale;
+    const exportCtx = exportCanvas.getContext("2d");
+    if(!exportCtx){ toast("Export failed."); return; }
+
+    exportCtx.imageSmoothingEnabled = true;
+    exportCtx.imageSmoothingQuality = "high";
+    if(format !== "exportPNG"){
+      exportCtx.fillStyle = "#000000";
+      exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    }
+    exportCtx.drawImage(capturedCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+
+    exportCanvas.toBlob(blob => {
+      if(!blob){
         toast("Export failed.");
         return;
       }
-
-      exportCtx.imageSmoothingEnabled = true;
-      if(format !== "exportPNG"){
-        exportCtx.fillStyle = "#ffffff";
-        exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-      }
-
-      const srcW = Math.max(1, Number(img.naturalWidth || img.width || exportCanvas.width));
-      const srcH = Math.max(1, Number(img.naturalHeight || img.height || exportCanvas.height));
-      const scale = Math.max(exportCanvas.width / srcW, exportCanvas.height / srcH);
-      const drawW = Math.max(1, Math.round(srcW * scale));
-      const drawH = Math.max(1, Math.round(srcH * scale));
-      const dx = Math.round((exportCanvas.width - drawW) / 2);
-      const dy = Math.round((exportCanvas.height - drawH) / 2);
-      exportCtx.drawImage(img, dx, dy, drawW, drawH);
-
-      exportCanvas.toBlob(blob => {
-        if(!blob){
-          toast("Export failed.");
-          return;
-        }
-
-        const link = document.createElement("a");
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
-        link.href = URL.createObjectURL(blob);
-        link.download = `export_${timestamp}.${ext}`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-        toast(`Exported as ${ext.toUpperCase()} OK`);
-      }, mimeType, quality);
-    };
-    img.onerror = () => toast("Export failed.");
-    img.src = dataUrl;
+      const link = document.createElement("a");
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+      link.href = URL.createObjectURL(blob);
+      link.download = `export_${timestamp}.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast(`Exported as ${ext.toUpperCase()} OK`);
+    }, mimeType, quality);
   }
 
   function exportCanvasAsImage(format){
@@ -4554,15 +4555,13 @@ async function evaluate(){
     if(window.Mp4Muxer?.Muxer) return Promise.resolve(window.Mp4Muxer);
     if(mp4MuxerLoadPromise) return mp4MuxerLoadPromise;
 
-    mp4MuxerLoadPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js";
-      script.onload = () => {
-        if(window.Mp4Muxer?.Muxer) resolve(window.Mp4Muxer);
-        else reject(new Error("mp4-muxer loaded but unavailable."));
-      };
-      script.onerror = () => reject(new Error("Failed to load MP4 muxer."));
-      document.head.appendChild(script);
+    mp4MuxerLoadPromise = loadScriptFromSources([
+      "vendor/mp4-muxer.min.js",
+      "https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js",
+      "https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.min.js"
+    ]).then(() => {
+      if(window.Mp4Muxer?.Muxer) return window.Mp4Muxer;
+      throw new Error("mp4-muxer loaded but unavailable.");
     });
 
     return mp4MuxerLoadPromise;
@@ -4570,11 +4569,33 @@ async function evaluate(){
 
   async function getSupportedMp4EncoderConfig(w, h, fps){
     if(typeof VideoEncoder !== "function" || typeof VideoEncoder.isConfigSupported !== "function") return null;
-    const candidates = [
-      { codec: "avc1.42001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
-      { codec: "avc1.4d401f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
-      { codec: "avc1.64001f", width: w, height: h, bitrate: 8_000_000, framerate: fps, avc: { format: "avc" } },
-    ];
+    const pixels = Math.max(1, w * h);
+    const refPixels = 1280 * 720;
+    const scale = Math.max(0.5, Math.min(4, pixels / refPixels));
+    const baseBitrate = Math.round(8_000_000 * scale * Math.max(0.75, Math.min(1.5, fps / 30)));
+    const profileCodecs = ["avc1.42001f", "avc1.4d401f", "avc1.64001f"];
+    const candidates = [];
+    for(const codec of profileCodecs){
+      candidates.push({
+        codec,
+        width: w,
+        height: h,
+        bitrate: baseBitrate,
+        framerate: fps,
+        avc: { format: "avc" },
+        hardwareAcceleration: "prefer-hardware",
+        latencyMode: "quality",
+        bitrateMode: "variable"
+      });
+      candidates.push({
+        codec,
+        width: w,
+        height: h,
+        bitrate: baseBitrate,
+        framerate: fps,
+        avc: { format: "avc" }
+      });
+    }
 
     for(const config of candidates){
       try{
@@ -4623,7 +4644,7 @@ async function evaluate(){
         <div class="mp4ProgressBarTrack">
           <div class="mp4ProgressBarFill" id="mp4ProgressBarFill" style="width:0%"></div>
         </div>
-        <div class="mp4ProgressNote">Frame-accurate MP4 export in progress.</div>
+        <div class="mp4ProgressNote">Frame-by-frame MP4 render in progress.</div>
         <button type="button" id="btnCancelMp4" class="danger" style="margin-top:12px; width:100%;">Cancel</button>
       </div>`;
     return div;
@@ -4689,6 +4710,19 @@ async function evaluate(){
           return true;
         }
       }catch(_){ }
+    }
+    return false;
+  }
+
+  function maskHasMotion(rootEl){
+    if(!(rootEl instanceof HTMLElement)) return false;
+    const maskedEls = rootEl.querySelectorAll("[data-mask-shape], [data-mask-path-data], [style*='mask-image'], [style*='-webkit-mask-image']");
+    for(const el of maskedEls){
+      if(hasMotionFlag(el)) return true;
+      if(el instanceof HTMLElement){
+        const motionChild = el.querySelector?.('[data-has-motion="true"]');
+        if(motionChild) return true;
+      }
     }
     return false;
   }
@@ -4759,7 +4793,7 @@ async function evaluate(){
     }
 
     const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
-    const fps = 30;
+    const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
     const totalFrames = Math.max(1, Math.round(duration * fps));
     const w = Math.max(1, Math.round(previewBase.w));
     const h = Math.max(1, Math.round(previewBase.h));
@@ -4772,11 +4806,16 @@ async function evaluate(){
     let encoder = null;
     let encoderFailure = null;
     try{
-      updateMp4Progress(overlay, 0, totalFrames, "Loading encoder");
+      updateMp4Progress(overlay, 0, totalFrames, "Preparing preview");
       const [html2canvasFn, Mp4Muxer] = await Promise.all([
         ensureHtml2CanvasLoaded(),
         ensureMp4MuxerLoaded(),
       ]);
+
+      await evaluateAndRender();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      updateMp4Progress(overlay, 0, totalFrames, "Loading encoder");
       const encoderConfig = await getSupportedMp4EncoderConfig(w, h, fps);
       if(!encoderConfig){
         throw new Error("H.264 MP4 encoding is not supported in this browser.");
@@ -4802,14 +4841,11 @@ async function evaluate(){
 
       const frameDurationUs = Math.round(1_000_000 / fps);
 
-      await evaluateAndRender();
-
-      // Detect scene characteristics after initial render
       const hasCssMaskInScene = sceneHasCssMask(renderRoot);
       const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
       const hasImagesInScene = renderRoot.querySelector("img") !== null;
-      // Pre-build the luminance mask canvas once (reused every frame, avoids per-frame pixel work)
-      const premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
+      const hasAnimatedMask = maskHasMotion(renderRoot);
+      let premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
         ? await buildLuminanceMaskCanvas(renderRoot, w, h)
         : null;
 
@@ -4820,17 +4856,19 @@ async function evaluate(){
         updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and encoding");
 
         freezeAnimationsAtTime(renderRoot, t);
+        if(hasAnimatedMask && (hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene){
+          premaskCanvas = await buildLuminanceMaskCanvas(renderRoot, w, h);
+        }
         let capturedCanvas;
         if(hasImagesInScene){
-          // Images don't render via SVG foreignObject — use html2canvas directly.
-          // premaskCanvas applies the CSS mask (e.g. Pen shape) after capture.
           capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
-        } else {
+        }else{
           capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
           if(!capturedCanvas){
             capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
           }
         }
+        if(!capturedCanvas) throw new Error("Could not capture frame.");
 
         frameCtx.fillStyle = "#000000";
         frameCtx.fillRect(0, 0, w, h);
@@ -4871,10 +4909,11 @@ async function evaluate(){
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(link.href);
-      toast(`MP4 exported \u2705 (${totalFrames} frames, ${duration}s)`);
+      toast(`MP4 exported OK (${totalFrames} frames, ${duration}s)`);
     }catch(err){
       console.error("MP4 export failed", err);
-      toast(`Export failed: ${String(err?.message || err || "Unknown error").slice(0, 120)}`);
+      const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+      toast(`Export failed: ${msg}`);
       try{ await evaluateAndRender(); }catch(_){}
     }finally{
       try{ encoder?.close?.(); }catch(_){}
