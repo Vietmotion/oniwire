@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.2)</title>
+  <title>Oniwire (v0.2.3)</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -254,6 +254,7 @@
         <div class="helpNavSection">Guide</div>
         <div class="helpNavGroup">
           <button type="button" class="helpNavBtn" data-help-page="introduction">Introduction</button>
+          <button type="button" class="helpNavBtn" data-help-page="shortcuts">Shortcuts</button>
           <button type="button" class="helpNavBtn" data-help-page="updates">Latest Update</button>
           <button type="button" class="helpNavBtn" data-help-page="examples">Examples</button>
         </div>
@@ -577,17 +578,39 @@
     index: -1,
     pathIndex: -1,
     startCanvas: null,
-    startPoints: null
+    startPoints: null,
+    hoverCanvas: null,
+    currentCanvas: null,
+    selectedIndices: [],
+    transformMeta: null
   };
 
   const PEN_PATH_INSERT_CANVAS_THRESHOLD = 14;
   const PEN_POINT_DELETE_CANVAS_THRESHOLD = 12;
-  const PEN_PATH_DRAG_SWITCH_CANVAS_THRESHOLD = 8;
+  const PEN_CLOSE_PATH_CANVAS_THRESHOLD = 14;
 
   function getSelectedPenNode(){
     if(!state.selected) return null;
     const node = state.nodes.get(state.selected);
     return node && node.type === "Pen" ? node : null;
+  }
+
+  function arePenHandlesMirrored(x, y, inX, inY, outX, outY){
+    const epsilon = 0.01;
+    return Math.abs(outX - (x + (x - inX))) <= epsilon
+      && Math.abs(outY - (y + (y - inY))) <= epsilon;
+  }
+
+  function setPenPointStraight(point, sourceKind){
+    if(!point) return;
+    if(sourceKind === "in"){
+      point.outX = point.x + (point.x - point.inX);
+      point.outY = point.y + (point.y - point.inY);
+    }else{
+      point.inX = point.x + (point.x - point.outX);
+      point.inY = point.y + (point.y - point.outY);
+    }
+    point.broken = false;
   }
 
   function normalizePenPoints(raw){
@@ -609,7 +632,17 @@
           inX: Number.isFinite(Number(p.inX)) ? Number(p.inX) : x,
           inY: Number.isFinite(Number(p.inY)) ? Number(p.inY) : y,
           outX: Number.isFinite(Number(p.outX)) ? Number(p.outX) : x,
-          outY: Number.isFinite(Number(p.outY)) ? Number(p.outY) : y
+          outY: Number.isFinite(Number(p.outY)) ? Number(p.outY) : y,
+          broken: typeof p.broken === "boolean"
+            ? p.broken
+            : !arePenHandlesMirrored(
+              x,
+              y,
+              Number.isFinite(Number(p.inX)) ? Number(p.inX) : x,
+              Number.isFinite(Number(p.inY)) ? Number(p.inY) : y,
+              Number.isFinite(Number(p.outX)) ? Number(p.outX) : x,
+              Number.isFinite(Number(p.outY)) ? Number(p.outY) : y
+            )
         };
       });
     return pts.length ? pts : (hasExplicitPoints ? [] : defaults);
@@ -617,6 +650,208 @@
 
   function clonePenPoints(pts){
     return (Array.isArray(pts) ? pts : []).map(p => ({ ...p }));
+  }
+
+  function getPenActivePathIndex(node){
+    if(!node?.params) return 0;
+    const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
+    return clamp(Number(node.params.activePath) || 0, 0, Math.max(0, paths.length - 1));
+  }
+
+  function normalizePenSelectionIndices(raw, pointCount){
+    if(!Array.isArray(raw) || pointCount <= 0) return [];
+    const seen = new Set();
+    const out = [];
+    for(const value of raw){
+      const index = Number(value);
+      if(!Number.isInteger(index) || index < 0 || index >= pointCount || seen.has(index)) continue;
+      seen.add(index);
+      out.push(index);
+    }
+    out.sort((a, b) => a - b);
+    return out;
+  }
+
+  function getPenSelectedIndices(node, points){
+    const pts = Array.isArray(points) ? points : normalizePenPoints(getPenActivePath(node)?.points);
+    const pointCount = pts.length;
+    if(pointCount <= 0) return [];
+
+    const activePathIndex = getPenActivePathIndex(node);
+    if(node?.params?.penSelectedPath === activePathIndex){
+      return normalizePenSelectionIndices(node.params.penSelectedIndices, pointCount);
+    }
+
+    if(Number.isFinite(Number(node?.params?.penSelectedIndex))){
+      return [clamp(Number(node.params.penSelectedIndex) || 0, 0, pointCount - 1)];
+    }
+
+    return [];
+  }
+
+  function setPenSelectedIndices(node, indices, pathIndex){
+    if(!node?.params) return [];
+    const nextPathIndex = Number.isInteger(pathIndex) ? pathIndex : getPenActivePathIndex(node);
+    const path = Array.isArray(node.params.paths) ? node.params.paths[nextPathIndex] : null;
+    const next = normalizePenSelectionIndices(indices, Array.isArray(path?.points) ? path.points.length : 0);
+    node.params.penSelectedPath = nextPathIndex;
+    node.params.penSelectedIndices = next;
+    node.params.penSelectedIndex = next.length ? next[0] : 0;
+    return next;
+  }
+
+  function getPenRect(a, b){
+    const minX = Math.min(a.x, b.x);
+    const minY = Math.min(a.y, b.y);
+    const maxX = Math.max(a.x, b.x);
+    const maxY = Math.max(a.y, b.y);
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: maxX - minX,
+      height: maxY - minY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2
+    };
+  }
+
+  function getPenSelectionBounds(node, points, indices){
+    const selected = normalizePenSelectionIndices(indices, points.length)
+      .map(index => penLocalToCanvas(node, points[index]));
+    if(!selected.length) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for(const point of selected){
+      if(point.x < minX) minX = point.x;
+      if(point.y < minY) minY = point.y;
+      if(point.x > maxX) maxX = point.x;
+      if(point.y > maxY) maxY = point.y;
+    }
+
+    const pad = Math.max(12, 14 / Math.max(0.1, previewScale));
+    const box = {
+      minX: minX - pad,
+      minY: minY - pad,
+      maxX: maxX + pad,
+      maxY: maxY + pad
+    };
+    box.width = box.maxX - box.minX;
+    box.height = box.maxY - box.minY;
+    box.centerX = (box.minX + box.maxX) / 2;
+    box.centerY = (box.minY + box.maxY) / 2;
+    box.rotateHandle = {
+      x: box.centerX,
+      y: box.minY - Math.max(22, 30 / Math.max(0.1, previewScale))
+    };
+    box.corners = {
+      nw: { x: box.minX, y: box.minY, signX: -1, signY: -1 },
+      ne: { x: box.maxX, y: box.minY, signX: 1, signY: -1 },
+      se: { x: box.maxX, y: box.maxY, signX: 1, signY: 1 },
+      sw: { x: box.minX, y: box.maxY, signX: -1, signY: 1 }
+    };
+    return box;
+  }
+
+  function pointInPenRect(canvasPt, rect){
+    if(!canvasPt || !rect) return false;
+    return canvasPt.x >= rect.minX && canvasPt.x <= rect.maxX
+      && canvasPt.y >= rect.minY && canvasPt.y <= rect.maxY;
+  }
+
+  function distanceSquared(a, b){
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return (dx * dx) + (dy * dy);
+  }
+
+  function pickPenSelectionControl(node, points, selectedIndices, canvasPt){
+    const selectionBounds = getPenSelectionBounds(node, points, selectedIndices);
+    if(!selectionBounds || selectedIndices.length < 2) return { kind: "none", bounds: null };
+
+    const radius = Math.max(8, 10 / Math.max(0.1, previewScale));
+    const radius2 = radius * radius;
+    if(distanceSquared(canvasPt, selectionBounds.rotateHandle) <= radius2){
+      return { kind: "selectionRotate", bounds: selectionBounds };
+    }
+
+    for(const [cornerName, corner] of Object.entries(selectionBounds.corners)){
+      if(distanceSquared(canvasPt, corner) <= radius2){
+        return { kind: "selectionScale", bounds: selectionBounds, cornerName, corner };
+      }
+    }
+
+    if(pointInPenRect(canvasPt, selectionBounds)){
+      return { kind: "selectionMove", bounds: selectionBounds };
+    }
+
+    return { kind: "none", bounds: selectionBounds };
+  }
+
+  function translatePenPoints(points, indices, dx, dy){
+    for(const index of indices){
+      const point = points[index];
+      if(!point) continue;
+      point.x += dx;
+      point.y += dy;
+      point.inX += dx;
+      point.inY += dy;
+      point.outX += dx;
+      point.outY += dy;
+    }
+  }
+
+  function rotateCoord(x, y, centerX, centerY, angle){
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const dx = x - centerX;
+    const dy = y - centerY;
+    return {
+      x: centerX + (dx * cosA) - (dy * sinA),
+      y: centerY + (dx * sinA) + (dy * cosA)
+    };
+  }
+
+  function rotatePenPoints(points, indices, centerX, centerY, angle){
+    for(const index of indices){
+      const point = points[index];
+      if(!point) continue;
+      const anchor = rotateCoord(point.x, point.y, centerX, centerY, angle);
+      const inHandle = rotateCoord(point.inX, point.inY, centerX, centerY, angle);
+      const outHandle = rotateCoord(point.outX, point.outY, centerX, centerY, angle);
+      point.x = anchor.x;
+      point.y = anchor.y;
+      point.inX = inHandle.x;
+      point.inY = inHandle.y;
+      point.outX = outHandle.x;
+      point.outY = outHandle.y;
+    }
+  }
+
+  function scalePenPoints(points, indices, centerX, centerY, scaleX, scaleY){
+    for(const index of indices){
+      const point = points[index];
+      if(!point) continue;
+      point.x = centerX + ((point.x - centerX) * scaleX);
+      point.y = centerY + ((point.y - centerY) * scaleY);
+      point.inX = centerX + ((point.inX - centerX) * scaleX);
+      point.inY = centerY + ((point.inY - centerY) * scaleY);
+      point.outX = centerX + ((point.outX - centerX) * scaleX);
+      point.outY = centerY + ((point.outY - centerY) * scaleY);
+    }
+  }
+
+  function removePenPointsByIndices(path, indices){
+    const points = clonePenPoints(normalizePenPoints(path?.points));
+    const removal = normalizePenSelectionIndices(indices, points.length).sort((a, b) => b - a);
+    for(const index of removal){
+      points.splice(index, 1);
+    }
+    return points;
   }
 
   function migratePenNode(node){
@@ -642,6 +877,10 @@
       delete node.params.strokeWidth;
       delete node.params.strokeOpacity;
     }
+    // Pen is geometry-only now; use Transform node for positioning/scaling.
+    delete node.params.x;
+    delete node.params.y;
+    delete node.params.scale;
   }
 
   function normalizePenPaths(raw){
@@ -726,30 +965,20 @@
   }
 
   function penLocalToCanvas(node, p){
-    const s = Math.max(0.01, Number(node.params?.scale) || 1);
-    const ox = Number(node.params?.x) || 0;
-    const oy = Number(node.params?.y) || 0;
-    const bounds = getPenLocalBounds(node);
-    const tx = (value) => ox + bounds.cx + ((value - bounds.cx) * s);
-    const ty = (value) => oy + bounds.cy + ((value - bounds.cy) * s);
     return {
-      x: tx(p.x),
-      y: ty(p.y),
-      inX: tx(p.inX),
-      inY: ty(p.inY),
-      outX: tx(p.outX),
-      outY: ty(p.outY)
+      x: Number(p?.x) || 0,
+      y: Number(p?.y) || 0,
+      inX: Number(p?.inX) || 0,
+      inY: Number(p?.inY) || 0,
+      outX: Number(p?.outX) || 0,
+      outY: Number(p?.outY) || 0
     };
   }
 
   function canvasToPenLocal(node, p){
-    const s = Math.max(0.01, Number(node.params?.scale) || 1);
-    const ox = Number(node.params?.x) || 0;
-    const oy = Number(node.params?.y) || 0;
-    const bounds = getPenLocalBounds(node);
     return {
-      x: bounds.cx + ((p.x - ox - bounds.cx) / s),
-      y: bounds.cy + ((p.y - oy - bounds.cy) / s)
+      x: Number(p?.x) || 0,
+      y: Number(p?.y) || 0
     };
   }
 
@@ -874,6 +1103,24 @@
     return { points, insertIndex, newPoint: split.newPoint };
   }
 
+  function appendPointToPenPath(path, canvasPt){
+    const points = clonePenPoints(normalizePenPoints(path?.points));
+    const local = canvasToPenLocal(null, canvasPt);
+    const handleOffset = 44;
+    points.push({
+      x: local.x,
+      y: local.y,
+      inX: local.x - handleOffset,
+      inY: local.y,
+      outX: local.x + handleOffset,
+      outY: local.y
+    });
+    return {
+      points,
+      createdIndex: points.length - 1
+    };
+  }
+
   function findClosestPenAnchor(node, canvasPt){
     const path = getPenActivePath(node);
     const pts = normalizePenPoints(path?.points);
@@ -930,6 +1177,16 @@
       && canvasPt.y <= (bounds.maxY + padding);
   }
 
+  function shouldShowPenCloseHint(node, path, canvasPt){
+    const pts = normalizePenPoints(path?.points);
+    if(!canvasPt || !pts.length || path?.closed || pts.length < 3) return null;
+    const first = penLocalToCanvas(node, pts[0]);
+    const threshold = Math.max(PEN_CLOSE_PATH_CANVAS_THRESHOLD, PEN_CLOSE_PATH_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    const dx = canvasPt.x - first.x;
+    const dy = canvasPt.y - first.y;
+    return ((dx * dx) + (dy * dy)) <= (threshold * threshold) ? { first, threshold } : null;
+  }
+
   function drawPenCanvasOverlay(){
     if(!penCanvasOverlay) return;
     const penNode = getSelectedPenNode();
@@ -943,13 +1200,16 @@
     penNode.params.paths = paths;
     const activeIdx = clamp(Number(penNode.params.activePath) || 0, 0, Math.max(0, paths.length - 1));
     penNode.params.activePath = activeIdx;
-    const selectedPtIndex = clamp(Number(penNode.params.penSelectedIndex) || 0, 0, 9999);
+    const activePath = paths[activeIdx] || null;
+    const selectedIndices = activePath ? getPenSelectedIndices(penNode, activePath.points) : [];
+    const selectedIndexSet = new Set(selectedIndices);
 
     penCanvasOverlay.setAttribute("viewBox", `0 0 ${previewBase.w} ${previewBase.h}`);
 
     const ghosts = [];
     const lines  = [];
     const dots   = [];
+    const gizmos = [];
 
     for(let pi = 0; pi < paths.length; pi++){
       const path = paths[pi];
@@ -967,17 +1227,38 @@
         ghosts.push(`<path d="${d}" stroke="rgba(220,235,255,.95)" stroke-width="2.2" fill="${path.closed ? "rgba(140,180,255,.14)" : "rgba(0,0,0,0)"}" />`);
         for(let i = 0; i < ptsCvs.length; i++){
           const p = ptsCvs[i];
-          const sel = i === selectedPtIndex;
-          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.inX}" y2="${p.inY}" stroke="rgba(150,180,255,.58)" stroke-width="1.2"/>`);
-          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.outX}" y2="${p.outY}" stroke="rgba(150,180,255,.58)" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.inX}" cy="${p.inY}" r="4.2" fill="${sel?"#9cc3ff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.outX}" cy="${p.outY}" r="4.2" fill="${sel?"#9cc3ff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?"6.2":"5.4"}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.5"/>`);
+          const sel = selectedIndexSet.has(i);
+          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.inX}" y2="${p.inY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2"/>`);
+          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.outX}" y2="${p.outY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2"/>`);
+          dots.push(`<circle cx="${p.inX}" cy="${p.inY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
+          dots.push(`<circle cx="${p.outX}" cy="${p.outY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
+          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?"6.6":"5.4"}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.5"/>`);
+        }
+
+        const selectionBounds = getPenSelectionBounds(penNode, path.points, selectedIndices);
+        if(selectionBounds && selectedIndices.length >= 2){
+          gizmos.push(`<rect x="${selectionBounds.minX}" y="${selectionBounds.minY}" width="${selectionBounds.width}" height="${selectionBounds.height}" fill="rgba(122, 162, 255, .06)" stroke="rgba(151, 189, 255, .92)" stroke-width="1.3" stroke-dasharray="6 4" rx="6"/>`);
+          gizmos.push(`<line x1="${selectionBounds.centerX}" y1="${selectionBounds.minY}" x2="${selectionBounds.rotateHandle.x}" y2="${selectionBounds.rotateHandle.y}" stroke="rgba(151, 189, 255, .92)" stroke-width="1.2"/>`);
+          gizmos.push(`<circle cx="${selectionBounds.rotateHandle.x}" cy="${selectionBounds.rotateHandle.y}" r="5.4" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.2"/>`);
+          for(const corner of Object.values(selectionBounds.corners)){
+            gizmos.push(`<rect x="${corner.x - 4.5}" y="${corner.y - 4.5}" width="9" height="9" rx="2.2" fill="#fef3c7" stroke="#0b1220" stroke-width="1.2"/>`);
+          }
+        }
+
+        if(penCanvasState.active && penCanvasState.kind === "marquee" && penCanvasState.startCanvas && penCanvasState.currentCanvas){
+          const marquee = getPenRect(penCanvasState.startCanvas, penCanvasState.currentCanvas);
+          gizmos.push(`<rect x="${marquee.minX}" y="${marquee.minY}" width="${marquee.width}" height="${marquee.height}" fill="rgba(122, 162, 255, .12)" stroke="rgba(186, 210, 255, .95)" stroke-width="1.2" stroke-dasharray="5 4"/>`);
+        }
+
+        const closeHint = shouldShowPenCloseHint(penNode, path, penCanvasState.hoverCanvas);
+        if(closeHint){
+          dots.push(`<circle cx="${closeHint.first.x}" cy="${closeHint.first.y}" r="9.5" fill="none" stroke="rgba(255,226,138,.95)" stroke-width="1.8" stroke-dasharray="2 2"/>`);
+          dots.push(`<circle cx="${closeHint.first.x + 11}" cy="${closeHint.first.y - 11}" r="3.1" fill="#ffe28a" stroke="#0b1220" stroke-width="1"/>`);
         }
       }
     }
 
-    penCanvasOverlay.innerHTML = `<g>${ghosts.join("")}${lines.join("")}${dots.join("")}</g>`;
+    penCanvasOverlay.innerHTML = `<g>${ghosts.join("")}${lines.join("")}${gizmos.join("")}${dots.join("")}</g>`;
   }
 
   function pickPenControl(node, canvasPt){
@@ -1014,6 +1295,24 @@
     penCanvasState.pathIndex = -1;
     penCanvasState.startCanvas = null;
     penCanvasState.startPoints = null;
+    penCanvasState.currentCanvas = null;
+    penCanvasState.selectedIndices = [];
+    penCanvasState.transformMeta = null;
+  }
+
+  function beginPenCanvasInteraction(pointerId, nodeId, pathIndex, kind, index, startCanvas, startPoints, selectedIndices, transformMeta){
+    penCanvasState.active = true;
+    penCanvasState.pointerId = pointerId;
+    penCanvasState.nodeId = nodeId;
+    penCanvasState.pathIndex = pathIndex;
+    penCanvasState.kind = kind;
+    penCanvasState.index = index;
+    penCanvasState.startCanvas = startCanvas;
+    penCanvasState.currentCanvas = startCanvas;
+    penCanvasState.startPoints = clonePenPoints(startPoints);
+    penCanvasState.selectedIndices = Array.isArray(selectedIndices) ? [...selectedIndices] : [];
+    penCanvasState.transformMeta = transformMeta || null;
+    previewViewport.setPointerCapture(pointerId);
   }
 
   function applyPreviewTransform(){
@@ -1059,14 +1358,23 @@
       const canvasPt = canvasPointFromPointer(e);
       if(!canvasPt) return;
 
+      const activePath = getPenActivePath(selectedNode);
+      if(!activePath) return;
+      const activePathIndex = Number(selectedNode.params.activePath) || 0;
+      const points = clonePenPoints(normalizePenPoints(activePath.points));
+      activePath.points = points;
+      const selectedIndices = getPenSelectedIndices(selectedNode, points);
+      const selectedIndexSet = new Set(selectedIndices);
+      const selectionHit = pickPenSelectionControl(selectedNode, points, selectedIndices, canvasPt);
+      const hit = pickPenControl(selectedNode, canvasPt);
+
       if(e.button === 2){
-        const activePath = getPenActivePath(selectedNode);
-        if(activePath) activePath.points = normalizePenPoints(activePath.points);
         const closestAnchor = findClosestPenAnchor(selectedNode, canvasPt);
         if(activePath && closestAnchor){
           pushHistory();
           activePath.points.splice(closestAnchor.index, 1);
-          selectedNode.params.penSelectedIndex = clamp(Number(selectedNode.params.penSelectedIndex) || 0, 0, Math.max(0, activePath.points.length - 1));
+          activePath.closed = activePath.closed && activePath.points.length >= 3;
+          setPenSelectedIndices(selectedNode, activePath.points.length ? [clamp(closestAnchor.index, 0, activePath.points.length - 1)] : [], activePathIndex);
           evaluateAndRender();
           renderInspector();
           drawPenCanvasOverlay();
@@ -1077,69 +1385,126 @@
 
       if(e.button !== 0) return;
 
-      const activePath = getPenActivePath(selectedNode);
-      if(!activePath) return;
+      if(e.shiftKey){
+        if(hit.kind === "anchor"){
+          if(!selectedIndexSet.has(hit.index)){
+            setPenSelectedIndices(selectedNode, [...selectedIndices, hit.index], activePathIndex);
+            renderInspector();
+            drawPenCanvasOverlay();
+          }
+          return;
+        }
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "marquee", -1, canvasPt, points, selectedIndices, null);
+        drawPenCanvasOverlay();
+        return;
+      }
 
-      const hit = pickPenControl(selectedNode, canvasPt);
-      const points = clonePenPoints(hit.points);
-      activePath.points = points;
+      if(selectionHit.kind === "selectionRotate"){
+        pushHistory();
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionRotate", -1, canvasPt, points, selectedIndices, {
+          bounds: selectionHit.bounds,
+          startAngle: Math.atan2(canvasPt.y - selectionHit.bounds.centerY, canvasPt.x - selectionHit.bounds.centerX)
+        });
+        drawPenCanvasOverlay();
+        return;
+      }
 
-      pushHistory();
+      if(selectionHit.kind === "selectionScale"){
+        pushHistory();
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionScale", -1, canvasPt, points, selectedIndices, {
+          bounds: selectionHit.bounds,
+          corner: selectionHit.corner,
+          cornerName: selectionHit.cornerName
+        });
+        drawPenCanvasOverlay();
+        return;
+      }
+
+      if((e.ctrlKey || e.metaKey) && hit.kind === "anchor"){
+        if(selectedIndexSet.has(hit.index)){
+          const nextSelection = selectedIndices.filter(index => index !== hit.index);
+          setPenSelectedIndices(selectedNode, nextSelection, activePathIndex);
+          renderInspector();
+          drawPenCanvasOverlay();
+        }
+        return;
+      }
+
+      if(!activePath.closed && points.length >= 3 && hit.kind === "anchor" && hit.index === 0){
+        const selectedIdx = selectedIndices.length ? selectedIndices[selectedIndices.length - 1] : clamp(Number(selectedNode.params.penSelectedIndex) || 0, 0, Math.max(0, points.length - 1));
+        const closeHint = shouldShowPenCloseHint(selectedNode, activePath, canvasPt);
+        const continuingFromEnd = selectedIdx === (points.length - 1);
+        if(closeHint && continuingFromEnd){
+          pushHistory();
+          activePath.closed = true;
+          setPenSelectedIndices(selectedNode, [0], activePathIndex);
+          evaluateAndRender();
+          renderInspector();
+          drawPenCanvasOverlay();
+          e.preventDefault();
+          return;
+        }
+      }
+
+      if(hit.kind === "anchor" && selectedIndices.length >= 2 && selectedIndexSet.has(hit.index)){
+        pushHistory();
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionMove", -1, canvasPt, points, selectedIndices, {
+          bounds: selectionHit.bounds
+        });
+        drawPenCanvasOverlay();
+        return;
+      }
+
+      if(hit.kind === "anchor" && selectedIndices.length >= 2 && !selectedIndexSet.has(hit.index)){
+        setPenSelectedIndices(selectedNode, [...selectedIndices, hit.index], activePathIndex);
+        renderInspector();
+        drawPenCanvasOverlay();
+        return;
+      }
 
       if(hit.kind !== "none"){
-        selectedNode.params.penSelectedIndex = hit.index;
-        penCanvasState.active = true;
-        penCanvasState.pointerId = e.pointerId;
-        penCanvasState.nodeId = selectedNode.id;
-        penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-        penCanvasState.kind = hit.kind;
-        penCanvasState.index = hit.index;
-        penCanvasState.startCanvas = canvasPt;
-        penCanvasState.startPoints = clonePenPoints(points);
-        previewViewport.setPointerCapture(e.pointerId);
+        pushHistory();
+        setPenSelectedIndices(selectedNode, [hit.index], activePathIndex);
+        if((hit.kind === "in" || hit.kind === "out") && points[hit.index] && e.altKey){
+          if(points[hit.index].broken){
+            setPenPointStraight(points[hit.index], hit.kind);
+          }else{
+            points[hit.index].broken = true;
+          }
+          activePath.points = points;
+          evaluateAndRender();
+        }
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, hit.kind, hit.index, canvasPt, points, [hit.index], null);
         drawPenCanvasOverlay();
       }else if(points.length < 2 || (!activePath.closed && points.length < 3)){
-        const local = canvasToPenLocal(selectedNode, canvasPt);
-        const handleOffset = 44;
-        points.push({
-          x: local.x,
-          y: local.y,
-          inX: local.x - handleOffset,
-          inY: local.y,
-          outX: local.x + handleOffset,
-          outY: local.y
-        });
-        const createdIndex = points.length - 1;
-        selectedNode.params.penSelectedIndex = createdIndex;
-        activePath.points = points;
-        penCanvasState.active = true;
-        penCanvasState.pointerId = e.pointerId;
-        penCanvasState.nodeId = selectedNode.id;
-        penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-        penCanvasState.kind = "newPointHandle";
-        penCanvasState.index = createdIndex;
-        penCanvasState.startCanvas = canvasPt;
-        penCanvasState.startPoints = clonePenPoints(points);
-        previewViewport.setPointerCapture(e.pointerId);
+        pushHistory();
+        const appended = appendPointToPenPath(activePath, canvasPt);
+        const createdIndex = appended.createdIndex;
+        activePath.points = appended.points;
+        setPenSelectedIndices(selectedNode, [createdIndex], activePathIndex);
+        if(e.altKey && activePath.points[createdIndex]){
+          activePath.points[createdIndex].broken = true;
+        }
+        const startPoints = clonePenPoints(appended.points);
+        if(e.altKey && startPoints[createdIndex]) startPoints[createdIndex].broken = true;
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", createdIndex, canvasPt, startPoints, [createdIndex], null);
         evaluateAndRender();
         renderInspector();
         drawPenCanvasOverlay();
       }else{
         const insertTarget = findPenInsertTarget(selectedNode, canvasPt);
         if(insertTarget){
+          pushHistory();
           const inserted = insertPointOnPenPath(activePath, insertTarget.segmentIndex, insertTarget.t);
           if(inserted){
             activePath.points = inserted.points;
-            selectedNode.params.penSelectedIndex = inserted.insertIndex;
-            penCanvasState.active = true;
-            penCanvasState.pointerId = e.pointerId;
-            penCanvasState.nodeId = selectedNode.id;
-            penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-            penCanvasState.kind = "newPointHandle";
-            penCanvasState.index = inserted.insertIndex;
-            penCanvasState.startCanvas = canvasPt;
-            penCanvasState.startPoints = clonePenPoints(inserted.points);
-            previewViewport.setPointerCapture(e.pointerId);
+            setPenSelectedIndices(selectedNode, [inserted.insertIndex], activePathIndex);
+            if(e.altKey && activePath.points[inserted.insertIndex]){
+              activePath.points[inserted.insertIndex].broken = true;
+            }
+            const startPoints = clonePenPoints(inserted.points);
+            if(e.altKey && startPoints[inserted.insertIndex]) startPoints[inserted.insertIndex].broken = true;
+            beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", inserted.insertIndex, canvasPt, startPoints, [inserted.insertIndex], null);
             evaluateAndRender();
             renderInspector();
             drawPenCanvasOverlay();
@@ -1148,56 +1513,84 @@
           if(!activePath.closed){
             const bounds = getPenPathCanvasBounds(selectedNode, activePath);
             const insideBounds = pointInPenPathBounds(canvasPt, bounds, 10 / Math.max(0.1, previewScale));
-            if(insideBounds){
-              // Inside path bounds: drag whole path.
-              penCanvasState.active = true;
-              penCanvasState.pointerId = e.pointerId;
-              penCanvasState.nodeId = selectedNode.id;
-              penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-              penCanvasState.kind = "path";
-              penCanvasState.index = -1;
-              penCanvasState.startCanvas = canvasPt;
-              penCanvasState.startPoints = clonePenPoints(points);
-              previewViewport.setPointerCapture(e.pointerId);
+            if(insideBounds && e.altKey){
+              // Alt inside open path bounds moves the whole path.
+              pushHistory();
+              beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "path", -1, canvasPt, points, selectedIndices, null);
               drawPenCanvasOverlay();
             }else{
-              // Outside bounds: append endpoint and allow immediate tangent drag.
-              const local = canvasToPenLocal(selectedNode, canvasPt);
-              const handleOffset = 44;
-              points.push({
-                x: local.x,
-                y: local.y,
-                inX: local.x - handleOffset,
-                inY: local.y,
-                outX: local.x + handleOffset,
-                outY: local.y
-              });
-              const createdIndex = points.length - 1;
-              selectedNode.params.penSelectedIndex = createdIndex;
-              activePath.points = points;
-              penCanvasState.active = true;
-              penCanvasState.pointerId = e.pointerId;
-              penCanvasState.nodeId = selectedNode.id;
-              penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-              penCanvasState.kind = "newPointHandle";
-              penCanvasState.index = createdIndex;
-              penCanvasState.startCanvas = canvasPt;
-              penCanvasState.startPoints = clonePenPoints(points);
-              previewViewport.setPointerCapture(e.pointerId);
-              evaluateAndRender();
-              renderInspector();
-              drawPenCanvasOverlay();
+              // Default click creates a new point and allows immediate tangent drag.
+              if(selectionHit.kind === "selectionMove" && selectedIndices.length >= 2){
+                pushHistory();
+                beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionMove", -1, canvasPt, points, selectedIndices, {
+                  bounds: selectionHit.bounds
+                });
+                drawPenCanvasOverlay();
+                return;
+              }
+
+              pushHistory();
+              if(insideBounds){
+                const insertTarget = findPenInsertTarget(selectedNode, canvasPt);
+                if(insertTarget){
+                  const split = insertPointOnPenPath(activePath, insertTarget.segmentIndex, insertTarget.t);
+                  if(split){
+                    activePath.points = split.points;
+                    setPenSelectedIndices(selectedNode, [split.insertIndex], activePathIndex);
+                    if(e.altKey && activePath.points[split.insertIndex]){
+                      activePath.points[split.insertIndex].broken = true;
+                    }
+                    const startPoints = clonePenPoints(split.points);
+                    if(e.altKey && startPoints[split.insertIndex]) startPoints[split.insertIndex].broken = true;
+                    beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", split.insertIndex, canvasPt, startPoints, [split.insertIndex], null);
+                    evaluateAndRender();
+                    renderInspector();
+                    drawPenCanvasOverlay();
+                  }
+                }else{
+                  const appended = appendPointToPenPath(activePath, canvasPt);
+                  const createdIndex = appended.createdIndex;
+                  activePath.points = appended.points;
+                  setPenSelectedIndices(selectedNode, [createdIndex], activePathIndex);
+                  if(e.altKey && activePath.points[createdIndex]){
+                    activePath.points[createdIndex].broken = true;
+                  }
+                  const startPoints = clonePenPoints(appended.points);
+                  if(e.altKey && startPoints[createdIndex]) startPoints[createdIndex].broken = true;
+                  beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", createdIndex, canvasPt, startPoints, [createdIndex], null);
+                  evaluateAndRender();
+                  renderInspector();
+                  drawPenCanvasOverlay();
+                }
+              }else{
+                const appended = appendPointToPenPath(activePath, canvasPt);
+                const createdIndex = appended.createdIndex;
+                activePath.points = appended.points;
+                setPenSelectedIndices(selectedNode, [createdIndex], activePathIndex);
+                if(e.altKey && activePath.points[createdIndex]){
+                  activePath.points[createdIndex].broken = true;
+                }
+                const startPoints = clonePenPoints(appended.points);
+                if(e.altKey && startPoints[createdIndex]) startPoints[createdIndex].broken = true;
+                beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", createdIndex, canvasPt, startPoints, [createdIndex], null);
+                evaluateAndRender();
+                renderInspector();
+                drawPenCanvasOverlay();
+              }
             }
           }else{
-            penCanvasState.active = true;
-            penCanvasState.pointerId = e.pointerId;
-            penCanvasState.nodeId = selectedNode.id;
-            penCanvasState.pathIndex = Number(selectedNode.params.activePath) || 0;
-            penCanvasState.kind = "path";
-            penCanvasState.index = -1;
-            penCanvasState.startCanvas = canvasPt;
-            penCanvasState.startPoints = clonePenPoints(points);
-            previewViewport.setPointerCapture(e.pointerId);
+            if(selectionHit.kind === "selectionMove" && selectedIndices.length >= 2){
+              pushHistory();
+              beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionMove", -1, canvasPt, points, selectedIndices, {
+                bounds: selectionHit.bounds
+              });
+            }else if(e.altKey){
+              pushHistory();
+              beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "path", -1, canvasPt, points, selectedIndices, null);
+            }else{
+              drawPenCanvasOverlay();
+              return;
+            }
             drawPenCanvasOverlay();
           }
         }
@@ -1246,13 +1639,14 @@
 
       const points = clonePenPoints(penCanvasState.startPoints);
       const idx = penCanvasState.index;
+      const activeSelection = normalizePenSelectionIndices(penCanvasState.selectedIndices, points.length);
 
       const start = penCanvasState.startCanvas;
       const dx = canvasPt.x - start.x;
       const dy = canvasPt.y - start.y;
-      const s = Math.max(0.01, Number(node.params?.scale) || 1);
-      const ldx = dx / s;
-      const ldy = dy / s;
+      const ldx = dx;
+      const ldy = dy;
+      penCanvasState.currentCanvas = canvasPt;
 
       if(penCanvasState.kind === "path"){
         for(const p of points){
@@ -1263,6 +1657,26 @@
           p.outX += ldx;
           p.outY += ldy;
         }
+      }else if(penCanvasState.kind === "selectionMove"){
+        translatePenPoints(points, activeSelection, ldx, ldy);
+      }else if(penCanvasState.kind === "selectionRotate"){
+        const bounds = penCanvasState.transformMeta?.bounds;
+        if(!bounds) return;
+        const startAngle = Number(penCanvasState.transformMeta?.startAngle) || 0;
+        const currentAngle = Math.atan2(canvasPt.y - bounds.centerY, canvasPt.x - bounds.centerX);
+        rotatePenPoints(points, activeSelection, bounds.centerX, bounds.centerY, currentAngle - startAngle);
+      }else if(penCanvasState.kind === "selectionScale"){
+        const bounds = penCanvasState.transformMeta?.bounds;
+        const corner = penCanvasState.transformMeta?.corner;
+        if(!bounds || !corner) return;
+        const startDx = Math.max(0.001, corner.signX * (corner.x - bounds.centerX));
+        const startDy = Math.max(0.001, corner.signY * (corner.y - bounds.centerY));
+        const scaleX = Math.max(0.05, (corner.signX * (canvasPt.x - bounds.centerX)) / startDx);
+        const scaleY = Math.max(0.05, (corner.signY * (canvasPt.y - bounds.centerY)) / startDy);
+        scalePenPoints(points, activeSelection, bounds.centerX, bounds.centerY, scaleX, scaleY);
+      }else if(penCanvasState.kind === "marquee"){
+        drawPenCanvasOverlay();
+        return;
       }else{
         const p = points[idx];
         if(!p) return;
@@ -1272,23 +1686,26 @@
         p.outX += ldx; p.outY += ldy;
         }else if(penCanvasState.kind === "in"){
         p.inX += ldx; p.inY += ldy;
-        if(!e.altKey){ p.outX = p.x + (p.x - p.inX); p.outY = p.y + (p.y - p.inY); }
+        if(!p.broken){ setPenPointStraight(p, "in"); }
         }else if(penCanvasState.kind === "out"){
         p.outX += ldx; p.outY += ldy;
-        if(!e.altKey){ p.inX = p.x + (p.x - p.outX); p.inY = p.y + (p.y - p.outY); }
+        if(!p.broken){ setPenPointStraight(p, "out"); }
         }else if(penCanvasState.kind === "newPointHandle"){
         p.outX = p.x + ldx;
         p.outY = p.y + ldy;
-        if(!e.altKey){
-          p.inX = p.x - ldx;
-          p.inY = p.y - ldy;
-        }
+        if(!p.broken){ setPenPointStraight(p, "out"); }
         }
       }
 
       activePath.points = points;
       evaluateAndRender();
       return;
+    }
+
+    const selectedPenNode = getSelectedPenNode();
+    if(selectedPenNode && previewInner.contains(e.target)){
+      penCanvasState.hoverCanvas = canvasPointFromPointer(e);
+      drawPenCanvasOverlay();
     }
 
     if(isPreviewDragging){
@@ -1316,15 +1733,33 @@
   });
 
 
-  previewViewport.addEventListener("pointerup", () => {
+  previewViewport.addEventListener("pointerup", (e) => {
     if(penCanvasState.active){
+      if(penCanvasState.kind === "marquee"){
+        const node = penCanvasState.nodeId ? state.nodes.get(penCanvasState.nodeId) : null;
+        const pathArr = node?.params?.paths;
+        const activePath = (Array.isArray(pathArr) && pathArr[penCanvasState.pathIndex]) ? pathArr[penCanvasState.pathIndex] : null;
+        const currentCanvas = canvasPointFromPointer(e) || penCanvasState.currentCanvas || penCanvasState.startCanvas;
+        if(node && activePath && currentCanvas){
+          const rect = getPenRect(penCanvasState.startCanvas, currentCanvas);
+          const points = normalizePenPoints(activePath.points);
+          const nextSelection = [...normalizePenSelectionIndices(penCanvasState.selectedIndices, points.length)];
+          for(let i = 0; i < points.length; i++){
+            const point = penLocalToCanvas(node, points[i]);
+            if(pointInPenRect(point, rect) && !nextSelection.includes(i)) nextSelection.push(i);
+          }
+          setPenSelectedIndices(node, nextSelection, penCanvasState.pathIndex);
+        }
+      }
       resetPenCanvasState();
       renderInspector();
     }
+    penCanvasState.hoverCanvas = null;
     isPreviewDragging = false;
     dragNodeId = null;
     isPreviewPanning = false;
     previewViewport.classList.remove("panning");
+    drawPenCanvasOverlay();
   });
 
   previewViewport.addEventListener("pointercancel", () => {
@@ -1332,10 +1767,19 @@
       resetPenCanvasState();
       renderInspector();
     }
+    penCanvasState.hoverCanvas = null;
     isPreviewDragging = false;
     dragNodeId = null;
     isPreviewPanning = false;
     previewViewport.classList.remove("panning");
+    drawPenCanvasOverlay();
+  });
+
+  previewViewport.addEventListener("pointerleave", () => {
+    if(penCanvasState.hoverCanvas){
+      penCanvasState.hoverCanvas = null;
+      drawPenCanvasOverlay();
+    }
   });
 
   previewViewport.addEventListener("contextmenu", (e) => {
@@ -2377,8 +2821,9 @@ const NODE_TIPS = {
     "Paste a URL or upload a file. Supports PNG, JPG, SVG, GIF. No inputs needed."
   ],
   Pen: [
-    "<strong>Pen</strong> - Draws custom shapes using SVG paths.",
-    "Paste SVG path commands (e.g., M 100 100 L 200 100 Z). Control fill, stroke, opacity, and scale."
+    "<strong>Pen</strong> - Draw and edit custom bezier shapes directly on the preview.",
+    "<strong>Shortcuts:</strong><br>Left-click add/select point<br>Shift-click/drag add to selection<br>Ctrl-click selected point deselects<br>Right-click point deletes",
+    "<strong>More:</strong><br>Alt-drag inside bounds moves full shape<br>Alt-click handle toggles straight/custom<br>Esc clears group selection"
   ],
   Transform: [
     "<strong>Transform</strong> - Moves, scales, and rotates a layer.",
@@ -2474,47 +2919,94 @@ const HELP_GENERAL_PAGES = {
       </div>
     `
   },
-  updates: {
-    eyebrow: "Oniwire Help - Latest Update",
-    title: "What changed in v0.2.2",
-    subtitle: "v0.2.2 now includes Pen-driven masking, stronger MP4 export behavior, contextual help, and the earlier color/layout improvements.",
+  shortcuts: {
+    eyebrow: "Oniwire Help - Shortcuts",
+    title: "Keyboard and mouse shortcuts",
+    subtitle: "A quick reference for the most useful controls while building and editing.",
     body: `
       <div class="helpSection">
-        <h3 class="helpSectionTitle">Latest in v0.2.2</h3>
+        <h3 class="helpSectionTitle">Global</h3>
+        <ul class="helpChecklist">
+          <li><kbd>Esc</kbd> closes the Help window.</li>
+          <li><kbd>Ctrl/Cmd + Z</kbd> undo.</li>
+          <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> deletes selected node(s).</li>
+        </ul>
+      </div>
+
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Node Graph</h3>
+        <ul class="helpChecklist">
+          <li><kbd>Tab</kbd> opens node search.</li>
+          <li><kbd>Shift + O</kbd> quick-connect selected node to Output.</li>
+          <li><kbd>Space</kbd> + drag pans the node editor.</li>
+          <li>Mouse wheel zooms in/out in the node editor.</li>
+        </ul>
+      </div>
+
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Preview</h3>
+        <ul class="helpChecklist">
+          <li>Preview zoom dropdown changes screen scale.</li>
+          <li>When zoomed above 100%, drag to pan the preview.</li>
+        </ul>
+      </div>
+
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Pen Node Editing</h3>
+        <ul class="helpChecklist">
+          <li>Left-click adds or selects a point.</li>
+          <li><kbd>Shift</kbd>-click adds a point to the current selection.</li>
+          <li><kbd>Shift</kbd>-drag creates an additive selection box.</li>
+          <li><kbd>Ctrl/Cmd</kbd>-click a selected point deselects it.</li>
+          <li><kbd>Esc</kbd> clears point group selection.</li>
+          <li><kbd>Alt</kbd>-drag inside bounds moves the whole path.</li>
+          <li><kbd>Alt</kbd>-click a handle toggles straight/custom handle mode.</li>
+          <li>Right-click a point deletes it.</li>
+        </ul>
+      </div>
+    `
+  },
+  updates: {
+    eyebrow: "Oniwire Help - Latest Update",
+    title: "What changed in v0.2.3",
+    subtitle: "v0.2.3 focuses on faster Pen workflow: multi-point selection, group transforms, clearer shortcuts, and dedicated shortcut help.",
+    body: `
+      <div class="helpSection">
+        <h3 class="helpSectionTitle">Latest in v0.2.3</h3>
         <div class="helpUpdateGrid">
           <div class="helpUpdateCard">
-            <span class="helpUpdateKicker">Masking</span>
+            <span class="helpUpdateKicker">Pen Editing</span>
             <div>
-              <h4>Pen as Mask Source</h4>
-              <p>Pen paths can now drive Composite and Mask nodes, so custom drawn shapes work as real mask inputs instead of just visual layers.</p>
+              <h4>Multi-point Selection + Group Transform</h4>
+              <p>Select multiple Pen points and transform them together using move, rotate, and scale controls without affecting non-selected points.</p>
             </div>
           </div>
           <div class="helpUpdateCard">
-            <span class="helpUpdateKicker">Export</span>
+            <span class="helpUpdateKicker">Pen Workflow</span>
             <div>
-              <h4>MP4 Mask + Image Fixes</h4>
-              <p>MP4 export now waits for cloned images, preserves masked image content more reliably, and keeps masked composites behaving closer to the live viewport during motion.</p>
+              <h4>Selection Controls Refined</h4>
+              <p>Shift adds points and box-selection, Ctrl/Cmd deselects selected points, Esc clears group selection, and full-shape movement is now Alt-drag only.</p>
             </div>
           </div>
           <div class="helpUpdateCard">
-            <span class="helpUpdateKicker">New node</span>
+            <span class="helpUpdateKicker">Handles</span>
             <div>
-              <h4>Color Correct</h4>
-              <p>Adjust brightness, contrast, saturation, hue rotation, and temperature directly on any input layer.</p>
+              <h4>Persistent Handle Mode</h4>
+              <p>Alt-click on a handle now toggles straight/custom mode as a persistent state, so custom handles stay custom until toggled back.</p>
             </div>
           </div>
           <div class="helpUpdateCard">
-            <span class="helpUpdateKicker">UX</span>
+            <span class="helpUpdateKicker">Help</span>
             <div>
-              <h4>Contextual Tips</h4>
-              <p>The Tips area now changes based on the selected node so users can understand what each node does faster while building graphs.</p>
+              <h4>New Shortcuts Page</h4>
+              <p>Help now includes a dedicated Shortcuts page with global, graph, preview, and Pen editing controls for faster onboarding.</p>
             </div>
           </div>
           <div class="helpUpdateCard">
-            <span class="helpUpdateKicker">Layout</span>
+            <span class="helpUpdateKicker">Tips</span>
             <div>
-              <h4>Laptop Optimization</h4>
-              <p>Panel spacing and density were tuned for smaller screens so the workspace feels less crowded on laptop-sized displays.</p>
+              <h4>Pen Tips Rewritten</h4>
+              <p>Pen tips are now a concise intro plus line-broken shortcut list for readability during editing sessions.</p>
             </div>
           </div>
         </div>
@@ -3586,7 +4078,17 @@ async function evaluate(){
           <div class="row"><label>Stroke Color</label><input type="color" data-sm-prop="strokeColor" value="${escapeAttr(ap.strokeColor || "#ffffff")}" /></div>
           <div class="row"><label>Stroke Width</label><input type="range" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.5" value="${ap.strokeWidth ?? 2}" /></div>
           <div class="row"><label>Stroke Opacity</label><input type="range" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /></div>
-          <div style="font-size:11px; color:#9db4d7; margin-top:4px;">Left-drag empty area moves path · click near curve inserts point · right-click point deletes · Alt = break mirror</div>
+          <div style="font-size:11px; color:#9db4d7; margin-top:4px; line-height:1.45;">
+            Draw and edit bezier paths for custom shapes.<br>
+            Shortcuts:<br>
+            • Left-click: add point / select point<br>
+            • Shift-click / Shift-drag: add to selection (point or box)<br>
+            • Ctrl-click selected point: deselect point<br>
+            • Alt-drag inside bounds: move entire shape<br>
+            • Alt-click handle: toggle straight/custom handle
+            • Esc: clear group selection
+            • Right-click point: delete point
+          </div>
         </div>
       ` : "";
 
@@ -4278,7 +4780,7 @@ async function evaluate(){
           const idx = Number(item.getAttribute('data-sm-idx'));
           if(Number.isNaN(idx)) return;
           node.params.activePath = idx;
-          node.params.penSelectedIndex = 0;
+          setPenSelectedIndices(node, [], idx);
           syncAndRefresh(false);
         });
       });
@@ -4304,7 +4806,7 @@ async function evaluate(){
           if(!Array.isArray(paths) || paths.length <= 1) return;
           paths.splice(idx, 1);
           node.params.activePath = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
-          node.params.penSelectedIndex = 0;
+          setPenSelectedIndices(node, [], Number(node.params.activePath) || 0);
           syncAndRefresh();
         });
       });
@@ -4324,7 +4826,7 @@ async function evaluate(){
           visible: true
         });
         node.params.activePath = node.params.paths.length - 1;
-        node.params.penSelectedIndex = 0;
+        setPenSelectedIndices(node, [], node.params.activePath);
         syncAndRefresh();
       });
 
@@ -4339,7 +4841,7 @@ async function evaluate(){
         };
         node.params.paths.push(copy);
         node.params.activePath = node.params.paths.length - 1;
-        node.params.penSelectedIndex = 0;
+        setPenSelectedIndices(node, [], node.params.activePath);
         syncAndRefresh();
       });
 
@@ -4348,7 +4850,7 @@ async function evaluate(){
         const ap = getActivePath();
         if(!ap) return;
         ap.points = [];
-        node.params.penSelectedIndex = 0;
+        setPenSelectedIndices(node, [], Number(node.params.activePath) || 0);
         syncAndRefresh();
       });
 
@@ -5467,8 +5969,42 @@ window.addEventListener("keydown", (e) => {
   if(e.key === "Delete" || e.key === "Backspace"){
     // prevent browser back navigation from Backspace (some browsers)
     e.preventDefault();
+    const selectedNode = getSelectedPenNode();
+    const activePath = selectedNode ? getPenActivePath(selectedNode) : null;
+    const selectedIndices = (selectedNode && activePath) ? getPenSelectedIndices(selectedNode, normalizePenPoints(activePath.points)) : [];
+    if(selectedNode && activePath && selectedIndices.length){
+      pushHistory();
+      activePath.points = removePenPointsByIndices(activePath, selectedIndices);
+      activePath.closed = activePath.closed && activePath.points.length >= 3;
+      setPenSelectedIndices(selectedNode, [], Number(selectedNode.params.activePath) || 0);
+      evaluateAndRender();
+      renderInspector();
+      drawPenCanvasOverlay();
+      return;
+    }
     deleteSelectedNode();
   }
+});
+
+// Esc clears current pen point-group selection
+window.addEventListener("keydown", (e) => {
+  if(helpVisible) return;
+  if(isTypingTarget(e.target)) return;
+  if(e.key !== "Escape") return;
+
+  const selectedNode = getSelectedPenNode();
+  const activePath = selectedNode ? getPenActivePath(selectedNode) : null;
+  if(!selectedNode || !activePath) return;
+
+  const selectedIndices = getPenSelectedIndices(selectedNode, normalizePenPoints(activePath.points));
+  if(selectedIndices.length < 2) return;
+
+  setPenSelectedIndices(selectedNode, [], Number(selectedNode.params.activePath) || 0);
+  if(penCanvasState.active){
+    resetPenCanvasState();
+  }
+  renderInspector();
+  drawPenCanvasOverlay();
 });
 
 // Shift+O quick connect to Output
