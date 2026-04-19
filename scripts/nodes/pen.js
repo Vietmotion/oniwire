@@ -145,10 +145,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
     outputs: ["layer"],
     defaults: {
       paths: [defaultPath(1)],
-      activePath: 0,
-      x: 0,
-      y: 0,
-      scale: 1
+      activePath: 0
     },
     icon: "✏️",
     run: (node) => {
@@ -157,7 +154,6 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       node.params.paths = paths;
       const activeIdx = clamp(Number(node.params?.activePath) || 0, 0, Math.max(0, paths.length - 1));
       node.params.activePath = activeIdx;
-      const scale = Number(node.params?.scale) || 1;
       const bounds = getPathBounds(paths);
       const maskPaths = serializeMaskPaths(paths);
 
@@ -167,16 +163,16 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       wrap.style.overflow = "visible";
       wrap.dataset.maskShape = "path";
       wrap.dataset.maskPathData = JSON.stringify(maskPaths);
-      wrap.dataset.maskX = String(Number(node.params?.x) || 0);
-      wrap.dataset.maskY = String(Number(node.params?.y) || 0);
-      wrap.dataset.maskScale = String(scale);
+      wrap.dataset.maskX = "0";
+      wrap.dataset.maskY = "0";
+      wrap.dataset.maskScale = "1";
       wrap.dataset.maskCx = String(bounds.cx);
       wrap.dataset.maskCy = String(bounds.cy);
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.style.position = "absolute";
-      svg.style.left = (Number(node.params?.x) || 0) + "px";
-      svg.style.top = (Number(node.params?.y) || 0) + "px";
+      svg.style.left = "0px";
+      svg.style.top = "0px";
       svg.style.pointerEvents = "none";
       svg.style.userSelect = "none";
       svg.style.overflow = "visible";
@@ -185,9 +181,6 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       svg.setAttribute("height", "720");
 
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      if(scale !== 1){
-        g.setAttribute("transform", `translate(${bounds.cx} ${bounds.cy}) scale(${scale}) translate(${-bounds.cx} ${-bounds.cy})`);
-      }
 
       for(const path of paths){
         if(!path.visible) continue;
@@ -212,10 +205,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       return { el: wrap };
     },
     inspector: () => ([
-      { k: "paths", type: "shapeManager", label: "Shapes" },
-      { k: "scale", type: "range", label: "Scale", min: 0.1, max: 3, step: 0.1 },
-      { k: "x", type: "range", label: "X", min: -640, max: 1280, step: 1 },
-      { k: "y", type: "range", label: "Y", min: -360, max: 720, step: 1 }
+      { k: "paths", type: "shapeManager", label: "Shapes" }
     ])
   };
 };

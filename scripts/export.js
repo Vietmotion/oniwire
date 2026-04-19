@@ -1845,48 +1845,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			migrateLegacyPenParams(params);
 			var cPen = this.createLayer();
 			var penPaths = normalizePenPaths(params.paths);
-			var penX = toNumber(params.x, 0);
-			var penY = toNumber(params.y, 0);
-			var penScale = Math.max(0.01, toNumber(params.scale, 1));
 
 			cPen.ctx.save();
-			cPen.ctx.translate(penX, penY);
-
-			if(penScale !== 1){
-				var minX = Infinity;
-				var minY = Infinity;
-				var maxX = -Infinity;
-				var maxY = -Infinity;
-				for(var pIdx = 0; pIdx < penPaths.length; pIdx++){
-					var boundsPath = penPaths[pIdx];
-					if(!boundsPath || boundsPath.visible === false || !Array.isArray(boundsPath.points)) continue;
-					for(var pointIdx = 0; pointIdx < boundsPath.points.length; pointIdx++){
-						var point = boundsPath.points[pointIdx];
-						var coords = [
-							[point.x, point.y],
-							[point.inX, point.inY],
-							[point.outX, point.outY]
-						];
-						for(var coordIdx = 0; coordIdx < coords.length; coordIdx++){
-							var coord = coords[coordIdx];
-							var bx = Number(coord[0]);
-							var by = Number(coord[1]);
-							if(!Number.isFinite(bx) || !Number.isFinite(by)) continue;
-							if(bx < minX) minX = bx;
-							if(by < minY) minY = by;
-							if(bx > maxX) maxX = bx;
-							if(by > maxY) maxY = by;
-						}
-					}
-				}
-				if(Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY)){
-					var penCx = (minX + maxX) / 2;
-					var penCy = (minY + maxY) / 2;
-					cPen.ctx.translate(penCx, penCy);
-					cPen.ctx.scale(penScale, penScale);
-					cPen.ctx.translate(-penCx, -penCy);
-				}
-			}
 
 			for(var pathIndex = 0; pathIndex < penPaths.length; pathIndex++){
 				var penPath = penPaths[pathIndex];

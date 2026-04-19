@@ -73,6 +73,20 @@ Important rule:
 - Fix: added local vendor copies with fallback order: local vendor -> jsdelivr -> unpkg.
 - Prevention: critical export dependencies should have a local-first load path.
 
+### 2026-04-19 - Motion worked in code, but appeared broken in app
+
+- Symptom: `Motion - Act` appeared non-functional for `Pen -> Motion - Act` and `Text -> Motion - Act` graphs.
+- Root cause: stale browser cache served older `scripts/nodes/motion.js` and `scripts/export.js` because script query versions in the HTML entry were outdated.
+- Conflict pattern: runtime behavior can mismatch repository code when script version tokens are behind file changes.
+- Fix:
+  - bumped script query versions in the app HTML (`motion.js` and `export.js`),
+  - synced latest version file into `index.html`,
+  - pushed deploy commit.
+- Prevention:
+  - whenever runtime JS changes, update script cache-busting query values in the live HTML entry,
+  - treat "works in source but not in browser" as a cache/version-drift check before deep renderer refactors,
+  - always include `index.html` sync in live-site pushes.
+
 ## High-Risk Areas
 
 - CSS masks and alpha-composite behavior.
@@ -81,6 +95,7 @@ Important rule:
 - Divergence between preview renderer and export renderer.
 - Divergence between MP4 path and PNG/JPG path.
 - Fallback logic that accepts non-null but incomplete image output.
+- Script cache/version drift between changed JS files and stale HTML query tokens.
 
 ## Prevention Checklist For New Render Methods / Formats
 
@@ -96,6 +111,7 @@ Before merging a new render path:
 8. Compare first frame between preview, PNG, JPG, and MP4.
 9. Verify fps/duration come from the same output settings used elsewhere.
 10. Verify offline behavior if the path depends on external libraries.
+11. If renderer-related JS changed, verify script query versions are updated in the live HTML entry.
 
 ## Debugging Rules
 
@@ -108,6 +124,7 @@ Before merging a new render path:
 - For image bugs, confirm decode timing in the cloned/offscreen DOM.
 - For animation bugs, verify whether any cached canvas/data URL is being reused across frames.
 - For fallback chains, log which fallback actually executed.
+- For "code looks correct but runtime still broken", validate browser cache/version drift first (script query tokens and hard refresh).
 
 ## Suggested Future Additions
 

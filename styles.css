@@ -615,7 +615,7 @@ select option{
   user-select: none;
 }
 
-#previewViewport.pannable{ cursor: grab; }
+#previewViewport.pannable{ cursor: default; }
 #previewViewport.panning { cursor: grabbing; }
 
 #previewInner{

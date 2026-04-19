@@ -1911,8 +1911,8 @@ utilsApi.initProjectUtils();
     if(!meta) return null;
     const { shapeType, width, height, x, y } = meta;
 
-    const w = renderRoot?.clientWidth || 800;
-    const h = renderRoot?.clientHeight || 600;
+    const w = previewBase?.w || 1280;
+    const h = previewBase?.h || 720;
 
     const baseFill = invert ? "white" : "black";
     const shapeFill = invert ? "black" : "white";
@@ -2028,8 +2028,8 @@ utilsApi.initProjectUtils();
     const list = normalizeRampStops(stops);
     if(list.length === 0) return null;
 
-    const w = renderRoot?.clientWidth || 800;
-    const h = renderRoot?.clientHeight || 600;
+    const w = previewBase?.w || 1280;
+    const h = previewBase?.h || 720;
 
     const stopMarkup = list.map(s => {
       const { r, g, b } = parseHexColor(s.color);
@@ -2073,8 +2073,8 @@ utilsApi.initProjectUtils();
   function buildGradientMaskUrl(meta, invert = false){
     if(!meta || !Array.isArray(meta.stops) || meta.stops.length === 0) return null;
 
-    const w = renderRoot?.clientWidth || 800;
-    const h = renderRoot?.clientHeight || 600;
+    const w = previewBase?.w || 1280;
+    const h = previewBase?.h || 720;
     const stops = normalizeRampStops(meta.stops);
 
     const stopMarkup = stops.map(s => {
@@ -2303,6 +2303,127 @@ utilsApi.initProjectUtils();
     })));
   }
 
+  function parseObjectPositionToken(token, leftover, axisSize){
+    const t = String(token || "").trim().toLowerCase();
+    if(!t) return { value: 0.5, consumed: false };
+
+    if(t.endsWith("%")){
+      const n = Number(t.slice(0, -1));
+      if(Number.isFinite(n)) return { value: n / 100, consumed: true };
+    }
+
+    if(t.endsWith("px")){
+      const n = Number(t.slice(0, -2));
+      if(Number.isFinite(n) && axisSize > 0){
+        return { value: n / axisSize, consumed: true };
+      }
+    }
+
+    if(t === "left" || t === "top") return { value: 0, consumed: true };
+    if(t === "center") return { value: 0.5, consumed: true };
+    if(t === "right" || t === "bottom") return { value: 1, consumed: true };
+
+    if(leftover && leftover.endsWith("%")){
+      const n = Number(leftover.slice(0, -1));
+      if(Number.isFinite(n)) return { value: n / 100, consumed: false };
+    }
+
+    if(leftover && leftover.endsWith("px") && axisSize > 0){
+      const n = Number(leftover.slice(0, -2));
+      if(Number.isFinite(n)) return { value: n / axisSize, consumed: false };
+    }
+
+    return { value: 0.5, consumed: false };
+  }
+
+  function parseObjectPosition(posValue, freeSpaceX, freeSpaceY){
+    const raw = String(posValue || "50% 50%").trim().toLowerCase();
+    const parts = raw.split(/\s+/).filter(Boolean);
+    const xToken = parts[0] || "50%";
+    const yToken = parts[1] || (xToken === "top" || xToken === "bottom" ? xToken : "50%");
+
+    const xInfo = parseObjectPositionToken(xToken, parts[1] || "", Math.max(1, freeSpaceX));
+    const yStartIndex = xInfo.consumed ? 1 : 0;
+    const yPrimary = parts[yStartIndex] || yToken;
+    const ySecondary = parts[yStartIndex + 1] || "";
+    const yInfo = parseObjectPositionToken(yPrimary, ySecondary, Math.max(1, freeSpaceY));
+
+    return {
+      x: Math.max(0, Math.min(1, xInfo.value)),
+      y: Math.max(0, Math.min(1, yInfo.value))
+    };
+  }
+
+  function bakeImgObjectFitToDataUrl(imgEl){
+    if(!(imgEl instanceof HTMLImageElement)) return null;
+    const iw = Math.max(1, Math.round(imgEl.clientWidth || 0));
+    const ih = Math.max(1, Math.round(imgEl.clientHeight || 0));
+    const sw = Math.max(1, imgEl.naturalWidth || imgEl.width || iw);
+    const sh = Math.max(1, imgEl.naturalHeight || imgEl.height || ih);
+    if(iw <= 0 || ih <= 0 || sw <= 0 || sh <= 0) return null;
+
+    let cs = null;
+    try{ cs = getComputedStyle(imgEl); }catch(_){ cs = null; }
+    const fit = String(cs?.objectFit || imgEl.style.objectFit || "fill").trim().toLowerCase() || "fill";
+    const posRaw = String(cs?.objectPosition || imgEl.style.objectPosition || "50% 50%");
+
+    const c = document.createElement("canvas");
+    c.width = iw;
+    c.height = ih;
+    const ctx = c.getContext("2d");
+    if(!ctx) return null;
+    ctx.clearRect(0, 0, iw, ih);
+
+    if(fit === "fill"){
+      try{
+        ctx.drawImage(imgEl, 0, 0, iw, ih);
+        return c.toDataURL("image/png");
+      }catch(_){
+        return null;
+      }
+    }
+
+    const scale = fit === "cover" ? Math.max(iw / sw, ih / sh) : Math.min(iw / sw, ih / sh);
+    const dw = sw * scale;
+    const dh = sh * scale;
+    const freeSpaceX = iw - dw;
+    const freeSpaceY = ih - dh;
+    const anchor = parseObjectPosition(posRaw, freeSpaceX, freeSpaceY);
+    const dx = freeSpaceX * anchor.x;
+    const dy = freeSpaceY * anchor.y;
+
+    try{
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, iw, ih);
+      ctx.clip();
+      ctx.drawImage(imgEl, dx, dy, dw, dh);
+      ctx.restore();
+      return c.toDataURL("image/png");
+    }catch(_){
+      return null;
+    }
+  }
+
+  async function bakeCloneImagesForCapture(rootEl){
+    if(!(rootEl instanceof Element)) return;
+    const images = Array.from(rootEl.querySelectorAll("img"));
+    if(!images.length) return;
+
+    await waitForRenderableImages(rootEl, 1200);
+
+    for(const img of images){
+      if(!(img instanceof HTMLImageElement)) continue;
+      if(!(img.naturalWidth > 0)) continue;
+      const bakedDataUrl = bakeImgObjectFitToDataUrl(img);
+      if(!bakedDataUrl) continue;
+      img.src = bakedDataUrl;
+      img.srcset = "";
+      img.style.objectFit = "fill";
+      img.style.objectPosition = "50% 50%";
+    }
+  }
+
   // Builds a pre-computed alpha-mode mask canvas from the first CSS mask-image found in sourceRoot.
   // Converts SVG luminance masks (white=visible, black=transparent) to canvas alpha masks.
   // Returns null if no mask is found or loading fails. Used once per export, not per-frame.
@@ -2411,23 +2532,96 @@ utilsApi.initProjectUtils();
     return true;
   }
 
+  function extractMaskUrlFromValue(rawValue){
+    const value = String(rawValue || "").trim();
+    if(!value || value === "none") return "";
+    const urlIndex = value.indexOf("url(");
+    if(urlIndex < 0) return "";
+    const start = urlIndex + 4;
+    const end = value.lastIndexOf(")");
+    if(end <= start) return "";
+    let inner = value.slice(start, end).trim();
+    if((inner.startsWith('"') && inner.endsWith('"')) || (inner.startsWith("'") && inner.endsWith("'"))){
+      inner = inner.slice(1, -1).trim();
+    }
+    return inner;
+  }
+
+  function readElementMaskStyle(el){
+    let maskValue = el?.style?.maskImage || el?.style?.webkitMaskImage || "";
+    let maskMode = el?.style?.maskMode || el?.style?.webkitMaskMode || "";
+    try{
+      if(!maskValue || maskValue === "none"){
+        const cs = getComputedStyle(el);
+        maskValue = cs.maskImage || cs.webkitMaskImage || maskValue;
+        maskMode = cs.maskMode || cs.webkitMaskMode || maskMode;
+      }
+    }catch(_){ }
+    return {
+      maskValue: String(maskValue || ""),
+      maskMode: String(maskMode || "luminance")
+    };
+  }
+
+  async function buildElementMaskCanvas(maskedEl, w, h){
+    if(!(maskedEl instanceof HTMLElement)) return null;
+
+    const localMaskCanvas = document.createElement("canvas");
+    localMaskCanvas.width = w;
+    localMaskCanvas.height = h;
+    const localMaskCtx = localMaskCanvas.getContext("2d", { willReadFrequently: true });
+    if(!localMaskCtx) return null;
+    localMaskCtx.clearRect(0, 0, w, h);
+
+    let drew = false;
+    const shapeMeta = resolveMaskMetaFromEl(maskedEl);
+    if(shapeMeta && drawShapeMaskToContext(localMaskCtx, shapeMeta)){
+      drew = true;
+    }
+
+    const { maskValue, maskMode } = readElementMaskStyle(maskedEl);
+    const maskUrl = extractMaskUrlFromValue(maskValue);
+    if(maskUrl){
+      const maskImg = await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        setTimeout(() => resolve(null), 3000);
+        img.src = maskUrl;
+      });
+      if(maskImg && maskImg.naturalWidth > 0){
+        const cssMaskCanvas = document.createElement("canvas");
+        cssMaskCanvas.width = w;
+        cssMaskCanvas.height = h;
+        const cssMaskCtx = cssMaskCanvas.getContext("2d", { willReadFrequently: true });
+        if(cssMaskCtx){
+          cssMaskCtx.clearRect(0, 0, w, h);
+          cssMaskCtx.drawImage(maskImg, 0, 0, w, h);
+
+          if(String(maskMode || "luminance").toLowerCase() !== "alpha"){
+            const imgData = cssMaskCtx.getImageData(0, 0, w, h);
+            const d = imgData.data;
+            for(let i = 0; i < d.length; i += 4){
+              const lum = Math.round((0.2126 * d[i]) + (0.7152 * d[i + 1]) + (0.0722 * d[i + 2]));
+              d[i] = 255;
+              d[i + 1] = 255;
+              d[i + 2] = 255;
+              d[i + 3] = lum;
+            }
+            cssMaskCtx.putImageData(imgData, 0, 0);
+          }
+
+          localMaskCtx.drawImage(cssMaskCanvas, 0, 0);
+          drew = true;
+        }
+      }
+    }
+
+    return drew && canvasHasOpaquePixels(localMaskCanvas) ? localMaskCanvas : null;
+  }
+
   async function buildLuminanceMaskCanvas(sourceRoot, w, h){
     if(!(sourceRoot instanceof HTMLElement)) return null;
-
-    const extractMaskUrl = (rawValue) => {
-      const value = String(rawValue || "").trim();
-      if(!value || value === "none") return "";
-      const urlIndex = value.indexOf("url(");
-      if(urlIndex < 0) return "";
-      const start = urlIndex + 4;
-      const end = value.lastIndexOf(")");
-      if(end <= start) return "";
-      let inner = value.slice(start, end).trim();
-      if((inner.startsWith('"') && inner.endsWith('"')) || (inner.startsWith("'") && inner.endsWith("'"))){
-        inner = inner.slice(1, -1).trim();
-      }
-      return inner;
-    };
 
     const combinedMaskCanvas = document.createElement("canvas");
     combinedMaskCanvas.width = w;
@@ -2447,17 +2641,9 @@ utilsApi.initProjectUtils();
         continue;
       }
 
-      let maskValue = el.style.maskImage || el.style.webkitMaskImage || "";
-      let maskMode = el.style.maskMode || el.style.webkitMaskMode || "";
-      try{
-        if(!maskValue || maskValue === "none"){
-          const cs = getComputedStyle(el);
-          maskValue = cs.maskImage || cs.webkitMaskImage || maskValue;
-          maskMode = cs.maskMode || cs.webkitMaskMode || maskMode;
-        }
-      }catch(_){ }
+      const { maskValue, maskMode } = readElementMaskStyle(el);
 
-      const maskUrl = extractMaskUrl(maskValue);
+      const maskUrl = extractMaskUrlFromValue(maskValue);
       if(!maskUrl || !/^data:/i.test(maskUrl)) continue;
 
       const maskImg = await new Promise(resolve => {
@@ -2496,27 +2682,127 @@ utilsApi.initProjectUtils();
   }
 
   async function bakeMaskedElementsForHtml2canvas(rootEl, html2canvasFn){
+    const ENABLE_EXPERIMENTAL_MASK_BAKE = false;
+    if(!ENABLE_EXPERIMENTAL_MASK_BAKE) return false;
     if(!(rootEl instanceof HTMLElement) || typeof html2canvasFn !== "function") return false;
 
-    const maskedEls = Array.from(rootEl.querySelectorAll("[data-mask-shape], [data-mask-path-data]"));
+    const maskedEls = [rootEl, ...Array.from(rootEl.querySelectorAll("*"))].filter(el => {
+      if(!(el instanceof HTMLElement)) return false;
+      if(resolveMaskMetaFromEl(el)) return true;
+      const { maskValue } = readElementMaskStyle(el);
+      return Boolean(maskValue && maskValue !== "none" && extractMaskUrlFromValue(maskValue));
+    });
     if(!maskedEls.length) return false;
-
     let bakedAny = false;
     for(const maskedEl of maskedEls){
       if(!(maskedEl instanceof HTMLElement)) continue;
-      const shapeMeta = resolveMaskMetaFromEl(maskedEl);
-      if(!shapeMeta) continue;
+      let hasCssMaskImage = false;
+      try{
+        const inlineMask = (maskedEl.style.maskImage && maskedEl.style.maskImage !== "none")
+          || (maskedEl.style.webkitMaskImage && maskedEl.style.webkitMaskImage !== "none");
+        if(inlineMask){
+          hasCssMaskImage = true;
+        }else{
+          const cs = getComputedStyle(maskedEl);
+          hasCssMaskImage = Boolean(
+            (cs.maskImage && cs.maskImage !== "none")
+            || (cs.webkitMaskImage && cs.webkitMaskImage !== "none")
+          );
+        }
+      }catch(_){ }
+      if(!hasCssMaskImage) continue;
 
       const elemW = Math.max(1, Math.round(maskedEl.clientWidth || rootEl.clientWidth || previewBase?.w || 1280));
       const elemH = Math.max(1, Math.round(maskedEl.clientHeight || rootEl.clientHeight || previewBase?.h || 720));
-      const localMaskCanvas = document.createElement("canvas");
-      localMaskCanvas.width = elemW;
-      localMaskCanvas.height = elemH;
-      const localMaskCtx = localMaskCanvas.getContext("2d", { willReadFrequently: true });
-      if(!localMaskCtx) continue;
-      if(!drawShapeMaskToContext(localMaskCtx, shapeMeta) || !canvasHasOpaquePixels(localMaskCanvas)) continue;
+      const localMaskCanvas = await buildElementMaskCanvas(maskedEl, elemW, elemH);
+      if(!localMaskCanvas) continue;
 
       let contentCanvas = null;
+      const allImgs = Array.from(maskedEl.querySelectorAll("img"));
+      const sourceImgEl = allImgs.find(img => img instanceof HTMLImageElement && img.naturalWidth > 0) || allImgs[0] || null;
+      const nonImageLeafTextEls = Array.from(maskedEl.querySelectorAll("*"))
+        .filter(el => el instanceof HTMLElement)
+        .filter(el => el.children.length === 0)
+        .filter(el => el.tagName.toLowerCase() !== "img")
+        .filter(el => !["br", "hr"].includes(el.tagName.toLowerCase()))
+        .filter(el => {
+          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+          return text.length > 0;
+        });
+      const hasMeaningfulNonImageText = nonImageLeafTextEls.length > 0;
+      const hasComplexVisuals = Boolean(maskedEl.querySelector("canvas, svg, video"));
+      const canUseDeterministicImageBake = Boolean(
+        sourceImgEl
+        && allImgs.length === 1
+        && sourceImgEl.naturalWidth > 0
+        && !hasMeaningfulNonImageText
+        && !hasComplexVisuals
+      );
+
+      if(canUseDeterministicImageBake){
+        const imgCs = getComputedStyle(sourceImgEl);
+        const boundId = String(sourceImgEl.dataset.boundId || "");
+        const boundNode = boundId ? state.nodes.get(boundId) : null;
+        const nodeParams = boundNode?.type === "Image" ? (boundNode.params || {}) : null;
+
+        const ix = Number.isFinite(Number(nodeParams?.x))
+          ? Number(nodeParams.x)
+          : (Number.parseFloat(sourceImgEl.style.left || imgCs.left || "0") || 0);
+        const iy = Number.isFinite(Number(nodeParams?.y))
+          ? Number(nodeParams.y)
+          : (Number.parseFloat(sourceImgEl.style.top || imgCs.top || "0") || 0);
+        const iw = Math.max(1,
+          Number.isFinite(Number(nodeParams?.width))
+            ? Number(nodeParams.width)
+            : (Number.parseFloat(sourceImgEl.style.width || imgCs.width || "0") || sourceImgEl.clientWidth || elemW)
+        );
+        const ih = Math.max(1,
+          Number.isFinite(Number(nodeParams?.height))
+            ? Number(nodeParams.height)
+            : (Number.parseFloat(sourceImgEl.style.height || imgCs.height || "0") || sourceImgEl.clientHeight || elemH)
+        );
+        const fit = String(nodeParams?.fit || imgCs.objectFit || sourceImgEl.style.objectFit || "contain").trim().toLowerCase() || "contain";
+        const posRaw = String(imgCs.objectPosition || sourceImgEl.style.objectPosition || "50% 50%");
+        const opacity = Math.max(0, Math.min(1,
+          Number.isFinite(Number(nodeParams?.opacity))
+            ? (Number(nodeParams.opacity) / 100)
+            : Number(imgCs.opacity || sourceImgEl.style.opacity || 1)
+        ));
+        const sw = Math.max(1, sourceImgEl.naturalWidth || sourceImgEl.width || iw);
+        const sh = Math.max(1, sourceImgEl.naturalHeight || sourceImgEl.height || ih);
+
+        const deterministicCanvas = document.createElement("canvas");
+        deterministicCanvas.width = elemW;
+        deterministicCanvas.height = elemH;
+        const dctx = deterministicCanvas.getContext("2d");
+        if(dctx){
+          dctx.clearRect(0, 0, elemW, elemH);
+          dctx.save();
+          dctx.globalAlpha = opacity;
+          if(fit === "fill"){
+            dctx.drawImage(sourceImgEl, ix, iy, iw, ih);
+          }else{
+            const scale = fit === "cover"
+              ? Math.max(iw / sw, ih / sh)
+              : Math.min(iw / sw, ih / sh);
+            const dw = sw * scale;
+            const dh = sh * scale;
+            const freeSpaceX = iw - dw;
+            const freeSpaceY = ih - dh;
+            const anchor = parseObjectPosition(posRaw, freeSpaceX, freeSpaceY);
+            const dx = ix + (freeSpaceX * anchor.x);
+            const dy = iy + (freeSpaceY * anchor.y);
+            dctx.beginPath();
+            dctx.rect(ix, iy, iw, ih);
+            dctx.clip();
+            dctx.drawImage(sourceImgEl, dx, dy, dw, dh);
+          }
+          dctx.restore();
+          contentCanvas = deterministicCanvas;
+        }
+      }
+
+      if(!contentCanvas){
       const isolatedWrap = document.createElement("div");
       isolatedWrap.style.position = "fixed";
       isolatedWrap.style.left = "-200vw";
@@ -2553,6 +2839,7 @@ utilsApi.initProjectUtils();
         isolatedClone.style.maskMode = "alpha";
         isolatedClone.style.webkitMaskMode = "alpha";
 
+        await bakeCloneImagesForCapture(isolatedClone);
         await waitForRenderableImages(isolatedWrap, 1200);
 
         contentCanvas = await html2canvasFn(isolatedWrap, {
@@ -2575,6 +2862,7 @@ utilsApi.initProjectUtils();
       }finally{
         document.body.removeChild(isolatedWrap);
       }
+      }
 
       if(!contentCanvas) continue;
 
@@ -2591,6 +2879,7 @@ utilsApi.initProjectUtils();
       bakedCtx.globalCompositeOperation = "source-over";
 
       const bakedUrl = bakedCanvas.toDataURL("image/png");
+
       maskedEl.innerHTML = "";
       maskedEl.style.maskImage = "none";
       maskedEl.style.webkitMaskImage = "none";
@@ -2602,10 +2891,11 @@ utilsApi.initProjectUtils();
       bakedImg.alt = "";
       bakedImg.draggable = false;
       bakedImg.style.position = "absolute";
-      bakedImg.style.inset = "0";
-      bakedImg.style.width = "100%";
-      bakedImg.style.height = "100%";
-      bakedImg.style.objectFit = "fill";
+      bakedImg.style.left = "0";
+      bakedImg.style.top = "0";
+      bakedImg.style.width = `${elemW}px`;
+      bakedImg.style.height = `${elemH}px`;
+      bakedImg.style.objectFit = "none";
       bakedImg.style.pointerEvents = "none";
       maskedEl.appendChild(bakedImg);
       bakedAny = true;
@@ -5001,8 +5291,17 @@ async function evaluate(){
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     let capturedCanvas = null;
+    const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+    const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+    const hasImagesInScene = renderRoot.querySelector("img") !== null;
+    const premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
+      ? await buildLuminanceMaskCanvas(renderRoot, w, h)
+      : null;
     try{
-      capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, sceneHasCssMask(renderRoot));
+      capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
+      if(!capturedCanvas){
+        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
+      }
     }catch(err){
       console.warn("exportCanvasWithBlend capture failed", err);
     }
@@ -5025,7 +5324,7 @@ async function evaluate(){
       exportCtx.fillStyle = "#000000";
       exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     }
-    exportCtx.drawImage(capturedCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    drawCanvasPreservingAspect(exportCtx, capturedCanvas, exportCanvas.width, exportCanvas.height);
 
     exportCanvas.toBlob(blob => {
       if(!blob){
@@ -5162,6 +5461,28 @@ async function evaluate(){
     if(fillEl) fillEl.style.width = `${pct}%`;
   }
 
+  function drawCanvasPreservingAspect(ctx, srcCanvas, targetW, targetH){
+    if(!ctx || !srcCanvas) return;
+    const srcW = Math.max(1, Number(srcCanvas.width) || 0);
+    const srcH = Math.max(1, Number(srcCanvas.height) || 0);
+    const dstW = Math.max(1, Number(targetW) || 0);
+    const dstH = Math.max(1, Number(targetH) || 0);
+
+    const srcRatio = srcW / srcH;
+    const dstRatio = dstW / dstH;
+    if(Math.abs(srcRatio - dstRatio) < 0.001){
+      ctx.drawImage(srcCanvas, 0, 0, dstW, dstH);
+      return;
+    }
+
+    const scale = Math.min(dstW / srcW, dstH / srcH);
+    const drawW = Math.max(1, Math.round(srcW * scale));
+    const drawH = Math.max(1, Math.round(srcH * scale));
+    const dx = Math.round((dstW - drawW) / 2);
+    const dy = Math.round((dstH - drawH) / 2);
+    ctx.drawImage(srcCanvas, dx, dy, drawW, drawH);
+  }
+
   async function dataUrlToCanvas(dataUrl, w, h){
     if(!dataUrl) return null;
     return await new Promise((resolve) => {
@@ -5232,7 +5553,8 @@ async function evaluate(){
   // premaskCanvas: optional pre-computed luminance mask canvas (alpha-mode) to apply after capture.
   // foreignObjectRendering is always false here so html2canvas uses its own DOM renderer
   // which correctly handles <img> elements; CSS mask-image is applied via premaskCanvas instead.
-  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject, premaskCanvas = null){
+  async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject, premaskCanvas = null, options = null){
+    const disableBakeMaskedElements = Boolean(options?.disableBakeMaskedElements);
     const tmpWrap = document.createElement("div");
     tmpWrap.style.position = "fixed";
     tmpWrap.style.left = "0";
@@ -5245,14 +5567,17 @@ async function evaluate(){
 
     const clone = renderRoot.cloneNode(true);
     clone.style.position = "absolute";
-    clone.style.inset = "0";
+    clone.style.left = "0";
+    clone.style.top = "0";
     clone.style.width = `${w}px`;
     clone.style.height = `${h}px`;
     tmpWrap.appendChild(clone);
     document.body.appendChild(tmpWrap);
 
     await waitForRenderableImages(tmpWrap, 1200);
-    const bakedMaskedEls = await bakeMaskedElementsForHtml2canvas(tmpWrap, html2canvasFn);
+    const bakedMaskedEls = disableBakeMaskedElements
+      ? false
+      : await bakeMaskedElementsForHtml2canvas(tmpWrap, html2canvasFn);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     try{
@@ -5374,7 +5699,7 @@ async function evaluate(){
 
         frameCtx.fillStyle = "#000000";
         frameCtx.fillRect(0, 0, w, h);
-        frameCtx.drawImage(capturedCanvas, 0, 0, w, h);
+        drawCanvasPreservingAspect(frameCtx, capturedCanvas, w, h);
 
         const frame = new VideoFrame(frameCanvas, {
           timestamp: frameIdx * frameDurationUs,
