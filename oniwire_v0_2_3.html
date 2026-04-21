@@ -146,7 +146,7 @@
               - You can pan and scroll for viewport Control. 
               - More is coming. 
             </span>
-            <span class="pill">Preview: Wheel to zoom � Drag to pan when zoomed</span>
+            <span class="pill">Preview: Wheel to zoom &middot; Drag to pan when zoomed</span>
           </div>
         </div>
         
@@ -158,7 +158,7 @@
       <div class="hdr">
         <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
-          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">?</button>
+          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">&#x2922;</button>
         </div>
       </div>
       <div class="content" id="inspectorBody">
@@ -214,10 +214,10 @@
 
     <!-- PLAYBACK CONTROL BAR -->
     <div id="playbackBar" class="playbackBar">
-      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">?</button>
-      <button id="pbPlayPause" class="pbBtn" title="Play">?</button>
-      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">?</button>
-      <button id="pbNextFrame" class="pbBtn" title="Next frame">?</button>
+      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">&#x23EE;</button>
+      <button id="pbPlayPause" class="pbBtn" title="Play">&#x23F5;</button>
+      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">&#x23F9;</button>
+      <button id="pbNextFrame" class="pbBtn" title="Next frame">&#x23ED;</button>
       <input id="pbScrub" class="pbScrub" type="range" min="0" max="10000" value="0" step="1">
       <span id="pbTimeDisplay" class="pbTimeDisplay">0.00 s</span>
       <span class="pbSep">/</span>
@@ -383,7 +383,7 @@
     const isExpanded = Boolean(expanded);
     appEl?.classList.toggle("inspectorExpanded", isExpanded);
     if(inspectorExpandBtn){
-      inspectorExpandBtn.textContent = isExpanded ? "?" : "?";
+      inspectorExpandBtn.textContent = isExpanded ? "\u2921" : "\u2922";
       inspectorExpandBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
       inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
       inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
@@ -4429,15 +4429,15 @@ async function evaluate(){
       const listHtml = paths.map((path, i) => {
         const isActive = i === activeIdx;
         return `<div class="smItem${isActive ? " smActive" : ""}" data-sm-idx="${i}">
-          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "?" : "?"}</button>
+          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "&#9679;" : "&#9675;"}</button>
           <span class="smLabel">${escapeAttr(path.name || ("Path " + String(i + 1).padStart(2, "0")))}</span>
-          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">?</button>
+          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">&#10005;</button>
         </div>`;
       }).join("");
 
       const propsHtml = paths.length ? `
         <div class="smProps">
-          <div class="smPropsTitle">? ${escapeAttr(ap.name || "")}</div>
+          <div class="smPropsTitle">&#x25B8; ${escapeAttr(ap.name || "")}</div>
           <div class="row"><label>Name</label><input type="text" data-sm-prop="name" value="${escapeAttr(ap.name || "")}" placeholder="Path name" /></div>
           <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
@@ -4448,13 +4448,13 @@ async function evaluate(){
           <div style="font-size:11px; color:#9db4d7; margin-top:4px; line-height:1.45;">
             Draw and edit bezier paths for custom shapes.<br>
             Shortcuts:<br>
-            � Left-click: add point / select point<br>
-            � Shift-click / Shift-drag: add to selection (point or box)<br>
-            � Ctrl-click selected point: deselect point<br>
-            � Alt-drag inside bounds: move entire shape<br>
-            � Alt-click handle: toggle straight/custom handle
-            � Esc: clear group selection
-            � Right-click point: delete point
+            &bull; Left-click: add point / select point<br>
+            &bull; Shift-click / Shift-drag: add to selection (point or box)<br>
+            &bull; Ctrl-click selected point: deselect point<br>
+            &bull; Alt-drag inside bounds: move entire shape<br>
+            &bull; Alt-click handle: toggle straight/custom handle<br>
+            &bull; Esc: clear group selection<br>
+            &bull; Right-click point: delete point
           </div>
         </div>
       ` : "";
@@ -5245,7 +5245,7 @@ async function evaluate(){
             const nextName = String(ap.name || '').trim() || 'Untitled Path';
             ap.name = nextName;
             const titleEl = sm.querySelector('.smPropsTitle');
-            if(titleEl) titleEl.textContent = `? ${nextName}`;
+            if(titleEl) titleEl.textContent = `\u25B8 ${nextName}`;
             const activeLabel = sm.querySelector('.smItem.smActive .smLabel');
             if(activeLabel) activeLabel.textContent = nextName;
           }

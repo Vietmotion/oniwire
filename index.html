@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -113,6 +113,7 @@
             </select>
           </label>
           <button id="btnSafeZone">Safe Zone</button>
+          <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask.">Mask Debug</button>
         </div>
         <button id="btnTips" class="active" style="margin-left:auto;" aria-pressed="true">Tips</button>
       </div>
@@ -145,7 +146,7 @@
               - You can pan and scroll for viewport Control. 
               - More is coming. 
             </span>
-            <span class="pill">Editor: Space+Drag to pan - Wheel to zoom</span>
+            <span class="pill">Preview: Wheel to zoom &middot; Drag to pan when zoomed</span>
           </div>
         </div>
         
@@ -157,7 +158,7 @@
       <div class="hdr">
         <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
-          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">?</button>
+          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">&#x2922;</button>
         </div>
       </div>
       <div class="content" id="inspectorBody">
@@ -213,10 +214,10 @@
 
     <!-- PLAYBACK CONTROL BAR -->
     <div id="playbackBar" class="playbackBar">
-      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">?</button>
-      <button id="pbPlayPause" class="pbBtn" title="Play">?</button>
-      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">?</button>
-      <button id="pbNextFrame" class="pbBtn" title="Next frame">?</button>
+      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">&#x23EE;</button>
+      <button id="pbPlayPause" class="pbBtn" title="Play">&#x23F5;</button>
+      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">&#x23F9;</button>
+      <button id="pbNextFrame" class="pbBtn" title="Next frame">&#x23ED;</button>
       <input id="pbScrub" class="pbScrub" type="range" min="0" max="10000" value="0" step="1">
       <span id="pbTimeDisplay" class="pbTimeDisplay">0.00 s</span>
       <span class="pbSep">/</span>
@@ -382,7 +383,7 @@
     const isExpanded = Boolean(expanded);
     appEl?.classList.toggle("inspectorExpanded", isExpanded);
     if(inspectorExpandBtn){
-      inspectorExpandBtn.textContent = isExpanded ? "?" : "?";
+      inspectorExpandBtn.textContent = isExpanded ? "\u2921" : "\u2922";
       inspectorExpandBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
       inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
       inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
@@ -507,6 +508,7 @@
   const previewInner = document.getElementById("previewInner"); // or previewScale if you kept that id
   const safeZoneOverlay = document.getElementById("safeZoneOverlay");
   const safeZoneBtn = document.getElementById("btnSafeZone");
+  const maskDebugBtn = document.getElementById("btnMaskDebug");
   const tipsBtn = document.getElementById("btnTips");
   const previewLayout = document.querySelector(".previewLayout");
   const previewNotes = document.querySelector(".previewNotes");
@@ -546,6 +548,8 @@
   }
 
   let previewBase = { w: 1280, h: 720 };
+  const PREVIEW_ZOOM_MIN = 0.5;
+  const PREVIEW_ZOOM_MAX = 3;
 
   let previewZoomValue = Number(previewZoomSel.value) || 1;
   let previewScale = 1;
@@ -1317,6 +1321,7 @@
 
   function applyPreviewTransform(){
     previewZoomValue = Number(previewZoomSel.value) || 1;
+    previewZoomValue = Math.max(PREVIEW_ZOOM_MIN, Math.min(PREVIEW_ZOOM_MAX, previewZoomValue));
 
     const pannable = previewZoomValue > 1;
     previewViewport.classList.toggle("pannable", pannable);
@@ -1348,11 +1353,80 @@
     syncLayoutSplitters();
   }
 
+  function syncPreviewZoomSelect(value){
+    const clamped = Math.max(PREVIEW_ZOOM_MIN, Math.min(PREVIEW_ZOOM_MAX, Number(value) || 1));
+    const preset = Array.from(previewZoomSel.options).find(opt => !opt.dataset.customZoom && Math.abs((Number(opt.value) || 0) - clamped) < 0.0001);
+    let customOpt = previewZoomSel.querySelector("option[data-custom-zoom='true']");
+
+    if(preset){
+      if(customOpt) customOpt.remove();
+      previewZoomSel.value = preset.value;
+      return;
+    }
+
+    if(!customOpt){
+      customOpt = document.createElement("option");
+      customOpt.dataset.customZoom = "true";
+      previewZoomSel.appendChild(customOpt);
+    }
+
+    const valueStr = String(Number(clamped.toFixed(4)));
+    customOpt.value = valueStr;
+    customOpt.textContent = `${Math.round(clamped * 100)}%`;
+    previewZoomSel.value = valueStr;
+  }
+
   previewZoomSel.addEventListener("change", applyPreviewTransform);
   applyPreviewTransform();
 
+  previewViewport.addEventListener("wheel", (e) => {
+    e.preventDefault();
+
+    const oldZoom = previewZoomValue;
+    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
+    const nextZoom = Math.max(PREVIEW_ZOOM_MIN, Math.min(PREVIEW_ZOOM_MAX, oldZoom * zoomFactor));
+    if(Math.abs(nextZoom - oldZoom) < 0.0001) return;
+
+    const rect = previewViewport.getBoundingClientRect();
+    const vw = previewViewport.clientWidth;
+    const vh = previewViewport.clientHeight;
+    if(vw <= 0 || vh <= 0) return;
+
+    const fitScale = Math.min(vw / previewBase.w, vh / previewBase.h);
+    const oldScale = fitScale * oldZoom;
+    const newScale = fitScale * nextZoom;
+    if(oldScale <= 0 || newScale <= 0) return;
+
+    const cursorX = e.clientX - rect.left;
+    const cursorY = e.clientY - rect.top;
+    const oldOffsetX = ((vw - (previewBase.w * oldScale)) / 2) + pan.x;
+    const oldOffsetY = ((vh - (previewBase.h * oldScale)) / 2) + pan.y;
+    const worldX = (cursorX - oldOffsetX) / oldScale;
+    const worldY = (cursorY - oldOffsetY) / oldScale;
+    const newOffsetX = (vw - (previewBase.w * newScale)) / 2;
+    const newOffsetY = (vh - (previewBase.h * newScale)) / 2;
+
+    pan.x = cursorX - newOffsetX - (worldX * newScale);
+    pan.y = cursorY - newOffsetY - (worldY * newScale);
+
+    syncPreviewZoomSelect(nextZoom);
+    applyPreviewTransform();
+  }, { passive: false });
+
   previewViewport.addEventListener("pointerdown", (e) => {
     const selectedNode = state.selected ? state.nodes.get(state.selected) : null;
+
+    if(e.button === 0 && state.spaceDown){
+      if(previewZoomValue <= 1) return;
+      isPreviewPanning = true;
+      previewViewport.classList.add("panning");
+      previewViewport.setPointerCapture(e.pointerId);
+      panStart.x = e.clientX;
+      panStart.y = e.clientY;
+      panBase.x = pan.x;
+      panBase.y = pan.y;
+      return;
+    }
 
     if(selectedNode && selectedNode.type === "Pen" && previewInner.contains(e.target)){
       const canvasPt = canvasPointFromPointer(e);
@@ -4355,15 +4429,15 @@ async function evaluate(){
       const listHtml = paths.map((path, i) => {
         const isActive = i === activeIdx;
         return `<div class="smItem${isActive ? " smActive" : ""}" data-sm-idx="${i}">
-          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "?" : "?"}</button>
+          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "&#9679;" : "&#9675;"}</button>
           <span class="smLabel">${escapeAttr(path.name || ("Path " + String(i + 1).padStart(2, "0")))}</span>
-          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">?</button>
+          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">&#10005;</button>
         </div>`;
       }).join("");
 
       const propsHtml = paths.length ? `
         <div class="smProps">
-          <div class="smPropsTitle">? ${escapeAttr(ap.name || "")}</div>
+          <div class="smPropsTitle">&#x25B8; ${escapeAttr(ap.name || "")}</div>
           <div class="row"><label>Name</label><input type="text" data-sm-prop="name" value="${escapeAttr(ap.name || "")}" placeholder="Path name" /></div>
           <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
@@ -4374,13 +4448,13 @@ async function evaluate(){
           <div style="font-size:11px; color:#9db4d7; margin-top:4px; line-height:1.45;">
             Draw and edit bezier paths for custom shapes.<br>
             Shortcuts:<br>
-            � Left-click: add point / select point<br>
-            � Shift-click / Shift-drag: add to selection (point or box)<br>
-            � Ctrl-click selected point: deselect point<br>
-            � Alt-drag inside bounds: move entire shape<br>
-            � Alt-click handle: toggle straight/custom handle
-            � Esc: clear group selection
-            � Right-click point: delete point
+            &bull; Left-click: add point / select point<br>
+            &bull; Shift-click / Shift-drag: add to selection (point or box)<br>
+            &bull; Ctrl-click selected point: deselect point<br>
+            &bull; Alt-drag inside bounds: move entire shape<br>
+            &bull; Alt-click handle: toggle straight/custom handle<br>
+            &bull; Esc: clear group selection<br>
+            &bull; Right-click point: delete point
           </div>
         </div>
       ` : "";
@@ -5171,7 +5245,7 @@ async function evaluate(){
             const nextName = String(ap.name || '').trim() || 'Untitled Path';
             ap.name = nextName;
             const titleEl = sm.querySelector('.smPropsTitle');
-            if(titleEl) titleEl.textContent = `? ${nextName}`;
+            if(titleEl) titleEl.textContent = `\u25B8 ${nextName}`;
             const activeLabel = sm.querySelector('.smItem.smActive .smLabel');
             if(activeLabel) activeLabel.textContent = nextName;
           }
@@ -5276,6 +5350,109 @@ async function evaluate(){
     });
 
     return html2CanvasLoadPromise;
+  }
+
+  async function showMaskDebugOverlay(){
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
+
+    // Remove any existing debug overlay
+    document.getElementById("maskDebugOverlay")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "maskDebugOverlay";
+    overlay.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:99999",
+      "background:rgba(0,0,0,0.82)",
+      "display:flex",
+      "flex-direction:column",
+      "align-items:center",
+      "justify-content:center",
+      "gap:14px",
+      "cursor:pointer"
+    ].join(";");
+
+    const label = document.createElement("div");
+    label.style.cssText = "color:#fff;font-family:monospace;font-size:13px;text-align:center;line-height:1.6;";
+    label.textContent = "Building premask canvas\u2026";
+    overlay.appendChild(label);
+    document.body.appendChild(overlay);
+
+    const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+    const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+    const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
+
+    let info = [];
+    info.push("hasCssMask: " + hasCssMaskInScene);
+    info.push("hasMetaMask: " + hasMetaMaskInScene);
+
+    // Enumerate which elements have masks
+    const all = [renderRoot, ...renderRoot.querySelectorAll("*")];
+    const maskedEls = all.filter(el => {
+      if(!(el instanceof HTMLElement)) return false;
+      const hasMeta = Boolean(el.dataset?.maskShape || el.dataset?.maskPathData);
+      if(hasMeta) return true;
+      const inlineMask = (el.style.maskImage && el.style.maskImage !== "none")
+        || (el.style.webkitMaskImage && el.style.webkitMaskImage !== "none");
+      return inlineMask;
+    });
+    info.push("masked elements found: " + maskedEls.length);
+    maskedEls.forEach((el, i) => {
+      const tag = el.tagName.toLowerCase();
+      const maskImg = el.style.maskImage || el.style.webkitMaskImage || "(none)";
+      const hasMeta = Boolean(el.dataset?.maskShape || el.dataset?.maskPathData);
+      info.push("  [" + i + "] <" + tag + "> maskImage=" + maskImg.slice(0,60) + (maskImg.length > 60 ? "\u2026" : "") + " meta=" + hasMeta);
+    });
+
+    let premaskCanvas = null;
+    if(hasMaskInScene){
+      premaskCanvas = await buildLuminanceMaskCanvas(renderRoot, w, h);
+    }
+
+    info.push("");
+    info.push("premaskCanvas: " + (premaskCanvas ? "built (" + premaskCanvas.width + "x" + premaskCanvas.height + ")" : "null"));
+    if(premaskCanvas){
+      // Check how many opaque pixels
+      const ctx = premaskCanvas.getContext("2d", { willReadFrequently: true });
+      const data = ctx.getImageData(0, 0, premaskCanvas.width, premaskCanvas.height).data;
+      let opaqueCount = 0;
+      for(let i = 3; i < data.length; i += 4) if(data[i] > 0) opaqueCount++;
+      const totalPixels = premaskCanvas.width * premaskCanvas.height;
+      info.push("opaque pixels: " + opaqueCount + " / " + totalPixels + " (" + Math.round(opaqueCount / totalPixels * 100) + "%)");
+    }
+
+    label.textContent = info.join("\n");
+
+    if(premaskCanvas){
+      const displayCanvas = document.createElement("canvas");
+      const maxW = Math.min(w, window.innerWidth - 80);
+      const scale = maxW / w;
+      displayCanvas.width = Math.round(w * scale);
+      displayCanvas.height = Math.round(h * scale);
+      displayCanvas.style.cssText = "border:2px solid #f44;max-width:90vw;max-height:55vh;display:block;background:#111;";
+      const dctx = displayCanvas.getContext("2d");
+      dctx.drawImage(premaskCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      overlay.appendChild(displayCanvas);
+
+      const note = document.createElement("div");
+      note.style.cssText = "color:#aaa;font-family:monospace;font-size:11px;text-align:center;";
+      note.textContent = "White area = visible after mask | Black/transparent = hidden | Click anywhere to close";
+      overlay.appendChild(note);
+    }else{
+      const note = document.createElement("div");
+      note.style.cssText = "color:#f88;font-family:monospace;font-size:12px;text-align:center;";
+      note.textContent = "No premask canvas built. See info above.";
+      overlay.appendChild(note);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.style.cssText = "margin-top:8px;padding:8px 28px;font-size:14px;";
+    closeBtn.addEventListener("click", () => overlay.remove(), { once: true });
+    overlay.appendChild(closeBtn);
+    overlay.addEventListener("click", (e) => { if(e.target === overlay) overlay.remove(); }, { once: true });
   }
 
   async function exportCanvasWithBlend(format){
@@ -6443,6 +6620,7 @@ function loadGraph(data){
 
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
+  maskDebugBtn?.addEventListener("click", () => showMaskDebugOverlay());
   buildHelpNavigation();
 
   helpBtn?.addEventListener("click", () => openHelp(activeHelpPage));
