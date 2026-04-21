@@ -658,6 +658,91 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		};
 	}
 
+	function renderPenAsImageAsset(penNode, canvasW, canvasH){
+		const p = penNode?.params || {};
+		const paths = Array.isArray(p.paths) ? p.paths : [];
+		if(!paths.length) return null;
+
+		const cw = Math.max(1, Math.round(Number(canvasW) || 1280));
+		const ch = Math.max(1, Math.round(Number(canvasH) || 720));
+		const canvas = document.createElement("canvas");
+		canvas.width = cw;
+		canvas.height = ch;
+		const ctx = canvas.getContext("2d");
+		if(!ctx) return null;
+		ctx.clearRect(0, 0, cw, ch);
+
+		const buildPath = (points, closed) => {
+			const pts = Array.isArray(points) ? points : [];
+			if(!pts.length) return;
+			const first = pts[0];
+			ctx.beginPath();
+			ctx.moveTo(Number(first.x) || 0, Number(first.y) || 0);
+			for(let i = 1; i < pts.length; i++){
+				const prev = pts[i - 1];
+				const curr = pts[i];
+				ctx.bezierCurveTo(
+					Number(prev.outX ?? prev.x) || 0,
+					Number(prev.outY ?? prev.y) || 0,
+					Number(curr.inX ?? curr.x) || 0,
+					Number(curr.inY ?? curr.y) || 0,
+					Number(curr.x) || 0,
+					Number(curr.y) || 0
+				);
+			}
+			if(closed && pts.length > 1){
+				const last = pts[pts.length - 1];
+				ctx.bezierCurveTo(
+					Number(last.outX ?? last.x) || 0,
+					Number(last.outY ?? last.y) || 0,
+					Number(first.inX ?? first.x) || 0,
+					Number(first.inY ?? first.y) || 0,
+					Number(first.x) || 0,
+					Number(first.y) || 0
+				);
+				ctx.closePath();
+			}
+		};
+
+		for(const path of paths){
+			if(!path || path.visible === false) continue;
+			const points = Array.isArray(path.points) ? path.points : [];
+			if(!points.length) continue;
+			const closed = Boolean(path.closed);
+			buildPath(points, closed);
+
+			const fillOpacity = Math.max(0, Math.min(1, Number(path.fillOpacity) || 0));
+			if(closed && fillOpacity > 0){
+				ctx.globalAlpha = fillOpacity;
+				ctx.fillStyle = String(path.fillColor || "#ffffff");
+				ctx.fill();
+			}
+
+			const strokeOpacity = Math.max(0, Math.min(1, Number(path.strokeOpacity) || 0));
+			const strokeWidth = Math.max(0.1, Number(path.strokeWidth) || 2);
+			if(strokeOpacity > 0 && strokeWidth > 0){
+				ctx.globalAlpha = strokeOpacity;
+				ctx.strokeStyle = String(path.strokeColor || "#ffffff");
+				ctx.lineWidth = strokeWidth;
+				ctx.lineCap = "round";
+				ctx.lineJoin = "round";
+				ctx.stroke();
+			}
+		}
+
+		ctx.globalAlpha = 1;
+		return {
+			dataUrl: canvas.toDataURL("image/png"),
+			assetWidth: cw,
+			assetHeight: ch,
+			anchorX: cw / 2,
+			anchorY: ch / 2,
+			centerX: cw / 2,
+			centerY: ch / 2,
+			bounds: { x: 0, y: 0, width: cw, height: ch }
+		};
+	}
+
 	function buildLottiePayload(name){
 		const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
 		if(!outNode){
@@ -745,7 +830,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			return ["a", "b"];
 		}
 
-		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite"]);
+		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite", "Pen"]);
 		const usedNodeIds = new Set();
 		(function walk(nodeId){
 			const id = String(nodeId || "");
@@ -855,6 +940,14 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				};
 			}
 
+			if(node.type === "Pen"){
+				return {
+					type: "pen",
+					node,
+					transform: accum
+				};
+			}
+
 			if(node.type === "Composite"){
 				const layerPorts = getCompositeLayerPorts(node);
 				const layers = layerPorts
@@ -900,6 +993,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		const textAssetCache = new Map();
 		const shapeAssetCache = new Map();
 		const gradientAssetCache = new Map();
+		const penAssetCache = new Map();
 		function getRenderedTextAsset(textNode, fillSpec){
 			const key = String(textNode?.id || "") + "::" + JSON.stringify(fillSpec || {});
 			if(textAssetCache.has(key)) return textAssetCache.get(key);
@@ -943,6 +1037,14 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				centerY: canvas.height / 2
 			};
 			gradientAssetCache.set(key, rendered);
+			return rendered;
+		}
+
+		function getRenderedPenAsset(penNode){
+			const key = String(penNode?.id || "") + "::" + JSON.stringify(penNode?.params?.paths || []);
+			if(penAssetCache.has(key)) return penAssetCache.get(key);
+			const rendered = renderPenAsImageAsset(penNode, w, h);
+			penAssetCache.set(key, rendered || null);
 			return rendered;
 		}
 
@@ -990,6 +1092,17 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 
 			if(item.type === "text"){
 				const rendered = getRenderedTextAsset(item.node, item.fillSpec);
+				if(!rendered?.bounds) return null;
+				return {
+					minX: Number(rendered.bounds.x || 0) + tx,
+					minY: Number(rendered.bounds.y || 0) + ty,
+					maxX: Number(rendered.bounds.x || 0) + Number(rendered.bounds.width || 0) + tx,
+					maxY: Number(rendered.bounds.y || 0) + Number(rendered.bounds.height || 0) + ty
+				};
+			}
+
+			if(item.type === "pen"){
+				const rendered = getRenderedPenAsset(item.node);
 				if(!rendered?.bounds) return null;
 				return {
 					minX: Number(rendered.bounds.x || 0) + tx,
@@ -1291,6 +1404,53 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				return layer;
 			}
 
+			if(item.type === "pen"){
+				const rendered = getRenderedPenAsset(item.node);
+				if(!rendered || !rendered.dataUrl){
+					toast("Lottie export failed: could not rasterize pen path.");
+					return null;
+				}
+				const assetId = `pen_asset_${item.node.id}`;
+				const penAnchorX = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorX || rendered.anchorX) : rendered.anchorX;
+				const penAnchorY = item.transform?.hasExplicitAnchor ? Number(item.transform.anchorY || rendered.anchorY) : rendered.anchorY;
+				const penPosX = item.transform?.hasExplicitAnchor
+					? penAnchorX + Number(item.transform?.tx || 0)
+					: rendered.centerX + Number(item.transform?.tx || 0);
+				const penPosY = item.transform?.hasExplicitAnchor
+					? penAnchorY + Number(item.transform?.ty || 0)
+					: rendered.centerY + Number(item.transform?.ty || 0);
+
+				if(!sharedAssets.some(a => a.id === assetId)){
+					sharedAssets.push({ id: assetId, w: rendered.assetWidth, h: rendered.assetHeight, u: "", p: rendered.dataUrl, e: 1 });
+				}
+
+				const layer = {
+					ddd: 0,
+					ind,
+					ty: 2,
+					nm: `Pen ${item.node.id}`,
+					refId: assetId,
+					sr: 1,
+					ks: createStaticSpatialTransform(
+						penAnchorX,
+						penAnchorY,
+						penPosX,
+						penPosY,
+						lottieRotation,
+						lottieScale
+					),
+					ao: 0,
+					w: rendered.assetWidth,
+					h: rendered.assetHeight,
+					ip: 0,
+					op: totalFrames,
+					st: 0,
+					bm: 0
+				};
+				applyWiggleMotionPosition(layer, penPosX, penPosY);
+				return layer;
+			}
+
 			return null;
 		}
 
@@ -1403,17 +1563,17 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				const maskInputId = findInput(item.node.id, ["mask"]);
 				if(maskInputId){
 					const maskDecoded = decodeLayer(maskInputId, {
-						tx: 0,
-						ty: 0,
-						scale: 1,
-						rot: 0,
-						anchorX: w / 2,
-						anchorY: h / 2,
-						hasExplicitAnchor: false,
-						motion: null
+						tx: Number(item.transform?.tx || 0),
+						ty: Number(item.transform?.ty || 0),
+						scale: Math.max(0.01, Number(item.transform?.scale || 1)),
+						rot: Number(item.transform?.rot || 0),
+						anchorX: Number(item.transform?.anchorX ?? (w / 2)),
+						anchorY: Number(item.transform?.anchorY ?? (h / 2)),
+						hasExplicitAnchor: Boolean(item.transform?.hasExplicitAnchor),
+						motion: item.transform?.motion || null
 					});
 					const maskLayer = maskDecoded ? buildSingleLayer(maskDecoded, startInd, sharedAssets) : null;
-					const contentBuilt = buildCompositeContent(1);
+					const contentBuilt = buildCompositeContent(startInd + 1);
 					if(maskLayer && contentBuilt.layers.length){
 						const precompId = `composite_precomp_${item.node.id}_${startInd}`;
 						if(!sharedAssets.some(a => a.id === precompId)){

@@ -113,6 +113,7 @@
             </select>
           </label>
           <button id="btnSafeZone">Safe Zone</button>
+          <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask.">Mask Debug</button>
         </div>
         <button id="btnTips" class="active" style="margin-left:auto;" aria-pressed="true">Tips</button>
       </div>
@@ -145,7 +146,7 @@
               - You can pan and scroll for viewport Control. 
               - More is coming. 
             </span>
-            <span class="pill">Preview: Wheel to zoom · Drag to pan when zoomed</span>
+            <span class="pill">Preview: Wheel to zoom � Drag to pan when zoomed</span>
           </div>
         </div>
         
@@ -157,7 +158,7 @@
       <div class="hdr">
         <div class="title">Inspector <span class="pill">Selected</span></div>
         <div class="btns">
-          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">⤢</button>
+          <button id="btnClearSel" aria-pressed="false" aria-label="Expand inspector panel" title="Expand inspector panel">?</button>
         </div>
       </div>
       <div class="content" id="inspectorBody">
@@ -213,10 +214,10 @@
 
     <!-- PLAYBACK CONTROL BAR -->
     <div id="playbackBar" class="playbackBar">
-      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">⏮</button>
-      <button id="pbPlayPause" class="pbBtn" title="Play">⏵</button>
-      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">⏹</button>
-      <button id="pbNextFrame" class="pbBtn" title="Next frame">⏭</button>
+      <button id="pbPrevFrame" class="pbBtn" title="Previous frame">?</button>
+      <button id="pbPlayPause" class="pbBtn" title="Play">?</button>
+      <button id="pbStop" class="pbBtn" title="Stop (reset to 0)">?</button>
+      <button id="pbNextFrame" class="pbBtn" title="Next frame">?</button>
       <input id="pbScrub" class="pbScrub" type="range" min="0" max="10000" value="0" step="1">
       <span id="pbTimeDisplay" class="pbTimeDisplay">0.00 s</span>
       <span class="pbSep">/</span>
@@ -382,7 +383,7 @@
     const isExpanded = Boolean(expanded);
     appEl?.classList.toggle("inspectorExpanded", isExpanded);
     if(inspectorExpandBtn){
-      inspectorExpandBtn.textContent = isExpanded ? "⤡" : "⤢";
+      inspectorExpandBtn.textContent = isExpanded ? "?" : "?";
       inspectorExpandBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
       inspectorExpandBtn.setAttribute("aria-label", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
       inspectorExpandBtn.setAttribute("title", isExpanded ? "Collapse inspector panel" : "Expand inspector panel");
@@ -507,6 +508,7 @@
   const previewInner = document.getElementById("previewInner"); // or previewScale if you kept that id
   const safeZoneOverlay = document.getElementById("safeZoneOverlay");
   const safeZoneBtn = document.getElementById("btnSafeZone");
+  const maskDebugBtn = document.getElementById("btnMaskDebug");
   const tipsBtn = document.getElementById("btnTips");
   const previewLayout = document.querySelector(".previewLayout");
   const previewNotes = document.querySelector(".previewNotes");
@@ -1225,7 +1227,7 @@
         // ghost outline only
         ghosts.push(`<path d="${d}" stroke="rgba(160,200,255,.28)" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/>`);
       } else {
-        // active path — full preview stroke + handles
+        // active path � full preview stroke + handles
         ghosts.push(`<path d="${d}" stroke="rgba(220,235,255,.95)" stroke-width="2.2" fill="${path.closed ? "rgba(140,180,255,.14)" : "rgba(0,0,0,0)"}" />`);
         for(let i = 0; i < ptsCvs.length; i++){
           const p = ptsCvs[i];
@@ -1986,8 +1988,9 @@ utilsApi.initProjectUtils();
     const w = previewBase?.w || 1280;
     const h = previewBase?.h || 720;
 
-    const baseFill = invert ? "white" : "black";
-    const shapeFill = invert ? "black" : "white";
+    // Use alpha-driven fills so CSS masking works consistently across engines.
+    const baseFill = invert ? "rgba(255,255,255,1)" : "rgba(255,255,255,0)";
+    const shapeFill = invert ? "rgba(255,255,255,0)" : "rgba(255,255,255,1)";
     const r = Math.max(width, height) / 2;
 
     let shapeSvg = "";
@@ -2003,8 +2006,10 @@ utilsApi.initProjectUtils();
         const isClosed = path.closed !== false;
         const fill = isClosed && (Number(path.fillOpacity) || 0) > 0 ? shapeFill : "none";
         const stroke = !isClosed && (Number(path.strokeOpacity) || 0) > 0 ? shapeFill : "none";
+        const fillOpacity = Math.max(0, Math.min(1, Number(path.fillOpacity) || 0));
+        const strokeOpacity = Math.max(0, Math.min(1, Number(path.strokeOpacity) || 0));
         const strokeWidth = Math.max(0.1, Number(path.strokeWidth) || 2);
-        return `<path d="${oniwireEscapeAttr(path.d)}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+        return `<path d="${oniwireEscapeAttr(path.d)}" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-opacity="${strokeOpacity}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
       }).join("");
       const scaleTransform = scale !== 1
         ? `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`
@@ -2674,11 +2679,13 @@ utilsApi.initProjectUtils();
             const imgData = cssMaskCtx.getImageData(0, 0, w, h);
             const d = imgData.data;
             for(let i = 0; i < d.length; i += 4){
-              const lum = Math.round((0.2126 * d[i]) + (0.7152 * d[i + 1]) + (0.0722 * d[i + 2]));
+              const srcAlpha = d[i + 3] / 255;
+              const lum = ((0.2126 * d[i]) + (0.7152 * d[i + 1]) + (0.0722 * d[i + 2])) / 255;
+              const outAlpha = Math.round(Math.max(0, Math.min(1, lum * srcAlpha)) * 255);
               d[i] = 255;
               d[i + 1] = 255;
               d[i + 2] = 255;
-              d[i + 3] = lum;
+              d[i + 3] = outAlpha;
             }
             cssMaskCtx.putImageData(imgData, 0, 0);
           }
@@ -2707,54 +2714,60 @@ utilsApi.initProjectUtils();
     for(const el of all){
       if(!(el instanceof HTMLElement)) continue;
 
+      const { maskValue, maskMode } = readElementMaskStyle(el);
+      const maskUrl = extractMaskUrlFromValue(maskValue);
+      let drewCssMask = false;
+
+      if(maskUrl && /^data:/i.test(maskUrl)){
+        const maskImg = await new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => resolve(null);
+          setTimeout(() => resolve(null), 3000);
+          img.src = maskUrl;
+        });
+        if(maskImg && maskImg.naturalWidth){
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = w;
+          maskCanvas.height = h;
+          const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
+          if(maskCtx){
+            maskCtx.drawImage(maskImg, 0, 0, w, h);
+
+            if(String(maskMode || "luminance").toLowerCase() !== "alpha"){
+              const imgData = maskCtx.getImageData(0, 0, w, h);
+              const d = imgData.data;
+              for(let i = 0; i < d.length; i += 4){
+                const srcAlpha = d[i + 3] / 255;
+                const lum = ((0.2126 * d[i]) + (0.7152 * d[i + 1]) + (0.0722 * d[i + 2])) / 255;
+                d[i + 3] = Math.round(Math.max(0, Math.min(1, lum * srcAlpha)) * 255);
+                d[i] = 255;
+                d[i + 1] = 255;
+                d[i + 2] = 255;
+              }
+              maskCtx.putImageData(imgData, 0, 0);
+            }
+
+            combinedCtx.drawImage(maskCanvas, 0, 0);
+            foundMask = true;
+            drewCssMask = true;
+          }
+        }
+      }
+
+      if(drewCssMask) continue;
+
       const shapeMeta = resolveMaskMetaFromEl(el);
       if(shapeMeta && drawShapeMaskToContext(combinedCtx, shapeMeta)){
         foundMask = true;
-        continue;
       }
-
-      const { maskValue, maskMode } = readElementMaskStyle(el);
-
-      const maskUrl = extractMaskUrlFromValue(maskValue);
-      if(!maskUrl || !/^data:/i.test(maskUrl)) continue;
-
-      const maskImg = await new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        setTimeout(() => resolve(null), 3000);
-        img.src = maskUrl;
-      });
-      if(!maskImg || !maskImg.naturalWidth) continue;
-
-      foundMask = true;
-      const maskCanvas = document.createElement("canvas");
-      maskCanvas.width = w;
-      maskCanvas.height = h;
-      const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
-      if(!maskCtx) continue;
-      maskCtx.drawImage(maskImg, 0, 0, w, h);
-
-      if(String(maskMode || "luminance").toLowerCase() !== "alpha"){
-        const imgData = maskCtx.getImageData(0, 0, w, h);
-        const d = imgData.data;
-        for(let i = 0; i < d.length; i += 4){
-          d[i + 3] = d[i];
-          d[i] = 255;
-          d[i + 1] = 255;
-          d[i + 2] = 255;
-        }
-        maskCtx.putImageData(imgData, 0, 0);
-      }
-
-      combinedCtx.drawImage(maskCanvas, 0, 0);
     }
 
     return foundMask && canvasHasOpaquePixels(combinedMaskCanvas) ? combinedMaskCanvas : null;
   }
 
   async function bakeMaskedElementsForHtml2canvas(rootEl, html2canvasFn){
-    const ENABLE_EXPERIMENTAL_MASK_BAKE = false;
+    const ENABLE_EXPERIMENTAL_MASK_BAKE = true;
     if(!ENABLE_EXPERIMENTAL_MASK_BAKE) return false;
     if(!(rootEl instanceof HTMLElement) || typeof html2canvasFn !== "function") return false;
 
@@ -2803,43 +2816,35 @@ utilsApi.initProjectUtils();
         });
       const hasMeaningfulNonImageText = nonImageLeafTextEls.length > 0;
       const hasComplexVisuals = Boolean(maskedEl.querySelector("canvas, svg, video"));
+      const hasTransformedSubtree = [maskedEl, ...Array.from(maskedEl.querySelectorAll("*"))].some(el => {
+        if(!(el instanceof HTMLElement)) return false;
+        try{
+          const cs = getComputedStyle(el);
+          return Boolean(cs.transform && cs.transform !== "none");
+        }catch(_){
+          return false;
+        }
+      });
       const canUseDeterministicImageBake = Boolean(
         sourceImgEl
         && allImgs.length === 1
         && sourceImgEl.naturalWidth > 0
         && !hasMeaningfulNonImageText
         && !hasComplexVisuals
+        && !hasTransformedSubtree
       );
 
       if(canUseDeterministicImageBake){
         const imgCs = getComputedStyle(sourceImgEl);
-        const boundId = String(sourceImgEl.dataset.boundId || "");
-        const boundNode = boundId ? state.nodes.get(boundId) : null;
-        const nodeParams = boundNode?.type === "Image" ? (boundNode.params || {}) : null;
-
-        const ix = Number.isFinite(Number(nodeParams?.x))
-          ? Number(nodeParams.x)
-          : (Number.parseFloat(sourceImgEl.style.left || imgCs.left || "0") || 0);
-        const iy = Number.isFinite(Number(nodeParams?.y))
-          ? Number(nodeParams.y)
-          : (Number.parseFloat(sourceImgEl.style.top || imgCs.top || "0") || 0);
-        const iw = Math.max(1,
-          Number.isFinite(Number(nodeParams?.width))
-            ? Number(nodeParams.width)
-            : (Number.parseFloat(sourceImgEl.style.width || imgCs.width || "0") || sourceImgEl.clientWidth || elemW)
-        );
-        const ih = Math.max(1,
-          Number.isFinite(Number(nodeParams?.height))
-            ? Number(nodeParams.height)
-            : (Number.parseFloat(sourceImgEl.style.height || imgCs.height || "0") || sourceImgEl.clientHeight || elemH)
-        );
-        const fit = String(nodeParams?.fit || imgCs.objectFit || sourceImgEl.style.objectFit || "contain").trim().toLowerCase() || "contain";
+        const ix = Number.parseFloat(sourceImgEl.style.left || imgCs.left || "0") || 0;
+        const iy = Number.parseFloat(sourceImgEl.style.top || imgCs.top || "0") || 0;
+        const iwRaw = Number.parseFloat(sourceImgEl.style.width || imgCs.width || "");
+        const ihRaw = Number.parseFloat(sourceImgEl.style.height || imgCs.height || "");
+        const iw = Math.max(1, (Number.isFinite(iwRaw) && iwRaw > 0) ? iwRaw : (sourceImgEl.clientWidth || elemW));
+        const ih = Math.max(1, (Number.isFinite(ihRaw) && ihRaw > 0) ? ihRaw : (sourceImgEl.clientHeight || elemH));
+        const fit = String(imgCs.objectFit || sourceImgEl.style.objectFit || "contain").trim().toLowerCase() || "contain";
         const posRaw = String(imgCs.objectPosition || sourceImgEl.style.objectPosition || "50% 50%");
-        const opacity = Math.max(0, Math.min(1,
-          Number.isFinite(Number(nodeParams?.opacity))
-            ? (Number(nodeParams.opacity) / 100)
-            : Number(imgCs.opacity || sourceImgEl.style.opacity || 1)
-        ));
+        const opacity = Math.max(0, Math.min(1, Number(imgCs.opacity || sourceImgEl.style.opacity || 1)));
         const sw = Math.max(1, sourceImgEl.naturalWidth || sourceImgEl.width || iw);
         const sh = Math.max(1, sourceImgEl.naturalHeight || sourceImgEl.height || ih);
 
@@ -4424,15 +4429,15 @@ async function evaluate(){
       const listHtml = paths.map((path, i) => {
         const isActive = i === activeIdx;
         return `<div class="smItem${isActive ? " smActive" : ""}" data-sm-idx="${i}">
-          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "●" : "○"}</button>
+          <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "?" : "?"}</button>
           <span class="smLabel">${escapeAttr(path.name || ("Path " + String(i + 1).padStart(2, "0")))}</span>
-          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">✕</button>
+          <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">?</button>
         </div>`;
       }).join("");
 
       const propsHtml = paths.length ? `
         <div class="smProps">
-          <div class="smPropsTitle">▸ ${escapeAttr(ap.name || "")}</div>
+          <div class="smPropsTitle">? ${escapeAttr(ap.name || "")}</div>
           <div class="row"><label>Name</label><input type="text" data-sm-prop="name" value="${escapeAttr(ap.name || "")}" placeholder="Path name" /></div>
           <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
@@ -4443,13 +4448,13 @@ async function evaluate(){
           <div style="font-size:11px; color:#9db4d7; margin-top:4px; line-height:1.45;">
             Draw and edit bezier paths for custom shapes.<br>
             Shortcuts:<br>
-            • Left-click: add point / select point<br>
-            • Shift-click / Shift-drag: add to selection (point or box)<br>
-            • Ctrl-click selected point: deselect point<br>
-            • Alt-drag inside bounds: move entire shape<br>
-            • Alt-click handle: toggle straight/custom handle
-            • Esc: clear group selection
-            • Right-click point: delete point
+            � Left-click: add point / select point<br>
+            � Shift-click / Shift-drag: add to selection (point or box)<br>
+            � Ctrl-click selected point: deselect point<br>
+            � Alt-drag inside bounds: move entire shape<br>
+            � Alt-click handle: toggle straight/custom handle
+            � Esc: clear group selection
+            � Right-click point: delete point
           </div>
         </div>
       ` : "";
@@ -4644,16 +4649,23 @@ async function evaluate(){
         ev.stopPropagation();
         const exportType = btn.getAttribute('data-export-btn');
         const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
-        if(exportType === "exportAnimJSON"){
-          exportAnimationJSON(projectName);
+        const runExport = (job) => {
+          Promise.resolve().then(job).catch((err) => {
+            console.error("Export action failed", err);
+            const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+            toast(`Export failed: ${msg}`);
+          });
+        };
+        if(exportType === "exportAnimJSON" || exportType === "exportAnimationJSON" || exportType === "exportJSON"){
+          runExport(() => exportAnimationJSON(projectName));
         }else if(exportType === "exportEmbedJS"){
-          exportEmbedJS(projectName);
+          runExport(() => exportEmbedJS(projectName));
         }else if(exportType === "exportLottieJSON"){
-          exportLottieJSON(projectName);
+          runExport(() => exportLottieJSON(projectName));
         }else if(exportType === "exportMp4"){
-          exportMp4(projectName);
+          runExport(() => exportMp4(projectName));
         }else{
-          exportCanvasAsImage(exportType);
+          runExport(() => exportCanvasAsImage(exportType));
         }
       });
     });
@@ -5135,7 +5147,7 @@ async function evaluate(){
         return "Path " + String(paths.length + 1).padStart(2, "0");
       };
 
-      // Click path item → select
+      // Click path item ? select
       sm.querySelectorAll('.smItem[data-sm-idx]').forEach(item => {
         item.addEventListener('click', (ev) => {
           if(ev.target.closest('.smVis, .smDel')) return;
@@ -5233,7 +5245,7 @@ async function evaluate(){
             const nextName = String(ap.name || '').trim() || 'Untitled Path';
             ap.name = nextName;
             const titleEl = sm.querySelector('.smPropsTitle');
-            if(titleEl) titleEl.textContent = `▸ ${nextName}`;
+            if(titleEl) titleEl.textContent = `? ${nextName}`;
             const activeLabel = sm.querySelector('.smItem.smActive .smLabel');
             if(activeLabel) activeLabel.textContent = nextName;
           }
@@ -5340,6 +5352,109 @@ async function evaluate(){
     return html2CanvasLoadPromise;
   }
 
+  async function showMaskDebugOverlay(){
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
+
+    // Remove any existing debug overlay
+    document.getElementById("maskDebugOverlay")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "maskDebugOverlay";
+    overlay.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:99999",
+      "background:rgba(0,0,0,0.82)",
+      "display:flex",
+      "flex-direction:column",
+      "align-items:center",
+      "justify-content:center",
+      "gap:14px",
+      "cursor:pointer"
+    ].join(";");
+
+    const label = document.createElement("div");
+    label.style.cssText = "color:#fff;font-family:monospace;font-size:13px;text-align:center;line-height:1.6;";
+    label.textContent = "Building premask canvas\u2026";
+    overlay.appendChild(label);
+    document.body.appendChild(overlay);
+
+    const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+    const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+    const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
+
+    let info = [];
+    info.push("hasCssMask: " + hasCssMaskInScene);
+    info.push("hasMetaMask: " + hasMetaMaskInScene);
+
+    // Enumerate which elements have masks
+    const all = [renderRoot, ...renderRoot.querySelectorAll("*")];
+    const maskedEls = all.filter(el => {
+      if(!(el instanceof HTMLElement)) return false;
+      const hasMeta = Boolean(el.dataset?.maskShape || el.dataset?.maskPathData);
+      if(hasMeta) return true;
+      const inlineMask = (el.style.maskImage && el.style.maskImage !== "none")
+        || (el.style.webkitMaskImage && el.style.webkitMaskImage !== "none");
+      return inlineMask;
+    });
+    info.push("masked elements found: " + maskedEls.length);
+    maskedEls.forEach((el, i) => {
+      const tag = el.tagName.toLowerCase();
+      const maskImg = el.style.maskImage || el.style.webkitMaskImage || "(none)";
+      const hasMeta = Boolean(el.dataset?.maskShape || el.dataset?.maskPathData);
+      info.push("  [" + i + "] <" + tag + "> maskImage=" + maskImg.slice(0,60) + (maskImg.length > 60 ? "\u2026" : "") + " meta=" + hasMeta);
+    });
+
+    let premaskCanvas = null;
+    if(hasMaskInScene){
+      premaskCanvas = await buildLuminanceMaskCanvas(renderRoot, w, h);
+    }
+
+    info.push("");
+    info.push("premaskCanvas: " + (premaskCanvas ? "built (" + premaskCanvas.width + "x" + premaskCanvas.height + ")" : "null"));
+    if(premaskCanvas){
+      // Check how many opaque pixels
+      const ctx = premaskCanvas.getContext("2d", { willReadFrequently: true });
+      const data = ctx.getImageData(0, 0, premaskCanvas.width, premaskCanvas.height).data;
+      let opaqueCount = 0;
+      for(let i = 3; i < data.length; i += 4) if(data[i] > 0) opaqueCount++;
+      const totalPixels = premaskCanvas.width * premaskCanvas.height;
+      info.push("opaque pixels: " + opaqueCount + " / " + totalPixels + " (" + Math.round(opaqueCount / totalPixels * 100) + "%)");
+    }
+
+    label.textContent = info.join("\n");
+
+    if(premaskCanvas){
+      const displayCanvas = document.createElement("canvas");
+      const maxW = Math.min(w, window.innerWidth - 80);
+      const scale = maxW / w;
+      displayCanvas.width = Math.round(w * scale);
+      displayCanvas.height = Math.round(h * scale);
+      displayCanvas.style.cssText = "border:2px solid #f44;max-width:90vw;max-height:55vh;display:block;background:#111;";
+      const dctx = displayCanvas.getContext("2d");
+      dctx.drawImage(premaskCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+      overlay.appendChild(displayCanvas);
+
+      const note = document.createElement("div");
+      note.style.cssText = "color:#aaa;font-family:monospace;font-size:11px;text-align:center;";
+      note.textContent = "White area = visible after mask | Black/transparent = hidden | Click anywhere to close";
+      overlay.appendChild(note);
+    }else{
+      const note = document.createElement("div");
+      note.style.cssText = "color:#f88;font-family:monospace;font-size:12px;text-align:center;";
+      note.textContent = "No premask canvas built. See info above.";
+      overlay.appendChild(note);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.style.cssText = "margin-top:8px;padding:8px 28px;font-size:14px;";
+    closeBtn.addEventListener("click", () => overlay.remove(), { once: true });
+    overlay.appendChild(closeBtn);
+    overlay.addEventListener("click", (e) => { if(e.target === overlay) overlay.remove(); }, { once: true });
+  }
+
   async function exportCanvasWithBlend(format){
     const exportScale = 2;
     const w = Math.max(1, Math.round(previewBase.w));
@@ -5356,7 +5471,7 @@ async function evaluate(){
     await ensureHtml2CanvasLoaded();
     const html2canvasFn = window.html2canvas;
     if(typeof html2canvasFn !== "function"){
-      toast("html2canvas failed to load — cannot export.");
+      toast("html2canvas failed to load � cannot export.");
       return;
     }
 
@@ -5365,14 +5480,17 @@ async function evaluate(){
     let capturedCanvas = null;
     const hasCssMaskInScene = sceneHasCssMask(renderRoot);
     const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+    const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
     const hasImagesInScene = renderRoot.querySelector("img") !== null;
-    const premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
+    const premaskCanvas = (hasMaskInScene && hasImagesInScene)
       ? await buildLuminanceMaskCanvas(renderRoot, w, h)
       : null;
+    const preserveAlpha = format === "exportPNG";
+    const captureOptions = preserveAlpha ? { backgroundColor: null } : null;
     try{
-      capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
+      capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions);
       if(!capturedCanvas){
-        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
+        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
       }
     }catch(err){
       console.warn("exportCanvasWithBlend capture failed", err);
@@ -5542,7 +5660,7 @@ async function evaluate(){
 
     const srcRatio = srcW / srcH;
     const dstRatio = dstW / dstH;
-    if(Math.abs(srcRatio - dstRatio) < 0.001){
+    if(Math.abs(srcRatio - dstRatio) < 0.02){
       ctx.drawImage(srcCanvas, 0, 0, dstW, dstH);
       return;
     }
@@ -5555,7 +5673,7 @@ async function evaluate(){
     ctx.drawImage(srcCanvas, dx, dy, drawW, drawH);
   }
 
-  async function dataUrlToCanvas(dataUrl, w, h){
+  async function dataUrlToCanvas(dataUrl, w, h, preserveAlpha = false){
     if(!dataUrl) return null;
     return await new Promise((resolve) => {
       const img = new Image();
@@ -5564,13 +5682,15 @@ async function evaluate(){
           const c = document.createElement("canvas");
           c.width = w;
           c.height = h;
-          const cctx = c.getContext("2d", { alpha: false });
+          const cctx = c.getContext("2d", { alpha: Boolean(preserveAlpha) });
           if(!cctx){
             resolve(null);
             return;
           }
-          cctx.fillStyle = "#000000";
-          cctx.fillRect(0, 0, w, h);
+          if(!preserveAlpha){
+            cctx.fillStyle = "#000000";
+            cctx.fillRect(0, 0, w, h);
+          }
           cctx.drawImage(img, 0, 0, w, h);
           resolve(c);
         }catch(_){
@@ -5582,13 +5702,14 @@ async function evaluate(){
     });
   }
 
-  async function captureFrameCanvasFromDomSnapshot(w, h){
+  async function captureFrameCanvasFromDomSnapshot(w, h, options = null){
+    const preserveAlpha = Boolean(options?.preserveAlpha);
     const dataUrl = await renderLayerToDataUrl(renderRoot, {
       useSimpleShapeRender: false,
       timeoutMs: 900,
       bakeComputedStyles: true
     });
-    return dataUrlToCanvas(dataUrl, w, h);
+    return dataUrlToCanvas(dataUrl, w, h, preserveAlpha);
   }
 
   function sceneHasCssMask(rootEl){
@@ -5627,6 +5748,9 @@ async function evaluate(){
   // which correctly handles <img> elements; CSS mask-image is applied via premaskCanvas instead.
   async function captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, preferForeignObject, premaskCanvas = null, options = null){
     const disableBakeMaskedElements = Boolean(options?.disableBakeMaskedElements);
+    const captureBackgroundColor = Object.prototype.hasOwnProperty.call(options || {}, "backgroundColor")
+      ? options.backgroundColor
+      : "#000000";
     const tmpWrap = document.createElement("div");
     tmpWrap.style.position = "fixed";
     tmpWrap.style.left = "0";
@@ -5647,6 +5771,7 @@ async function evaluate(){
     document.body.appendChild(tmpWrap);
 
     await waitForRenderableImages(tmpWrap, 1200);
+    await bakeCloneImagesForCapture(tmpWrap);
     const bakedMaskedEls = disableBakeMaskedElements
       ? false
       : await bakeMaskedElementsForHtml2canvas(tmpWrap, html2canvasFn);
@@ -5654,7 +5779,7 @@ async function evaluate(){
 
     try{
       const capturedCanvas = await html2canvasFn(tmpWrap, {
-        backgroundColor: "#000000",
+        backgroundColor: captureBackgroundColor,
         width: w,
         height: h,
         scale: 1,
@@ -5742,9 +5867,10 @@ async function evaluate(){
 
       const hasCssMaskInScene = sceneHasCssMask(renderRoot);
       const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+      const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
       const hasImagesInScene = renderRoot.querySelector("img") !== null;
       const hasAnimatedMask = maskHasMotion(renderRoot);
-      let premaskCanvas = ((hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene)
+      let premaskCanvas = (hasMaskInScene && hasImagesInScene)
         ? await buildLuminanceMaskCanvas(renderRoot, w, h)
         : null;
 
@@ -5755,11 +5881,11 @@ async function evaluate(){
         updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and encoding");
 
         freezeAnimationsAtTime(renderRoot, t);
-        if(hasAnimatedMask && (hasCssMaskInScene || hasMetaMaskInScene) && hasImagesInScene){
+        if(hasAnimatedMask && hasMaskInScene && hasImagesInScene){
           premaskCanvas = await buildLuminanceMaskCanvas(renderRoot, w, h);
         }
         let capturedCanvas;
-        if(hasImagesInScene){
+        if(hasMaskInScene || hasImagesInScene){
           capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas);
         }else{
           capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h);
@@ -5777,8 +5903,13 @@ async function evaluate(){
           timestamp: frameIdx * frameDurationUs,
           duration: frameDurationUs,
         });
-        encoder.encode(frame, { keyFrame: frameIdx === 0 || (frameIdx % fps) === 0 });
-        frame.close();
+        try{
+          if(encoderFailure) throw encoderFailure;
+          if(encoder.state === "closed") throw new Error("VideoEncoder closed during export.");
+          encoder.encode(frame, { keyFrame: frameIdx === 0 || (frameIdx % fps) === 0 });
+        }finally{
+          frame.close();
+        }
 
         await new Promise(resolve => setTimeout(resolve, 0));
       }
@@ -6489,6 +6620,7 @@ function loadGraph(data){
 
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
+  maskDebugBtn?.addEventListener("click", () => showMaskDebugOverlay());
   buildHelpNavigation();
 
   helpBtn?.addEventListener("click", () => openHelp(activeHelpPage));
@@ -6520,7 +6652,13 @@ function loadGraph(data){
   document.getElementById("btnExport").addEventListener("click", (ev) => {
     ev.preventDefault();
     const projectName = document.getElementById("projectName")?.value || "animation";
-    exportAnimationJSON(projectName);
+    Promise.resolve()
+      .then(() => exportAnimationJSON(projectName))
+      .catch((err) => {
+        console.error("Top-bar JSON export failed", err);
+        const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+        toast(`Export failed: ${msg}`);
+      });
   });
 
   document.getElementById("btnClearCache").addEventListener("click", () => {
@@ -6782,7 +6920,7 @@ function loadGraph(data){
 
     // ---- Hook into evaluateAndRender ----
     // After each graph re-render, re-sync to the current playhead.
-    // We do NOT pause — the RAF loop keeps running uninterrupted.
+    // We do NOT pause � the RAF loop keeps running uninterrupted.
     const _origEAR = evaluateAndRender;
     evaluateAndRender = async function(...args){
       await _origEAR.apply(this, args);
@@ -6804,7 +6942,7 @@ function loadGraph(data){
       }
     });
 
-    // Auto-start — animation plays immediately on load.
+    // Auto-start � animation plays immediately on load.
     // Only a deliberate user action (press Pause / Stop) will halt it.
     play();
     updateUI();

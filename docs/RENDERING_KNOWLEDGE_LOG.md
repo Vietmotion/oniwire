@@ -87,6 +87,44 @@ Important rule:
   - treat "works in source but not in browser" as a cache/version-drift check before deep renderer refactors,
   - always include `index.html` sync in live-site pushes.
 
+### 2026-04-21 - Mask/export stabilization (3-day struggle resolved)
+
+- Symptoms observed across projects:
+  - Pen/Shape -> Composite masks looked correct in live preview but failed in export.
+  - PNG/JPG sometimes rendered full frame, blacked out, or had wrong apparent size.
+  - MP4 initially failed with `Cannot call 'encode' on a closed codec`.
+  - Dino scenes appeared horizontally stretched/fat in exported stills.
+
+- Root causes (stacked):
+  - `html2canvas` ignores CSS `mask-image`, so live CSS masks do not transfer automatically to exported canvas.
+  - Full-frame premask (`destination-in`) is unsafe for non-image scenes and can wipe the frame.
+  - MP4 encode loop could continue after async encoder failure/closure.
+  - PNG alpha was lost because capture forced black background.
+  - Deterministic image bake path could diverge from rendered layout in transformed/mixed chains.
+  - Direct Image -> Output path could still distort because cloned image object-fit was not always faithfully captured by `html2canvas`.
+
+- Final fixes that produced stable behavior:
+  - Enabled per-element masked baking for html2canvas capture (preferred path for masked content).
+  - Kept premask restricted to image scenes only: `hasMaskInScene && hasImagesInScene`.
+  - For animated MP4 masks, rebuild premask per frame only when mask motion exists.
+  - Guarded MP4 encode loop with encoder state/failure checks and always `frame.close()` in `finally`.
+  - Preserved PNG alpha via per-call transparent capture (`backgroundColor: null`) and alpha-aware snapshot fallback.
+  - Relaxed tiny aspect-ratio tolerance in fit helper to reduce minor visual size drift.
+  - For deterministic masked single-image bake, switched to rendered/computed image metrics as source of truth.
+  - Disabled deterministic single-image bake when transformed subtree is detected (fallback to isolated html2canvas path).
+  - Added pre-bake of object-fit images in cloned export DOM before html2canvas capture (`bakeCloneImagesForCapture(tmpWrap)`) to fix direct Image -> Output stretching.
+  - Restored missing Output inspector `Animation JSON` button and hardened export click handlers to avoid silent no-op failures (async error toast + alias IDs).
+  - Stabilized Lottie export for Heart/Pen graphs by:
+    - fixing composite mask content indexing (`buildCompositeContent(startInd + 1)`),
+    - adding `Pen` support via rasterized embedded image assets,
+    - applying accumulated composite transform/motion to mask matte decode so full masked shape pulses (not only inner content).
+
+- Guardrails going forward:
+  - When preview works but export fails, debug capture path first, not node graph logic.
+  - Keep still and MP4 mask safety rules aligned to avoid path drift.
+  - Treat deterministic image bake as an optimization; disable it in any ambiguous/transformed scene.
+  - Before large refactors, add a quick regression matrix: heart mask scene, dino scene, mixed image+text, animated mask, direct image output.
+
 ## High-Risk Areas
 
 - CSS masks and alpha-composite behavior.

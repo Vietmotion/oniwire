@@ -102,11 +102,13 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
                 ? buildRampMaskUrl(rampStops)
                 : (buildGradientMaskUrl(maskMeta?.gradient, false)
                     || buildShapeMaskUrl(maskMeta?.shape, false))));
+      const hasShapeMask = Boolean(maskMeta?.shape);
+      const resolvedMaskMode = (isLiveMask || hasShapeMask) ? "alpha" : "luminance";
       if(maskUrl || isLiveMask){
         wrap.style.maskImage = maskUrl;
         wrap.style.webkitMaskImage = maskUrl;
-        wrap.style.maskMode = isLiveMask ? "alpha" : "luminance";
-        wrap.style.webkitMaskMode = isLiveMask ? "alpha" : "luminance";
+        wrap.style.maskMode = resolvedMaskMode;
+        wrap.style.webkitMaskMode = resolvedMaskMode;
         wrap.style.maskRepeat = "no-repeat";
         wrap.style.webkitMaskRepeat = "no-repeat";
         wrap.style.maskPosition = "0 0";
