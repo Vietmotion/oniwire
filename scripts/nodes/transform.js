@@ -74,30 +74,30 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
       clone.style.transformOrigin = `${oxPercent}% ${oyPercent}%`;
       clone.style.transform = `translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
 
+      const sourceBounds = typeof measureLayerBounds === "function" ? measureLayerBounds(src.el) : null;
+      const transformedBounds = getTransformedBounds(sourceBounds, {
+        x,
+        y,
+        scale: s,
+        rotateDeg: r,
+        pivotX,
+        pivotY
+      });
+
+      if(transformedBounds){
+        const boundsTarget = document.createElement("div");
+        boundsTarget.dataset.boundId = node.id;
+        boundsTarget.style.position = "absolute";
+        boundsTarget.style.left = `${transformedBounds.left}px`;
+        boundsTarget.style.top = `${transformedBounds.top}px`;
+        boundsTarget.style.width = `${transformedBounds.width}px`;
+        boundsTarget.style.height = `${transformedBounds.height}px`;
+        boundsTarget.style.visibility = "hidden";
+        boundsTarget.style.pointerEvents = "none";
+        wrap.appendChild(boundsTarget);
+      }
+
       if(state.selected === node.id){
-        const sourceBounds = typeof measureLayerBounds === "function" ? measureLayerBounds(src.el) : null;
-        const transformedBounds = getTransformedBounds(sourceBounds, {
-          x,
-          y,
-          scale: s,
-          rotateDeg: r,
-          pivotX,
-          pivotY
-        });
-
-        if(transformedBounds){
-          const boundsTarget = document.createElement("div");
-          boundsTarget.dataset.boundId = node.id;
-          boundsTarget.style.position = "absolute";
-          boundsTarget.style.left = `${transformedBounds.left}px`;
-          boundsTarget.style.top = `${transformedBounds.top}px`;
-          boundsTarget.style.width = `${transformedBounds.width}px`;
-          boundsTarget.style.height = `${transformedBounds.height}px`;
-          boundsTarget.style.visibility = "hidden";
-          boundsTarget.style.pointerEvents = "none";
-          wrap.appendChild(boundsTarget);
-        }
-
         const pivot = document.createElement("div");
         pivot.style.position = "absolute";
         pivot.style.left = `calc(${oxPercent}% + ${x}px)`;

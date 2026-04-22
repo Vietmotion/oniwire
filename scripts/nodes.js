@@ -6,7 +6,8 @@ window.createOniwireNodeDefsApi = function createOniwireNodeDefsApi(deps){
 		propagateMotionFlag,
 		clamp,
 		parseHexColor,
-		getOutputDuration
+		getOutputDuration,
+		getCanvasSize
 	} = deps;
 
 	const basicNodes = {
@@ -28,7 +29,8 @@ window.createOniwireNodeDefsApi = function createOniwireNodeDefsApi(deps){
 		MotionOut: window.createOniwireMotionOutNodeDef({ ensureMotionStyles, measureLayerBounds, clamp, getOutputDuration }),
 		Glow: window.createOniwireGlowNodeDef({ propagateMotionFlag, clamp, parseHexColor }),
 		ColorCorrect: window.createOniwireColorCorrectNodeDef({ propagateMotionFlag, clamp }),
-		Curves: window.createOniwireCurvesNodeDef({ propagateMotionFlag, clamp })
+		Curves: window.createOniwireCurvesNodeDef({ propagateMotionFlag, clamp }),
+		Stylize: window.createOniwireStylizeNodeDef({ propagateMotionFlag, clamp, getCanvasSize })
 	};
 
 	return {

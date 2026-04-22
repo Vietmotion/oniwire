@@ -41,6 +41,7 @@
   <script src="scripts/nodes/glow.js"></script>
   <script src="scripts/nodes/color_correct.js"></script>
   <script src="scripts/nodes/curves.js"></script>
+  <script src="scripts/nodes/stylize.js"></script>
   <script src="scripts/nodes/clone.js"></script>
   <script src="scripts/nodes/composite.js"></script>
   <script src="scripts/nodes/mask.js"></script>
@@ -3115,6 +3116,7 @@ utilsApi.initProjectUtils();
     propagateMotionFlag,
     clamp,
     parseHexColor,
+    getCanvasSize: () => ({ width: previewBase?.w || 1280, height: previewBase?.h || 720 }),
     getOutputDuration: () => {
       const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
       return Math.max(0.5, Number(outNode?.params?.duration) || 5);
@@ -3223,6 +3225,11 @@ const NODE_TIPS = {
     "<strong>Curves</strong> - Fine-tunes tonal response using channel curves.",
     "Modes: RGB (master), R, G, B. Use Shadows, Midtones, Highlights sliders per mode.",
     "<em>in</em> -> the layer to remap with curve adjustments."
+  ],
+  Stylize: [
+    "<strong>Stylize</strong> - Adds cinematic and graphic treatment presets to a layer.",
+    "Modes: Lookup filter, Brutal, Glitch. Lookup includes comic, dreamy, noir, retro, neon, sunset, acid.",
+    "<em>in</em> -> the layer to stylize. Brutal uses a draggable gradient-map control; glitch keeps RGB split and offset controls."
   ],
   Clone: [
     "<strong>Clone</strong> - Duplicates a layer in a grid, line, or radial pattern.",
@@ -3427,6 +3434,7 @@ const NODE_CATEGORIES = {
   Mask: "Operations",
   ColorCorrect: "Operations",
   Curves: "Operations",
+  Stylize: "Operations",
   Output: "Output",
 };
 
@@ -4369,19 +4377,53 @@ async function evaluate(){
       `;
     } else if(f.type === "ramp"){
       const stops = normalizeRampStops(node.params.stops);
+      const grad = `linear-gradient(90deg, ${stops.map(s => `${escapeAttr(s.color)} ${s.pos}%`).join(", ")})`;
       const rows = stops.map((s, i) => `
         <div class="rampStop" data-index="${i}">
-          <input class="rampPosRange" type="range" min="0" max="100" step="1" value="${s.pos}" />
-          <input class="rampPosNum" type="number" min="0" max="100" step="1" value="${s.pos}" />
           <input class="rampColor" type="color" value="${escapeAttr(s.color)}" />
+          <span class="rampPosLabel">${Math.round(s.pos)}%</span>
           <button class="rampRemoveBtn" type="button">Remove</button>
         </div>
       `).join("");
 
       controlHtml = `
         <div class="rampEditor" data-k="${f.k}">
+          <div class="rampTrack" style="background:${grad};">
+            ${stops.map((s, i) => `<button type="button" class="rampHandle" data-index="${i}" style="left:${s.pos}%;"><span class="rampHandleInner" style="background:${escapeAttr(s.color)};"></span></button>`).join("")}
+          </div>
           ${rows}
           <button class="rampAddBtn" type="button">Add stop</button>
+        </div>
+      `;
+    } else if(f.type === "gradientMap3"){
+      const fallback = Array.isArray(f.stops) && f.stops.length >= 3
+        ? f.stops
+        : [
+            { pos: 0, color: "#162447" },
+            { pos: 50, color: "#e94560" },
+            { pos: 100, color: "#f5a623" }
+          ];
+      const srcStops = Array.isArray(node.params[f.k]) && node.params[f.k].length === 3 ? node.params[f.k] : fallback;
+      const stops = [0, 1, 2].map((idx) => {
+        const s = srcStops[idx] || fallback[idx];
+        return {
+          pos: clamp(Number(s.pos), 0, 100),
+          color: String(s.color || fallback[idx].color)
+        };
+      });
+      stops[0].pos = clamp(stops[0].pos, 0, stops[1].pos);
+      stops[1].pos = clamp(stops[1].pos, stops[0].pos, stops[2].pos);
+      stops[2].pos = clamp(stops[2].pos, stops[1].pos, 100);
+      const grad = `linear-gradient(90deg, ${stops.map(s => `${escapeAttr(s.color)} ${s.pos}%`).join(", ")})`;
+
+      controlHtml = `
+        <div class="gm3Editor" data-k="${f.k}">
+          <div class="gm3Track" style="background:${grad};">
+            ${stops.map((s, i) => `<button type="button" class="gm3Handle" data-index="${i}" style="left:${s.pos}%;"><span class="gm3HandleInner" style="background:${escapeAttr(s.color)};"></span></button>`).join("")}
+          </div>
+          <div class="gm3Swatches">
+            ${stops.map((s, i) => `<div class="gm3SwatchRow" data-index="${i}"><input class="gm3Color" type="color" value="${escapeAttr(s.color)}" /></div>`).join("")}
+          </div>
         </div>
       `;
     } else if(f.type === "curvesGraph"){
@@ -4854,6 +4896,10 @@ async function evaluate(){
           renderInspector();
         }
 
+        if(node.type === "Stylize" && (k === "preset" || k === "lookupPreset")){
+          renderInspector();
+        }
+
         if(node.type === "Clone" && k === "mode"){
           renderInspector();
         }
@@ -4964,39 +5010,51 @@ async function evaluate(){
         evaluateAndRender();
       };
 
+      const track = editor.querySelector('.rampTrack');
+      const handles = [...editor.querySelectorAll('.rampHandle')];
+
+      const paintRamp = () => {
+        const stops = normalizeRampStops(node.params.stops);
+        node.params.stops = stops;
+        if(track){
+          track.style.background = `linear-gradient(90deg, ${stops.map(s => `${s.color} ${s.pos}%`).join(', ')})`;
+        }
+        handles.forEach((h, idx) => {
+          const s = stops[idx];
+          if(!s) return;
+          h.style.left = `${s.pos}%`;
+          const inner = h.querySelector('.rampHandleInner');
+          if(inner) inner.style.background = s.color;
+        });
+        editor.querySelectorAll('.rampStop').forEach((row) => {
+          const idx = Number(row.getAttribute('data-index'));
+          const s = stops[idx];
+          if(!s) return;
+          const colorEl = row.querySelector('.rampColor');
+          const posLabel = row.querySelector('.rampPosLabel');
+          if(colorEl && colorEl.value !== s.color) colorEl.value = s.color;
+          if(posLabel) posLabel.textContent = `${Math.round(s.pos)}%`;
+        });
+      };
+
       editor.querySelectorAll('.rampStop').forEach(row => {
         const idx = Number(row.getAttribute('data-index'));
-        const rangeEl = row.querySelector('.rampPosRange');
-        const numEl = row.querySelector('.rampPosNum');
         const colorEl = row.querySelector('.rampColor');
         const removeBtn = row.querySelector('.rampRemoveBtn');
-
-        const updatePos = (v, commit = false) => {
-          if(Number.isNaN(v)) return;
-          const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
-          if(!stops[idx]) return;
-          stops[idx] = { ...stops[idx], pos: v };
-          if(rangeEl) rangeEl.value = String(v);
-          if(numEl) numEl.value = String(v);
-          syncStops(stops, commit);
-        };
-
-        rangeEl?.addEventListener('input', () => updatePos(Number(rangeEl.value), false));
-        rangeEl?.addEventListener('change', () => updatePos(Number(rangeEl.value), true));
-        numEl?.addEventListener('input', () => updatePos(Number(numEl.value), false));
-        numEl?.addEventListener('change', () => updatePos(Number(numEl.value), true));
 
         colorEl?.addEventListener('input', () => {
           const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
           if(!stops[idx]) return;
           stops[idx] = { ...stops[idx], color: colorEl.value };
           syncStops(stops, false);
+          paintRamp();
         });
         colorEl?.addEventListener('change', () => {
           const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
           if(!stops[idx]) return;
           stops[idx] = { ...stops[idx], color: colorEl.value };
           syncStops(stops, true);
+          paintRamp();
         });
 
         removeBtn?.addEventListener('click', () => {
@@ -5007,13 +5065,155 @@ async function evaluate(){
         });
       });
 
+      handles.forEach((handle, idx) => {
+        handle.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          handle.setPointerCapture(ev.pointerId);
+
+          const move = (clientX) => {
+            const rect = track?.getBoundingClientRect();
+            if(!rect || rect.width <= 0) return;
+            const raw = ((clientX - rect.left) / rect.width) * 100;
+            const cur = normalizeRampStops(node.params.stops);
+            const min = idx === 0 ? 0 : cur[idx - 1].pos;
+            const max = idx === cur.length - 1 ? 100 : cur[idx + 1].pos;
+            if(!cur[idx]) return;
+            cur[idx] = { ...cur[idx], pos: clamp(raw, min, max) };
+            syncStops(cur, false);
+            paintRamp();
+          };
+
+          const onMove = (e2) => move(e2.clientX);
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            pushHistory();
+          };
+
+          move(ev.clientX);
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+      });
+
       editor.querySelector('.rampAddBtn')?.addEventListener('click', () => {
         const stops = Array.isArray(node.params.stops) ? [...node.params.stops] : [];
-        const mid = stops.length ? 50 : 50;
-        stops.push({ pos: mid, color: "#ffffff" });
+        if(stops.length < 2){
+          stops.push({ pos: 50, color: "#ffffff" });
+        }else{
+          const sorted = normalizeRampStops(stops);
+          let bestIdx = 0;
+          let bestGap = -1;
+          for(let i = 0; i < sorted.length - 1; i++){
+            const gap = sorted[i + 1].pos - sorted[i].pos;
+            if(gap > bestGap){
+              bestGap = gap;
+              bestIdx = i;
+            }
+          }
+          const pos = clamp((sorted[bestIdx].pos + sorted[bestIdx + 1].pos) / 2, 0, 100);
+          stops.push({ pos, color: "#ffffff" });
+        }
         syncStops(stops, true);
         renderInspector();
       });
+
+      paintRamp();
+    });
+
+    inspectorBody.querySelectorAll('.gm3Editor').forEach(editor => {
+      const k = String(editor.getAttribute('data-k') || '');
+      if(!k) return;
+
+      const fallback = [
+        { pos: 0, color: '#162447' },
+        { pos: 50, color: '#e94560' },
+        { pos: 100, color: '#f5a623' }
+      ];
+
+      const normalizeGmStops = (src) => {
+        const base = Array.isArray(src) && src.length === 3 ? src : fallback;
+        const out = [0, 1, 2].map((idx) => {
+          const s = base[idx] || fallback[idx];
+          return {
+            pos: clamp(Number(s.pos), 0, 100),
+            color: /^#[0-9a-fA-F]{3,8}$/.test(String(s.color || '')) ? String(s.color) : fallback[idx].color
+          };
+        });
+        out[0].pos = clamp(out[0].pos, 0, out[1].pos);
+        out[1].pos = clamp(out[1].pos, out[0].pos, out[2].pos);
+        out[2].pos = clamp(out[2].pos, out[1].pos, 100);
+        return out;
+      };
+
+      node.params[k] = normalizeGmStops(node.params[k]);
+
+      const track = editor.querySelector('.gm3Track');
+      const handles = [...editor.querySelectorAll('.gm3Handle')];
+      const colorInputs = [...editor.querySelectorAll('.gm3Color')];
+
+      const paint = () => {
+        const stops = normalizeGmStops(node.params[k]);
+        node.params[k] = stops;
+        if(track){
+          track.style.background = `linear-gradient(90deg, ${stops.map(s => `${s.color} ${s.pos}%`).join(', ')})`;
+        }
+        handles.forEach((h, idx) => {
+          const s = stops[idx] || fallback[idx];
+          h.style.left = `${s.pos}%`;
+          const inner = h.querySelector('.gm3HandleInner');
+          if(inner) inner.style.background = s.color;
+        });
+        colorInputs.forEach((inp, idx) => {
+          const s = stops[idx] || fallback[idx];
+          if(inp.value !== s.color) inp.value = s.color;
+        });
+      };
+
+      const setStop = (idx, patch, commit = false) => {
+        const stops = normalizeGmStops(node.params[k]);
+        if(!stops[idx]) return;
+        stops[idx] = { ...stops[idx], ...patch };
+        node.params[k] = normalizeGmStops(stops);
+        paint();
+        evaluateAndRender();
+        if(commit) pushHistory();
+      };
+
+      colorInputs.forEach((inp, idx) => {
+        inp.addEventListener('input', () => setStop(idx, { color: inp.value }, false));
+        inp.addEventListener('change', () => setStop(idx, { color: inp.value }, true));
+      });
+
+      handles.forEach((handle, idx) => {
+        handle.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          handle.setPointerCapture(ev.pointerId);
+
+          const move = (clientX) => {
+            const rect = track?.getBoundingClientRect();
+            if(!rect || rect.width <= 0) return;
+            const raw = ((clientX - rect.left) / rect.width) * 100;
+            const cur = normalizeGmStops(node.params[k]);
+            const min = idx === 0 ? 0 : cur[idx - 1].pos;
+            const max = idx === 2 ? 100 : cur[idx + 1].pos;
+            setStop(idx, { pos: clamp(raw, min, max) }, false);
+          };
+
+          const onMove = (e2) => move(e2.clientX);
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            pushHistory();
+          };
+
+          move(ev.clientX);
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        });
+      });
+
+      paint();
     });
 
     inspectorBody.querySelectorAll('.curvesEditor').forEach(editor => {

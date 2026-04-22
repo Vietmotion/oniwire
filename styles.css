@@ -149,15 +149,60 @@ select#nodeType optgroup{
   gap:8px;
 }
 
+.rampTrack{
+  position:relative;
+  height:28px;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,.2);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.2);
+  margin-bottom:14px;
+}
+
+.rampHandle{
+  position:absolute;
+  top:100%;
+  transform:translate(-50%, 4px);
+  width:18px;
+  height:14px;
+  border:1px solid rgba(255,255,255,.7);
+  border-radius:2px;
+  background:rgba(6,10,18,.95);
+  padding:2px;
+  cursor:ew-resize;
+  touch-action:none;
+}
+
+.rampHandle::before{
+  content:"";
+  position:absolute;
+  top:-7px;
+  left:50%;
+  transform:translateX(-50%);
+  width:0;
+  height:0;
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-bottom:7px solid rgba(255,255,255,.78);
+}
+
+.rampHandleInner{
+  display:block;
+  width:100%;
+  height:100%;
+  border-radius:1px;
+}
+
 .rampStop{
   display:grid;
-  grid-template-columns: 1fr 72px 46px 66px;
+  grid-template-columns: 38px 1fr 66px;
   gap:8px;
   align-items:center;
 }
 
-.rampStop input[type="range"]{
-  width:100%;
+.rampPosLabel{
+  color:#9db4d7;
+  font-size:12px;
+  font-family: var(--mono);
 }
 
 .rampAddBtn,
@@ -165,6 +210,74 @@ select#nodeType optgroup{
   padding:6px 8px;
   font-size:11px;
   border-radius:10px;
+}
+
+.gm3Editor{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.gm3Track{
+  position:relative;
+  height:28px;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,.2);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.2);
+}
+
+.gm3Handle{
+  position:absolute;
+  top:100%;
+  transform:translate(-50%, 4px);
+  width:18px;
+  height:14px;
+  border:1px solid rgba(255,255,255,.7);
+  border-radius:2px;
+  background:rgba(6,10,18,.95);
+  padding:2px;
+  cursor:ew-resize;
+  touch-action:none;
+}
+
+.gm3Handle::before{
+  content:"";
+  position:absolute;
+  top:-7px;
+  left:50%;
+  transform:translateX(-50%);
+  width:0;
+  height:0;
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-bottom:7px solid rgba(255,255,255,.78);
+}
+
+.gm3HandleInner{
+  display:block;
+  width:100%;
+  height:100%;
+  border-radius:1px;
+}
+
+.gm3Swatches{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:10px;
+  margin-top:16px;
+}
+
+.gm3SwatchRow{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+
+.gm3SwatchRow .gm3Color{
+  width:38px;
+  height:28px;
+  padding:0;
+  border-radius:8px;
 }
 
 .previewSelectionBox{
