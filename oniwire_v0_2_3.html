@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.3 | 2026-04-23 20:00)</title>
-  <link rel="stylesheet" href="styles.css?v=20260423-2000">
+  <title>Oniwire (v0.2.3 | 2026-04-23 22:00)</title>
+  <link rel="stylesheet" href="styles.css?v=20260423-2200">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=Montserrat:wght@100;200;300;400;500;600;700;800;900&family=Roboto:wght@100;300;400;500;700;900&family=Open+Sans:wght@300;400;500;600;700;800&family=Lato:wght@100;300;400;700;900&family=Nunito:wght@200;300;400;500;600;700;800;900&family=Raleway:wght@100;200;300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Source+Sans+3:wght@200;300;400;500;600;700;800;900&family=Ubuntu:wght@300;400;500;700&family=Work+Sans:wght@100;200;300;400;500;600;700;800;900&family=DM+Sans:wght@100;200;300;400;500;600;700;800;900&family=Manrope:wght@200;300;400;500;600;700;800&family=Mulish:wght@200;300;400;500;600;700;800;900&family=Oswald:wght@200;300;400;500;600;700&family=Bebas+Neue&family=Fira+Sans:wght@100;200;300;400;500;600;700;800;900&family=PT+Sans:wght@400;700&family=Noto+Sans:wght@100;200;300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700;800;900&family=Karla:wght@200;300;400;500;600;700;800&family=Inconsolata:wght@200;300;400;500;600;700;800;900&display=swap">
@@ -114,7 +114,8 @@
             </select>
           </label>
           <button id="btnSafeZone">Safe Zone</button>
-          <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask.">Mask Debug</button>
+          <button id="btnRuler" title="Toggle rulers. Drag from ruler bars to create guide lines. Double-click a guide to remove it.">Ruler</button>
+          <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask." style="display:none;">Mask Debug</button>
         </div>
         <button id="btnTips" class="active" style="margin-left:auto;" aria-pressed="true">Tips</button>
       </div>
@@ -134,6 +135,13 @@
                 <div class="safeZoneCenter"></div>
               </div>
               <div id="renderRoot" style="position:absolute; inset:0;"></div>
+            </div>
+            <!-- Ruler overlay: outside previewScale so guides are viewport-relative -->
+            <div id="rulerOverlay" class="rulerOverlay isHidden" aria-hidden="true">
+              <div id="rulerTop" class="rulerBar rulerBar--h" title="Drag down to create a horizontal guide"></div>
+              <div id="rulerLeft" class="rulerBar rulerBar--v" title="Drag right to create a vertical guide"></div>
+              <div class="rulerCorner"></div>
+              <div id="rulerGuideLayer"></div>
             </div>
           </div>
         </div>
@@ -539,6 +547,126 @@
   function toggleTips(){
     setTipsVisible(!tipsVisible);
   }
+
+  // -----------------------------
+  // Ruler + Guide system
+  // -----------------------------
+  const rulerBtn        = document.getElementById("btnRuler");
+  const rulerOverlay    = document.getElementById("rulerOverlay");
+  const rulerTop        = document.getElementById("rulerTop");
+  const rulerLeft       = document.getElementById("rulerLeft");
+  const rulerGuideLayer = document.getElementById("rulerGuideLayer");
+
+  let rulersVisible = false;
+  const rulerGuides = []; // { el, axis: 'h'|'v' }
+
+  function setRulersVisible(v){
+    rulersVisible = !!v;
+    rulerOverlay?.classList.toggle("isHidden", !rulersVisible);
+    rulerBtn?.classList.toggle("active", rulersVisible);
+  }
+
+  function toggleRulers(){
+    setRulersVisible(!rulersVisible);
+    toast(rulersVisible ? "Rulers on — drag from ruler bars to add guides. Double-click a guide to remove." : "Rulers off.");
+  }
+
+  function createGuide(axis, pct){
+    const el = document.createElement("div");
+    el.className = `rulerGuide rulerGuide--${axis}`;
+    if(axis === "h") el.style.top  = pct + "%";
+    else             el.style.left = pct + "%";
+
+    // Double-click removes the guide
+    el.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      const idx = rulerGuides.findIndex(g => g.el === el);
+      if(idx !== -1) rulerGuides.splice(idx, 1);
+      el.remove();
+    });
+
+    // Pointer drag to reposition
+    el.addEventListener("pointerdown", (e) => {
+      if(e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const rect = rulerOverlay.getBoundingClientRect();
+
+      function onMove(me){
+        if(axis === "h"){
+          const p = Math.max(0, Math.min(100, ((me.clientY - rect.top) / rect.height) * 100));
+          el.style.top = p + "%";
+        } else {
+          const p = Math.max(0, Math.min(100, ((me.clientX - rect.left) / rect.width) * 100));
+          el.style.left = p + "%";
+        }
+      }
+      function onUp(){
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup",   onUp);
+        el.removeEventListener("pointercancel", onUp);
+      }
+      el.addEventListener("pointermove",   onMove);
+      el.addEventListener("pointerup",     onUp);
+      el.addEventListener("pointercancel", onUp);
+    });
+
+    rulerGuides.push({ el, axis });
+    rulerGuideLayer?.appendChild(el);
+    return el;
+  }
+
+  // Drag from a ruler bar → ghost line preview → drop creates a guide
+  function setupRulerBarDrag(barEl, axis){
+    barEl?.addEventListener("pointerdown", (e) => {
+      if(e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      barEl.setPointerCapture(e.pointerId);
+
+      const ghost = document.createElement("div");
+      ghost.className = `rulerGhost rulerGhost--${axis}`;
+      ghost.style.display = "none";
+      rulerOverlay?.appendChild(ghost);
+
+      const rect = rulerOverlay.getBoundingClientRect();
+      let currentPct = 0;
+
+      function updateGhost(me){
+        if(axis === "h"){
+          const p = Math.max(0, Math.min(100, ((me.clientY - rect.top) / rect.height) * 100));
+          currentPct = p;
+          ghost.style.top = p + "%";
+        } else {
+          const p = Math.max(0, Math.min(100, ((me.clientX - rect.left) / rect.width) * 100));
+          currentPct = p;
+          ghost.style.left = p + "%";
+        }
+        ghost.style.display = "block";
+      }
+
+      function onUp(me){
+        ghost.remove();
+        barEl.removeEventListener("pointermove", updateGhost);
+        barEl.removeEventListener("pointerup",   onUp);
+        barEl.removeEventListener("pointercancel", onUp);
+        // Only create the guide if the pointer moved past the ruler bar
+        const pastRuler = axis === "h"
+          ? (me.clientY - rect.top)  > 18
+          : (me.clientX - rect.left) > 18;
+        if(pastRuler) createGuide(axis, currentPct);
+      }
+
+      barEl.addEventListener("pointermove",   updateGhost);
+      barEl.addEventListener("pointerup",     onUp);
+      barEl.addEventListener("pointercancel", onUp);
+    });
+  }
+
+  setupRulerBarDrag(rulerTop,  "h");
+  setupRulerBarDrag(rulerLeft, "v");
+
 
   const tipsContentEl = document.getElementById("tipsContent");
 
@@ -3342,11 +3470,11 @@ const HELP_GENERAL_PAGES = {
   },
   updates: {
     eyebrow: "Oniwire Help - Latest Update",
-    title: "What changed in v0.2.3 | 2026-04-23 20:00",
+    title: "What changed in v0.2.3 | 2026-04-23 22:00",
     subtitle: "v0.2.3 focuses on faster Pen workflow: multi-point selection, group transforms, clearer shortcuts, and dedicated shortcut help.",
     body: `
       <div class="helpSection">
-        <h3 class="helpSectionTitle">Latest in v0.2.3 &mdash; 2026-04-23 20:00</h3>
+        <h3 class="helpSectionTitle">Latest in v0.2.3 &mdash; 2026-04-23 22:00</h3>
         <div class="helpUpdateGrid">
           <div class="helpUpdateCard">
             <span class="helpUpdateKicker">Pen Editing</span>
@@ -6820,6 +6948,7 @@ function loadGraph(data){
 
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
+  rulerBtn?.addEventListener("click", toggleRulers);
   maskDebugBtn?.addEventListener("click", () => showMaskDebugOverlay());
   buildHelpNavigation();
 

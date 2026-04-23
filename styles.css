@@ -2036,3 +2036,118 @@ select optgroup{
   border-color: rgba(122,167,255,.38) !important;
   color: rgba(132,178,255,.95) !important;
 }
+
+/* =====================================================
+   Ruler + Guide system
+   ===================================================== */
+.rulerOverlay{
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 22;
+}
+.rulerOverlay.isHidden{ display: none; }
+
+/* Horizontal ruler bar (top edge) */
+.rulerBar--h{
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 18px;
+  cursor: s-resize;
+  pointer-events: auto;
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(255,255,255,.18) 0px,
+      rgba(255,255,255,.18) 1px,
+      transparent 1px,
+      transparent 10px
+    ),
+    rgba(14, 18, 26, 0.90);
+  border-bottom: 1px solid rgba(255,255,255,.14);
+}
+
+/* Vertical ruler bar (left edge) */
+.rulerBar--v{
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 18px;
+  cursor: e-resize;
+  pointer-events: auto;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,.18) 0px,
+      rgba(255,255,255,.18) 1px,
+      transparent 1px,
+      transparent 10px
+    ),
+    rgba(14, 18, 26, 0.90);
+  border-right: 1px solid rgba(255,255,255,.14);
+}
+
+/* Corner square where the two bars meet */
+.rulerCorner{
+  position: absolute;
+  top: 0; left: 0;
+  width: 18px; height: 18px;
+  background: rgba(20, 24, 34, 0.95);
+  border-right: 1px solid rgba(255,255,255,.14);
+  border-bottom: 1px solid rgba(255,255,255,.14);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Guide line layer */
+#rulerGuideLayer{
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Individual guide lines */
+.rulerGuide{
+  position: absolute;
+  pointer-events: auto;
+  transition: background 0.1s ease;
+}
+/* Horizontal guide */
+.rulerGuide--h{
+  left: 0; right: 0;
+  height: 1px;
+  cursor: ns-resize;
+  background: rgba(80, 180, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(80, 180, 255, 0.18);
+}
+.rulerGuide--h::before{
+  content: "";
+  position: absolute;
+  inset: -4px 0;          /* expand hit area vertically */
+  cursor: ns-resize;
+}
+/* Vertical guide */
+.rulerGuide--v{
+  top: 0; bottom: 0;
+  width: 1px;
+  cursor: ew-resize;
+  background: rgba(80, 180, 255, 0.75);
+  box-shadow: 1px 0 0 0 rgba(80, 180, 255, 0.18);
+}
+.rulerGuide--v::before{
+  content: "";
+  position: absolute;
+  inset: 0 -4px;          /* expand hit area horizontally */
+  cursor: ew-resize;
+}
+.rulerGuide:hover{
+  background: rgba(255, 100, 80, 0.85);
+}
+
+/* Ghost preview line while dragging from a ruler bar */
+.rulerGhost{
+  position: absolute;
+  pointer-events: none;
+  background: rgba(80, 180, 255, 0.35);
+}
+.rulerGhost--h{ left: 0; right: 0; height: 1px; }
+.rulerGhost--v{ top: 0; bottom: 0; width: 1px; }
