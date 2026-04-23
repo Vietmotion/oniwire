@@ -1,68 +1,111 @@
 # Push Workflow (GitHub Pages)
 
+> **Hard rule:** Every push that touches the live app MUST include a synced `index.html`.
+> Skipping this is the single most common cause of the app appearing frozen or loading a stale version.
+
 GitHub Pages serves this project from `index.html`.
-If `index.html` is not synced, the live site will show an old version even if a newer `oniwire_vX_Y_Z.html` exists.
+Editing `oniwire_vX_Y_Z.html` alone — no matter how many times you push — does **not** update the live site.
 
-## Live publish rule (must follow)
+---
 
-1. Build/edit in the latest version file (`oniwire_vX_Y_Z.html`).
-2. Sync latest version file into `index.html`.
-3. Commit and push.
+## Step-by-step release (do every time, no exceptions)
 
-## Required release stamp (day + time)
+### 1. Edit in the version file
 
-For every live push, append a local timestamp after the visible version label so you can confirm freshness instantly.
+All code changes go into `oniwire_vX_Y_Z.html` (and any supporting files like `styles.css`, `scripts/`).
+Do **not** edit `index.html` directly.
 
-Use this format everywhere the user sees version text:
+### 2. Update the release stamp (day + time)
 
-- `vX.Y.Z | YYYY-MM-DD HH:mm`
-- Example: `v0.2.3 | 2026-04-19 23:40`
+Before syncing, update the timestamp in **three places** inside `oniwire_vX_Y_Z.html`:
 
-Minimum places to update before push:
+| Location | What to change | Format |
+|---|---|---|
+| `<title>` in HTML head | `Oniwire (vX.Y.Z \| YYYY-MM-DD HH:mm)` | e.g. `Oniwire (v0.2.3 \| 2026-04-23 20:00)` |
+| Help → Latest Update `title` field | `"What changed in vX.Y.Z \| YYYY-MM-DD HH:mm"` | same format |
+| Help → `helpSectionTitle` | `Latest in vX.Y.Z — YYYY-MM-DD HH:mm` | visible in the Help panel |
 
-1. `title` in HTML head.
-2. Help "Latest Update" header text (`What changed in v...`).
-3. Help "Latest in v..." section title.
+Also bump the CSS cache-bust query string on the same line as the `styles.css` link:
 
-Never push a new version file without syncing `index.html` when your goal is to update the live site.
+```html
+<link rel="stylesheet" href="styles.css?v=YYYYMMDD-HHmm">
+```
 
-## Standard release commands
+This forces browsers to fetch the latest CSS and prevents the stale-style freeze on first load.
 
-Run from repo root:
+### 3. Sync `index.html`
 
-1. Sync:
-   - `powershell -ExecutionPolicy Bypass -File .\scripts\sync-index.ps1`
-2. Verify `index.html` is on the expected version:
-   - `git diff -- index.html`
-   - Required quick check: search title/help labels inside `index.html` for `vX.Y.Z | YYYY-MM-DD HH:mm`.
-3. Commit:
-   - `git add index.html oniwire_vX_Y_Z.html`
-   - `git commit -m "release: vX.Y.Z YYYY-MM-DD HH:mm sync index"`
-4. Push:
-   - `git push origin main`
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-index.ps1
+```
 
-## Fast fix (if wrong version is live)
+### 4. Verify the sync worked
 
-If the live site still shows an old version:
+```powershell
+git diff -- index.html
+```
 
-1. Run sync script again.
-2. Commit only `index.html` if needed:
-   - `git add index.html`
-   - `git commit -m "deploy: sync index to vX.Y.Z YYYY-MM-DD HH:mm"`
-3. Push to `main`.
+Confirm the diff shows:
+- Updated `<title>` with new timestamp
+- Updated `styles.css?v=` query string
+- Updated Help section titles
 
-## Post-push verification
+If `git diff` shows no changes to `index.html`, the sync did not run — stop and re-run step 3.
 
-1. Confirm remote has your latest commit:
-   - `git log --oneline -n 3`
-2. Wait 1 to 3 minutes for Pages build.
-3. Hard refresh browser (`Ctrl+F5`) or open in private window.
+### 5. Commit — always include both files
+
+```powershell
+git add index.html oniwire_vX_Y_Z.html
+git commit -m "deploy: vX.Y.Z YYYY-MM-DD HH:mm sync index"
+```
+
+A commit that includes `oniwire_vX_Y_Z.html` but **not** `index.html` will leave the live site on the old build.
+
+### 6. Push
+
+```powershell
+git push origin main
+```
+
+---
+
+## Post-push verification (always do this)
+
+1. Confirm the commit reached remote:
+   ```powershell
+   git log --oneline -n 3
+   ```
+2. Wait 1–3 minutes for GitHub Pages to rebuild.
+3. Open the site in a **private/incognito window** (bypasses local browser cache).
+4. Open Help → Latest Update and confirm the timestamp matches what you just pushed.
+
+---
+
+## Fast fix — if the live site is frozen or on the wrong version
+
+This means `index.html` was not included in the last push. Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-index.ps1
+git add index.html
+git commit -m "deploy: fix sync index to vX.Y.Z YYYY-MM-DD HH:mm"
+git push origin main
+```
+
+Then follow post-push verification above.
+
+---
 
 ## Pre-push checklist
 
-- [ ] I changed the intended `oniwire_vX_Y_Z.html` file.
-- [ ] I updated visible version labels to `vX.Y.Z | YYYY-MM-DD HH:mm`.
-- [ ] I synced `index.html` using `scripts/sync-index.ps1`.
-- [ ] I verified `index.html` contains the target version + timestamp label.
-- [ ] My commit includes `index.html` for any live-site update.
-- [ ] I pushed to `origin/main`.
+Run through this before every push that goes to the live site:
+
+- [ ] All code changes are in `oniwire_vX_Y_Z.html` (not in `index.html` directly).
+- [ ] `<title>` updated to `vX.Y.Z | YYYY-MM-DD HH:mm`.
+- [ ] `styles.css?v=YYYYMMDD-HHmm` cache-bust query updated.
+- [ ] Help → Latest Update `title` and section heading updated with timestamp.
+- [ ] `sync-index.ps1` was run and completed successfully.
+- [ ] `git diff -- index.html` confirms the timestamp and CSS version are present.
+- [ ] `git add` includes **both** `index.html` and `oniwire_vX_Y_Z.html`.
+- [ ] Pushed to `origin/main`.
+- [ ] Verified live site in private window shows the correct timestamp in Help → Latest Update.
