@@ -636,10 +636,12 @@ select option{
 
 .screenShell{
   min-height: 0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 6px;
+  overflow: visible;
 }
 
 /* The 16:9 viewport should never become “wider than 16:9”.
@@ -2040,114 +2042,105 @@ select optgroup{
 /* =====================================================
    Ruler + Guide system
    ===================================================== */
-.rulerOverlay{
+/* Ruler canvas bars — sized and positioned by JS, sit outside .screen */
+canvas.rulerBar--h,
+canvas.rulerBar--v {
+  position: absolute;
+  display: block;
+  z-index: 25;
+  pointer-events: auto;
+}
+canvas.rulerBar--h { cursor: s-resize; }
+canvas.rulerBar--v { cursor: e-resize; }
+canvas.rulerBar--h.isHidden,
+canvas.rulerBar--v.isHidden { display: none; }
+
+/* Corner square where ruler bars meet */
+.rulerCorner{
+  position: absolute;
+  width: 18px; height: 18px;
+  background: rgba(12, 16, 24, 0.97);
+  border-right:  1px solid rgba(255,255,255,.14);
+  border-bottom: 1px solid rgba(255,255,255,.14);
+  pointer-events: none;
+  z-index: 26;
+}
+.rulerCorner.isHidden{ display: none; }
+
+/* Guide layer fills the .screen, clips at canvas edges */
+#rulerGuideLayer{
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 22;
 }
-.rulerOverlay.isHidden{ display: none; }
-
-/* Horizontal ruler bar (top edge) */
-.rulerBar--h{
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 18px;
-  cursor: s-resize;
-  pointer-events: auto;
-  background:
-    repeating-linear-gradient(
-      to right,
-      rgba(255,255,255,.18) 0px,
-      rgba(255,255,255,.18) 1px,
-      transparent 1px,
-      transparent 10px
-    ),
-    rgba(14, 18, 26, 0.90);
-  border-bottom: 1px solid rgba(255,255,255,.14);
-}
-
-/* Vertical ruler bar (left edge) */
-.rulerBar--v{
-  position: absolute;
-  top: 0; left: 0; bottom: 0;
-  width: 18px;
-  cursor: e-resize;
-  pointer-events: auto;
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      rgba(255,255,255,.18) 0px,
-      rgba(255,255,255,.18) 1px,
-      transparent 1px,
-      transparent 10px
-    ),
-    rgba(14, 18, 26, 0.90);
-  border-right: 1px solid rgba(255,255,255,.14);
-}
-
-/* Corner square where the two bars meet */
-.rulerCorner{
-  position: absolute;
-  top: 0; left: 0;
-  width: 18px; height: 18px;
-  background: rgba(20, 24, 34, 0.95);
-  border-right: 1px solid rgba(255,255,255,.14);
-  border-bottom: 1px solid rgba(255,255,255,.14);
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* Guide line layer */
-#rulerGuideLayer{
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
+#rulerGuideLayer.isHidden{ display: none; }
 
 /* Individual guide lines */
 .rulerGuide{
   position: absolute;
   pointer-events: auto;
-  transition: background 0.1s ease;
 }
-/* Horizontal guide */
+/* Horizontal guide — spans full width */
 .rulerGuide--h{
   left: 0; right: 0;
   height: 1px;
   cursor: ns-resize;
   background: rgba(80, 180, 255, 0.75);
-  box-shadow: 0 0 0 1px rgba(80, 180, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(80, 180, 255, 0.15);
 }
 .rulerGuide--h::before{
   content: "";
   position: absolute;
-  inset: -4px 0;          /* expand hit area vertically */
+  inset: -5px 0;
   cursor: ns-resize;
 }
-/* Vertical guide */
+/* Vertical guide — spans full height */
 .rulerGuide--v{
   top: 0; bottom: 0;
   width: 1px;
   cursor: ew-resize;
   background: rgba(80, 180, 255, 0.75);
-  box-shadow: 1px 0 0 0 rgba(80, 180, 255, 0.18);
+  box-shadow: 1px 0 0 0 rgba(80, 180, 255, 0.15);
 }
 .rulerGuide--v::before{
   content: "";
   position: absolute;
-  inset: 0 -4px;          /* expand hit area horizontally */
+  inset: 0 -5px;
   cursor: ew-resize;
 }
 .rulerGuide:hover{
   background: rgba(255, 100, 80, 0.85);
 }
 
+/* Pixel-coordinate label shown on each guide via data-pos attribute */
+.rulerGuide::after{
+  content: attr(data-pos);
+  position: absolute;
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: rgba(160, 210, 255, 0.92);
+  background: rgba(10, 14, 22, 0.82);
+  padding: 1px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+  line-height: 14px;
+}
+.rulerGuide--h::after{
+  top: -15px;
+  left: 20px;
+}
+.rulerGuide--v::after{
+  left: 4px;
+  top: 20px;
+}
+
 /* Ghost preview line while dragging from a ruler bar */
 .rulerGhost{
   position: absolute;
   pointer-events: none;
-  background: rgba(80, 180, 255, 0.35);
+  background: rgba(80, 180, 255, 0.30);
 }
 .rulerGhost--h{ left: 0; right: 0; height: 1px; }
 .rulerGhost--v{ top: 0; bottom: 0; width: 1px; }

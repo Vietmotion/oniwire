@@ -122,7 +122,7 @@
 
       <div class="previewInner previewLayout">
         <!-- LEFT: Screen -->
-        <div class="screenShell">
+        <div class="screenShell" id="screenShell">
           <div class="screen" id="previewViewport" draggable ="false">
             <div class="previewScale" id="previewInner">
               <div id="safeZoneOverlay" class="safeZoneOverlay isHidden" aria-hidden="true">
@@ -136,14 +136,13 @@
               </div>
               <div id="renderRoot" style="position:absolute; inset:0;"></div>
             </div>
-            <!-- Ruler overlay: outside previewScale so guides are viewport-relative -->
-            <div id="rulerOverlay" class="rulerOverlay isHidden" aria-hidden="true">
-              <div id="rulerTop" class="rulerBar rulerBar--h" title="Drag down to create a horizontal guide"></div>
-              <div id="rulerLeft" class="rulerBar rulerBar--v" title="Drag right to create a vertical guide"></div>
-              <div class="rulerCorner"></div>
-              <div id="rulerGuideLayer"></div>
-            </div>
+            <!-- Guide lines clip naturally at canvas bounds -->
+            <div id="rulerGuideLayer" class="isHidden" aria-hidden="true"></div>
           </div>
+          <!-- Ruler bars live outside the screen, positioned by JS relative to screenShell -->
+          <canvas id="rulerTop"  class="rulerBar rulerBar--h isHidden" title="Drag down to create a horizontal guide"></canvas>
+          <canvas id="rulerLeft" class="rulerBar rulerBar--v isHidden" title="Drag right to create a vertical guide"></canvas>
+          <div id="rulerCorner" class="rulerCorner isHidden"></div>
         </div>
         
         <!-- RIGHT: Notes -->
@@ -552,18 +551,166 @@
   // Ruler + Guide system
   // -----------------------------
   const rulerBtn        = document.getElementById("btnRuler");
-  const rulerOverlay    = document.getElementById("rulerOverlay");
-  const rulerTop        = document.getElementById("rulerTop");
-  const rulerLeft       = document.getElementById("rulerLeft");
+  const rulerTopCanvas  = document.getElementById("rulerTop");
+  const rulerLeftCanvas = document.getElementById("rulerLeft");
+  const rulerCornerEl   = document.getElementById("rulerCorner");
   const rulerGuideLayer = document.getElementById("rulerGuideLayer");
+  const screenShellEl   = document.getElementById("screenShell");
+  const RULER_SIZE = 18;
 
   let rulersVisible = false;
-  const rulerGuides = []; // { el, axis: 'h'|'v' }
+  const rulerGuides = []; // { el, axis: 'h'|'v', canvasPx: number }
+
+  // Returns current transform state — scale and canvas-origin offsets in screen pixels
+  function getTransformInfo(){
+    const vw = previewViewport.clientWidth;
+    const vh = previewViewport.clientHeight;
+    const fitScale = Math.min(vw / previewBase.w, vh / previewBase.h);
+    const scale   = fitScale * previewZoomValue;
+    const offsetX = (vw - previewBase.w * scale) / 2 + pan.x;
+    const offsetY = (vh - previewBase.h * scale) / 2 + pan.y;
+    return { scale, offsetX, offsetY };
+  }
+
+  // Draw tick marks + pixel labels on a ruler canvas element
+  function drawRulerCanvas(canvas, axis){
+    if(!canvas || canvas.width < 1 || canvas.height < 1) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    const { scale, offsetX, offsetY } = getTransformInfo();
+    const pixOff    = axis === "h" ? offsetX : offsetY;
+    const barLength = axis === "h" ? W : H;
+    const canvasMax = axis === "h" ? previewBase.w : previewBase.h;
+
+    // Adaptive major step: keep labels at least 60 screen-px apart
+    const NICE = [1,2,5,10,25,50,100,200,250,500,1000];
+    const majorStep = NICE.find(s => s * scale >= 60) || 1000;
+    const minorStep = majorStep >= 5 ? majorStep / 5 : 0;
+
+    // Background
+    ctx.fillStyle = "rgba(12,16,24,0.97)";
+    ctx.fillRect(0, 0, W, H);
+
+    // Inner border line
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if(axis === "h"){ ctx.moveTo(0, H - 0.5); ctx.lineTo(W, H - 0.5); }
+    else             { ctx.moveTo(W - 0.5, 0); ctx.lineTo(W - 0.5, H); }
+    ctx.stroke();
+
+    // Minor ticks
+    if(minorStep > 0 && minorStep * scale >= 4){
+      const minorStart = Math.floor(-pixOff / scale / minorStep) * minorStep;
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.lineWidth = 1;
+      for(let cp = minorStart; cp <= canvasMax + majorStep; cp += minorStep){
+        if(cp % majorStep === 0) continue;
+        const sp = Math.round(cp * scale + pixOff);
+        if(sp < 0 || sp >= barLength) continue;
+        ctx.beginPath();
+        if(axis === "h"){ ctx.moveTo(sp + .5, H - 4); ctx.lineTo(sp + .5, H); }
+        else             { ctx.moveTo(W - 4, sp + .5); ctx.lineTo(W,   sp + .5); }
+        ctx.stroke();
+      }
+    }
+
+    // Major ticks + labels
+    ctx.font = "9px ui-monospace,SFMono-Regular,monospace";
+    const majorStart = Math.floor(-pixOff / scale / majorStep) * majorStep;
+    for(let cp = majorStart; cp <= canvasMax + majorStep; cp += majorStep){
+      const sp = Math.round(cp * scale + pixOff);
+      if(sp < -1 || sp > barLength + 1) continue;
+
+      ctx.strokeStyle = "rgba(255,255,255,0.32)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if(axis === "h"){ ctx.moveTo(sp + .5, H - 7); ctx.lineTo(sp + .5, H); }
+      else             { ctx.moveTo(W - 7, sp + .5); ctx.lineTo(W,   sp + .5); }
+      ctx.stroke();
+
+      const label = String(Math.round(cp));
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      if(axis === "h"){
+        ctx.textAlign    = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, sp, 2);
+      } else {
+        ctx.save();
+        ctx.translate(W - 10, sp);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign    = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, 0, 1);
+        ctx.restore();
+      }
+    }
+  }
+
+  // Position canvas elements outside the screen and redraw tick marks
+  function positionAndDrawRulers(){
+    if(!rulersVisible || !screenShellEl || !previewViewport) return;
+    // offsetLeft/offsetTop are always relative to the positioned screenShell ancestor —
+    // much more reliable than BoundingClientRect subtraction during resize/zoom.
+    const relLeft = previewViewport.offsetLeft;
+    const relTop  = previewViewport.offsetTop;
+    const sw = previewViewport.offsetWidth;
+    const sh = previewViewport.offsetHeight;
+
+    // Top ruler — above screen, aligned with screen left edge
+    rulerTopCanvas.style.left   = relLeft + "px";
+    rulerTopCanvas.style.top    = (relTop - RULER_SIZE) + "px";
+    rulerTopCanvas.style.width  = sw + "px";
+    rulerTopCanvas.style.height = RULER_SIZE + "px";
+    rulerTopCanvas.width  = Math.max(1, Math.round(sw));
+    rulerTopCanvas.height = RULER_SIZE;
+
+    // Left ruler — left of screen, aligned with screen top edge
+    rulerLeftCanvas.style.left   = (relLeft - RULER_SIZE) + "px";
+    rulerLeftCanvas.style.top    = relTop + "px";
+    rulerLeftCanvas.style.width  = RULER_SIZE + "px";
+    rulerLeftCanvas.style.height = sh + "px";
+    rulerLeftCanvas.width  = RULER_SIZE;
+    rulerLeftCanvas.height = Math.max(1, Math.round(sh));
+
+    // Corner square
+    rulerCornerEl.style.left   = (relLeft - RULER_SIZE) + "px";
+    rulerCornerEl.style.top    = (relTop  - RULER_SIZE) + "px";
+    rulerCornerEl.style.width  = RULER_SIZE + "px";
+    rulerCornerEl.style.height = RULER_SIZE + "px";
+
+    drawRulerCanvas(rulerTopCanvas,  "h");
+    drawRulerCanvas(rulerLeftCanvas, "v");
+  }
+
+  // Reposition guide divs based on stored canvas-pixel coordinates
+  function updateGuidePositions(){
+    if(!rulersVisible) return;
+    const { scale, offsetX, offsetY } = getTransformInfo();
+    for(const g of rulerGuides){
+      if(g.axis === "h"){
+        g.el.style.top  = (g.canvasPx * scale + offsetY) + "px";
+        g.el.dataset.pos = "Y: " + Math.round(g.canvasPx) + "px";
+      } else {
+        g.el.style.left = (g.canvasPx * scale + offsetX) + "px";
+        g.el.dataset.pos = "X: " + Math.round(g.canvasPx) + "px";
+      }
+    }
+  }
+
+  // Called from applyPreviewTransform and ResizeObserver
+  function updateRulerDisplay(){
+    if(!rulersVisible) return;
+    positionAndDrawRulers();
+    updateGuidePositions();
+  }
 
   function setRulersVisible(v){
     rulersVisible = !!v;
-    rulerOverlay?.classList.toggle("isHidden", !rulersVisible);
+    [rulerTopCanvas, rulerLeftCanvas, rulerCornerEl].forEach(el => el?.classList.toggle("isHidden", !rulersVisible));
+    rulerGuideLayer?.classList.toggle("isHidden", !rulersVisible);
     rulerBtn?.classList.toggle("active", rulersVisible);
+    if(rulersVisible) requestAnimationFrame(updateRulerDisplay);
   }
 
   function toggleRulers(){
@@ -571,13 +718,14 @@
     toast(rulersVisible ? "Rulers on — drag from ruler bars to add guides. Double-click a guide to remove." : "Rulers off.");
   }
 
-  function createGuide(axis, pct){
+  function createGuide(axis, canvasPx){
+    const { scale, offsetX, offsetY } = getTransformInfo();
     const el = document.createElement("div");
     el.className = `rulerGuide rulerGuide--${axis}`;
-    if(axis === "h") el.style.top  = pct + "%";
-    else             el.style.left = pct + "%";
+    el.dataset.pos = (axis === "h" ? "Y: " : "X: ") + Math.round(canvasPx) + "px";
+    if(axis === "h") el.style.top  = (canvasPx * scale + offsetY) + "px";
+    else             el.style.left = (canvasPx * scale + offsetX) + "px";
 
-    // Double-click removes the guide
     el.addEventListener("dblclick", (e) => {
       e.stopPropagation();
       const idx = rulerGuides.findIndex(g => g.el === el);
@@ -585,87 +733,86 @@
       el.remove();
     });
 
-    // Pointer drag to reposition
     el.addEventListener("pointerdown", (e) => {
       if(e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
-      const rect = rulerOverlay.getBoundingClientRect();
-
+      const guide = rulerGuides.find(g => g.el === el);
       function onMove(me){
+        const sr = previewViewport.getBoundingClientRect();
+        const { scale: sc, offsetX: ox, offsetY: oy } = getTransformInfo();
         if(axis === "h"){
-          const p = Math.max(0, Math.min(100, ((me.clientY - rect.top) / rect.height) * 100));
-          el.style.top = p + "%";
+          guide.canvasPx = Math.max(0, Math.min(previewBase.h, Math.round((me.clientY - sr.top - oy) / sc)));
+          el.style.top  = (guide.canvasPx * sc + oy) + "px";
+          el.dataset.pos = "Y: " + Math.round(guide.canvasPx) + "px";
         } else {
-          const p = Math.max(0, Math.min(100, ((me.clientX - rect.left) / rect.width) * 100));
-          el.style.left = p + "%";
+          guide.canvasPx = Math.max(0, Math.min(previewBase.w, Math.round((me.clientX - sr.left - ox) / sc)));
+          el.style.left = (guide.canvasPx * sc + ox) + "px";
+          el.dataset.pos = "X: " + Math.round(guide.canvasPx) + "px";
         }
       }
-      function onUp(){
-        el.removeEventListener("pointermove", onMove);
-        el.removeEventListener("pointerup",   onUp);
-        el.removeEventListener("pointercancel", onUp);
-      }
+      function onUp(){ el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp); el.removeEventListener("pointercancel", onUp); }
       el.addEventListener("pointermove",   onMove);
       el.addEventListener("pointerup",     onUp);
       el.addEventListener("pointercancel", onUp);
     });
 
-    rulerGuides.push({ el, axis });
+    rulerGuides.push({ el, axis, canvasPx });
     rulerGuideLayer?.appendChild(el);
     return el;
   }
 
-  // Drag from a ruler bar → ghost line preview → drop creates a guide
-  function setupRulerBarDrag(barEl, axis){
-    barEl?.addEventListener("pointerdown", (e) => {
+  function setupRulerBarDrag(canvasEl, axis){
+    canvasEl?.addEventListener("pointerdown", (e) => {
       if(e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
-      barEl.setPointerCapture(e.pointerId);
+      canvasEl.setPointerCapture(e.pointerId);
 
       const ghost = document.createElement("div");
       ghost.className = `rulerGhost rulerGhost--${axis}`;
       ghost.style.display = "none";
-      rulerOverlay?.appendChild(ghost);
+      rulerGuideLayer?.appendChild(ghost);
 
-      const rect = rulerOverlay.getBoundingClientRect();
-      let currentPct = 0;
+      let currentCanvasPx = 0;
 
       function updateGhost(me){
+        const sr = previewViewport.getBoundingClientRect();
+        const { scale, offsetX, offsetY } = getTransformInfo();
         if(axis === "h"){
-          const p = Math.max(0, Math.min(100, ((me.clientY - rect.top) / rect.height) * 100));
-          currentPct = p;
-          ghost.style.top = p + "%";
+          currentCanvasPx = Math.max(0, Math.min(previewBase.h, Math.round((me.clientY - sr.top  - offsetY) / scale)));
+          ghost.style.top  = (currentCanvasPx * scale + offsetY) + "px";
         } else {
-          const p = Math.max(0, Math.min(100, ((me.clientX - rect.left) / rect.width) * 100));
-          currentPct = p;
-          ghost.style.left = p + "%";
+          currentCanvasPx = Math.max(0, Math.min(previewBase.w, Math.round((me.clientX - sr.left - offsetX) / scale)));
+          ghost.style.left = (currentCanvasPx * scale + offsetX) + "px";
         }
         ghost.style.display = "block";
       }
 
       function onUp(me){
         ghost.remove();
-        barEl.removeEventListener("pointermove", updateGhost);
-        barEl.removeEventListener("pointerup",   onUp);
-        barEl.removeEventListener("pointercancel", onUp);
-        // Only create the guide if the pointer moved past the ruler bar
-        const pastRuler = axis === "h"
-          ? (me.clientY - rect.top)  > 18
-          : (me.clientX - rect.left) > 18;
-        if(pastRuler) createGuide(axis, currentPct);
+        canvasEl.removeEventListener("pointermove", updateGhost);
+        canvasEl.removeEventListener("pointerup",   onUp);
+        canvasEl.removeEventListener("pointercancel", onUp);
+        const sr = previewViewport.getBoundingClientRect();
+        const inScreen = axis === "h"
+          ? (me.clientY >= sr.top  && me.clientY <= sr.bottom)
+          : (me.clientX >= sr.left && me.clientX <= sr.right);
+        if(inScreen) createGuide(axis, currentCanvasPx);
       }
 
-      barEl.addEventListener("pointermove",   updateGhost);
-      barEl.addEventListener("pointerup",     onUp);
-      barEl.addEventListener("pointercancel", onUp);
+      canvasEl.addEventListener("pointermove",   updateGhost);
+      canvasEl.addEventListener("pointerup",     onUp);
+      canvasEl.addEventListener("pointercancel", onUp);
     });
   }
 
-  setupRulerBarDrag(rulerTop,  "h");
-  setupRulerBarDrag(rulerLeft, "v");
+  setupRulerBarDrag(rulerTopCanvas,  "h");
+  setupRulerBarDrag(rulerLeftCanvas, "v");
+
+  // Reposition rulers when the viewport is resized (window/panel drag)
+  new ResizeObserver(() => { if(rulersVisible) positionAndDrawRulers(); }).observe(previewViewport);
 
 
   const tipsContentEl = document.getElementById("tipsContent");
@@ -1480,6 +1627,7 @@
       `translate(${offsetX + pan.x}px, ${offsetY + pan.y}px) scale(${scale})`;
 
     syncLayoutSplitters();
+    updateRulerDisplay();
   }
 
   function syncPreviewZoomSelect(value){

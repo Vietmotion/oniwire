@@ -10,6 +10,22 @@ Editing `oniwire_vX_Y_Z.html` alone — no matter how many times you push — do
 
 ## Step-by-step release (do every time, no exceptions)
 
+### Recommended fast path (safe one-command deploy)
+
+From repo root, run:
+
+```powershell
+npm run deploy-pages -- "deploy: vX.Y.Z YYYY-MM-DD HH:mm ruler fix"
+```
+
+This command now does the full release flow automatically:
+- Syncs `index.html` from the latest `oniwire_vX_Y_Z.html`
+- Stages changes
+- Commits (if needed)
+- Pushes to `origin/main`
+
+Use the detailed manual steps below if you need to inspect each stage.
+
 ### 1. Edit in the version file
 
 All code changes go into `oniwire_vX_Y_Z.html` (and any supporting files like `styles.css`, `scripts/`).
