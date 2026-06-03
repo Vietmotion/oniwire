@@ -125,6 +125,43 @@ Important rule:
   - Treat deterministic image bake as an optimization; disable it in any ambiguous/transformed scene.
   - Before large refactors, add a quick regression matrix: heart mask scene, dino scene, mixed image+text, animated mask, direct image output.
 
+### 2026-06-03 - Stylize + Mask export regression (geometry drift, missing stylize, mask misalignment)
+
+- Symptoms:
+  - Export output not centered while viewport stayed centered.
+  - Stylize look (especially brutal mapping) missing or downgraded in export.
+  - Pen mask and image content rendered out-of-place or split (shape + rectangular strip mismatch).
+
+- Root causes:
+  - Still export prioritized a live-capture branch for filter scenes, then applied premask afterward; this diverged from clone+bake geometry and caused placement drift.
+  - Filter pre-bake path initially replaced filtered descendants too aggressively and did not always preserve full style/layout context.
+  - Isolated filtered capture did not initially run the same image/mask normalization helpers as the main export path.
+  - Deterministic masked single-image optimization could misclassify mixed-content masked subtrees as image-only.
+  - Stylize brutal mode relied on `filter: url(#...)`; generic canvas filter handling for SVG URL filters was inconsistent.
+
+- Fixes applied:
+  - Reordered still export capture strategy to prefer clone+bake capture first (`captureFrameCanvasWithHtml2canvas`), using live capture only as fallback.
+  - Kept masked-element baking enabled in still export path even when filter effects are present.
+  - Hardened filtered pre-bake:
+    - bake only top-most filtered elements,
+    - preserve full inline style (`cssText`) when replacing with baked image,
+    - skip tiny utility elements.
+  - In isolated filtered capture, explicitly ran:
+    - `bakeCloneImagesForCapture(...)`
+    - `bakeMaskedElementsForHtml2canvas(...)`
+    before html2canvas capture.
+  - Tightened deterministic masked-image eligibility to reject masked subtrees containing visible non-image painted content.
+  - Added SVG URL-filter raster fallback for brutal-style mapping by parsing `feComponentTransfer` tables and applying equivalent pixel mapping in canvas.
+
+- Prevention rules for future nodes:
+  - Any new visual node must define export behavior for both preview and clone-capture paths before release.
+  - If a node uses CSS features html2canvas may ignore (`filter`, `mask`, blend combinations), add explicit pre-bake logic at implementation time.
+  - Never route filter scenes to a different still-capture primary path unless centering/mask parity is validated against clone capture.
+  - Keep MP4 frame capture order aligned with PNG/JPG still capture order. If still export is fixed by clone+bake, MP4 must use the same primary path.
+  - Do not disable masked-element baking just because filter effects exist; this breaks mask/image positional parity in mixed Stylize+Mask scenes.
+  - Treat deterministic image-only bake as opt-in optimization; default to full subtree capture when ambiguity exists.
+  - Add node-level regression checks: viewport parity, center alignment, mask alignment, stylize parity, and mixed-content masked scenes.
+
 ## High-Risk Areas
 
 - CSS masks and alpha-composite behavior.
@@ -170,3 +207,84 @@ Before merging a new render path:
 - Add lightweight export diagnostics that record which capture path ran (`renderLayerToDataUrl`, `html2canvas`, SVG path, etc.).
 - Add a reusable export test scene pack covering text, image, mask, motion, and mixed composites.
 - Add a short "render path changed" checklist to future dev logs whenever export logic is modified.
+
+## Render System Contract (Scalable Guardrails)
+
+This section defines the long-term contract for keeping preview, PNG/JPG, and MP4 behavior aligned as new nodes and effects are added.
+
+### 1) Core Logic Model
+
+- Preview is the visual source of truth.
+- Export is a deterministic reconstruction of preview via clone + bake + capture.
+- Any effect unsupported by the capture engine (for example CSS filter/mask combinations) must be explicitly baked before capture.
+- PNG/JPG and MP4 must share the same primary frame-capture strategy and helper order.
+
+Canonical capture order (still and MP4):
+
+1. Clone render root into isolated wrapper.
+2. Wait for renderable images.
+3. Bake image object-fit/object-position into pixel-stable images.
+4. Bake filter-dependent content (including SVG URL filter fallback where needed).
+5. Bake masked elements.
+6. Capture with html2canvas.
+7. Apply premask only when masked-element bake did not run.
+8. Fall back to live/snapshot capture only on failure.
+
+### 2) Why It Broke
+
+The 2026-06-03 regression happened because the contract above was violated in multiple places:
+
+- MP4 and still paths diverged (different primary branches for filter scenes).
+- Filter scenes routed to live capture first, while still path relied on clone+bake.
+- Mask bake was disabled in some filter branches.
+- Deterministic image-only optimization was allowed in mixed-content masked subtrees.
+
+Result: center drift, mask/image misalignment, and stylize parity failure.
+
+### 3) Non-Negotiable Invariants
+
+- Path parity invariant:
+  - MP4 first-frame capture and PNG capture must use the same primary helper sequence.
+- Mask invariant:
+  - Never disable masked-element bake only because filter effects exist.
+- Optimization invariant:
+  - Deterministic single-image bake is opt-in and must be rejected when subtree ambiguity exists.
+- Geometry invariant:
+  - Replaced/baked elements must preserve full inline layout/transform style context.
+- Fallback invariant:
+  - Fallbacks are for failure recovery, not normal routing for specific node categories.
+
+### 4) Node Onboarding Checklist (Before New Node Ships)
+
+For each new node type or major node update:
+
+1. Classify rendering features used:
+   - filter, mask, blend, transform, animated style, foreignObject dependencies.
+2. Define explicit export strategy:
+   - direct capture-safe OR requires pre-bake helper.
+3. Add node to regression matrix scenes:
+   - static, animated, masked, mixed-content, with/without motion.
+4. Verify parity:
+   - preview vs PNG first frame vs MP4 first frame.
+5. Verify stability:
+   - no center shift, no mask drift, no stylize loss.
+6. Document helper assumptions in this log.
+
+### 5) Fast Recovery Playbook
+
+When a future render mismatch appears:
+
+1. Identify actual capture path used (do not guess).
+2. Compare helper order between preview-success format and failing format.
+3. Check if mask/filter/image bake helpers were skipped or reordered.
+4. Check deterministic optimization gating conditions.
+5. Force parity path first; only then tune optimizations.
+6. Capture and store one minimal failing graph as permanent regression fixture.
+
+### 6) Practical Rule For Scale
+
+- Treat rendering as a pipeline contract, not ad-hoc per-format logic.
+- Every new feature must either:
+  - conform to existing pipeline stages, or
+  - add a new stage used consistently by still + MP4.
+- If a fix is applied to one export format, parity audit for the other format is required before closing the issue.

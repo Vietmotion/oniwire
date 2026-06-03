@@ -1,9 +1,11 @@
 {
   "name": "oniwire",
-  "version": "0.1.5",
+  "version": "0.2.5",
   "private": true,
   "scripts": {
     "sync-index": "powershell -ExecutionPolicy Bypass -File scripts/sync-index.ps1",
-    "deploy-pages": "powershell -ExecutionPolicy Bypass -File scripts/deploy-pages.ps1"
+    "deploy-pages": "powershell -ExecutionPolicy Bypass -File scripts/deploy-pages.ps1",
+    "regression:status": "node scripts/regression-status.js",
+    "core:smoke": "node scripts/core-smoke-test.js"
   }
 }
