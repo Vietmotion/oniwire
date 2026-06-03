@@ -312,14 +312,12 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       const canvasWidth = Math.max(1, Number(canvasSize.width) || 1280);
       const canvasHeight = Math.max(1, Number(canvasSize.height) || 720);
 
-      const bounds = resolveBoundsFromMaskMeta(src.el, canvasWidth, canvasHeight)
-        || resolveBoundsFromMarkers(src.el, canvasWidth, canvasHeight)
-        || { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
-
-      const bx = clamp(Number(bounds.x) || 0, 0, canvasWidth - 1);
-      const by = clamp(Number(bounds.y) || 0, 0, canvasHeight - 1);
-      const bw = clamp(Number(bounds.width) || canvasWidth, 1, canvasWidth - bx);
-      const bh = clamp(Number(bounds.height) || canvasHeight, 1, canvasHeight - by);
+      // Stylize must process the entire composited layer. Cropping to inferred bounds
+      // can create visible seams when source bounds and mask bounds diverge.
+      const bx = 0;
+      const by = 0;
+      const bw = canvasWidth;
+      const bh = canvasHeight;
 
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
@@ -360,6 +358,7 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       fxFrame.style.height = `${bh}px`;
       fxFrame.style.overflow = "hidden";
       fxFrame.style.pointerEvents = "none";
+      const maskHost = findMaskHost(src.el) || src.el;
 
       const base = src.el;
       base.style.position = "absolute";
@@ -466,7 +465,6 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
         overlay.style.background = `radial-gradient(circle at center, rgba(0,0,0,0) 45%, rgba(0,0,0,${alpha.toFixed(3)}) 100%)`;
 
         // Keep vignette constrained to the same mask so it does not darken outside the masked shape.
-        const maskHost = findMaskHost(src.el) || src.el;
         const srcMask = maskHost.style.maskImage || maskHost.style.webkitMaskImage;
         if(srcMask){
           overlay.style.maskImage = srcMask;

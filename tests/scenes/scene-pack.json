@@ -1,0 +1,117 @@
+{
+  "version": "0.1",
+  "createdAt": "2026-05-16",
+  "notes": "Phase 0 seed pack. Uses existing project fixtures first, then adds required manual scenes.",
+  "scenes": [
+    {
+      "id": "S01_basic_shape_motion",
+      "title": "Basic shape + motion + text composite",
+      "status": "seeded",
+      "source": {
+        "type": "fixture-file",
+        "path": "tests/scenes/fixtures/scene_basic_shape_motion.json"
+      },
+      "covers": ["motion", "composite", "text", "shape"]
+    },
+    {
+      "id": "S02_mixed_motion_composite",
+      "title": "Mixed layered composite with motion and effects",
+      "status": "seeded",
+      "source": {
+        "type": "fixture-file",
+        "path": "tests/scenes/fixtures/scene_mixed_motion_composite.json"
+      },
+      "covers": ["gradient", "clone", "transform", "motion", "composite", "glow", "text"]
+    },
+    {
+      "id": "S03_text_multiline_boxwrap",
+      "title": "Text multiline with box wrap and alignment",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Create Text node using wrapMode=box, set boxWidth, test left/center/right align."
+      },
+      "covers": ["text", "wrapMode", "alignment"]
+    },
+    {
+      "id": "S04_shape_gradient_fill",
+      "title": "Shape with gradient/ramp fill",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Connect Ramp -> Gradient and Gradient -> Shape fill input."
+      },
+      "covers": ["shape", "gradient", "ramp", "fill-input"]
+    },
+    {
+      "id": "S05_image_text_composite",
+      "title": "Image + text mixed composite",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Use uploaded image plus text into Composite with blend/opacity variants."
+      },
+      "covers": ["image", "text", "composite", "blend", "opacity"]
+    },
+    {
+      "id": "S06_image_mask_shape_or_pen",
+      "title": "Image masked by shape or pen",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Image -> Composite input, Shape/Pen -> Composite mask."
+      },
+      "covers": ["mask", "image", "shape", "pen", "composite"]
+    },
+    {
+      "id": "S07_animated_mask_motion",
+      "title": "Animated mask over moving content",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Animate mask input and content simultaneously using Motion/Transform."
+      },
+      "covers": ["animated-mask", "motion", "transform", "mp4"]
+    },
+    {
+      "id": "S08_nested_composite_blend",
+      "title": "Nested composite with multiple blend modes",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Create Composite inside Composite with multiply/screen/overlay checks."
+      },
+      "covers": ["nested-composite", "blend", "opacity"]
+    },
+    {
+      "id": "S09_transform_stylize_mask_chain",
+      "title": "Transform chain with stylize and mask",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Composite -> Transform -> Stylize with mask scope verification."
+      },
+      "covers": ["transform", "stylize", "mask-scope"]
+    },
+    {
+      "id": "S10_direct_image_output_stress",
+      "title": "Direct image output object-fit stress",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Direct Image -> Output with varying object-fit/object-position and scale."
+      },
+      "covers": ["image", "object-fit", "export-stretch"]
+    },
+    {
+      "id": "S11_transparent_png_case",
+      "title": "Transparent PNG output",
+      "status": "todo",
+      "source": {
+        "type": "manual-build",
+        "instructions": "Scene with transparent background and alpha edges."
+      },
+      "covers": ["png-alpha", "transparency", "background"]
+    }
+  ]
+}

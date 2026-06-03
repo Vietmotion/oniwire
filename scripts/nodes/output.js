@@ -3,10 +3,12 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
     inputs: ["in"],
     outputs: [],
     icon: "🎯",
-    defaults: { ratio: "16:9", duration: 5, exportEmbedMode: true, exportLottieMode: false },
+    defaults: { ratioMode: "preset", ratioPreset: "16:9", customWidth: 1920, customHeight: 1080, ratio: "16:9", duration: 5, exportEmbedMode: true, exportLottieMode: false },
     run: (_node, inputs) => inputs.in ?? null,
     inspector: () => ([
-      { k: "ratio", type: "select", label: "Aspect Ratio", options: ["1:1", "4:3", "16:9", "21:9", "5:4", "3:2", "2:3", "9:16", "3:4", "4:5"] },
+      { k: "ratioMode", type: "select", label: "Aspect Ratio", options: [{ value: "preset", label: "Preset" }, { value: "custom", label: "Custom" }] },
+      { k: "ratioPreset", type: "select", label: "Preset Ratio", options: ["1:1", "4:3", "16:9", "21:9", "5:4", "3:2", "2:3", "9:16", "3:4", "4:5"], showIf: { k: "ratioMode", equals: "preset" } },
+      { type: "size2d", label: "Custom Size (px)", kx: "customWidth", ky: "customHeight", showIf: { k: "ratioMode", equals: "custom" } },
       { k: "duration", type: "range", label: "Duration (s)", min: 1, max: 30, step: 1 },
       {
         type: "buttons",
@@ -18,14 +20,6 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             buttons: [
               { label: "PNG", id: "exportPNG" },
               { label: "JPG", id: "exportJPG" }
-            ]
-          },
-          {
-            title: "Video/Data",
-            hint: "Animation timeline payload",
-            buttons: [
-              { label: "Animation JSON", id: "exportAnimJSON" },
-              { label: "Embed JS", id: "exportEmbedJS" }
             ]
           },
           {

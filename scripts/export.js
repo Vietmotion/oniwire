@@ -16,6 +16,26 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return `${gb.toFixed(2)} GB`;
 	}
 
+	function resolveOutputRatio(outNode){
+		if(!outNode) return "16:9";
+		const mode = outNode.params?.ratioMode === "custom" ? "custom" : "preset";
+		let raw = mode === "custom"
+			? `${Math.max(1, Math.round(Number(outNode.params?.customWidth) || 0))}:${Math.max(1, Math.round(Number(outNode.params?.customHeight) || 0))}`
+			: String(outNode.params?.ratioPreset || outNode.params?.ratio || "16:9");
+
+		if(mode === "custom"){
+			const w = Math.max(1, Math.round(Number(outNode.params?.customWidth) || 0));
+			const h = Math.max(1, Math.round(Number(outNode.params?.customHeight) || 0));
+			if(!w || !h){
+				raw = String(outNode.params?.ratio || "16:9");
+			}
+		}
+		const parsed = window.oniwireParseRatioString?.(raw);
+		if(parsed) return `${parsed.w}:${parsed.h}`;
+		const fallbackParsed = window.oniwireParseRatioString?.(outNode.params?.ratio || "16:9");
+		return fallbackParsed ? `${fallbackParsed.w}:${fallbackParsed.h}` : "16:9";
+	}
+
 	function buildAnimationPayload(name){
 		const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
 		if(!outNode){
@@ -25,7 +45,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 
 		const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
 		const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
-		const ratio = outNode.params?.ratio || "16:9";
+		const ratio = resolveOutputRatio(outNode);
 		const totalFrames = Math.round(duration * fps);
 
 		const payload = serializeGraph();

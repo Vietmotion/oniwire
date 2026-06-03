@@ -101,7 +101,7 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
             : (rampStops.length
                 ? buildRampMaskUrl(rampStops)
                 : (buildGradientMaskUrl(maskMeta?.gradient, false)
-                    || buildShapeMaskUrl(maskMeta?.shape, false))));
+                || buildShapeMaskUrl(maskMeta?.shape, false))));
       const hasShapeMask = Boolean(maskMeta?.shape);
       const resolvedMaskMode = (isLiveMask || hasShapeMask) ? "alpha" : "luminance";
       if(maskUrl || isLiveMask){
@@ -162,6 +162,27 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
             wrap.appendChild(M);
           }
         }, 0);
+      }
+
+      // When a shape mask is connected, add a hidden bounds marker sized to the
+      // mask so that measureLayerBounds / updatePreviewSelectionBox uses the
+      // mask's footprint instead of the full-canvas inset:0 wrap.
+      if(maskMeta?.shape && maskMeta.shape.shapeType !== "path"){
+        const sm = maskMeta.shape;
+        const bw = Number(sm.width || sm.size || 120);
+        const bh = Number(sm.height || sm.size || 120);
+        const bx = Number(sm.x || 0);
+        const by = Number(sm.y || 0);
+        const bounds = document.createElement("div");
+        bounds.dataset.boundId = node.id;
+        bounds.style.position = "absolute";
+        bounds.style.left = (bx - bw / 2) + "px";
+        bounds.style.top = (by - bh / 2) + "px";
+        bounds.style.width = bw + "px";
+        bounds.style.height = bh + "px";
+        bounds.style.visibility = "hidden";
+        bounds.style.pointerEvents = "none";
+        wrap.appendChild(bounds);
       }
 
       return { el: wrap };

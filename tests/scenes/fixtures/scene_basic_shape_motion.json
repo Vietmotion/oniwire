@@ -1,0 +1,150 @@
+{
+  "version": "2.0",
+  "type": "oniwire-animation-data",
+  "name": "animation",
+  "metadata": {
+    "duration": 5,
+    "fps": 30,
+    "totalFrames": 150,
+    "width": 1280,
+    "height": 720,
+    "ratio": "16:9"
+  },
+  "project": {
+    "version": "0.1",
+    "nextId": 7,
+    "panX": 201.25502998480624,
+    "panY": 31.85773943800112,
+    "zoom": 0.697676326071031,
+    "nodes": [
+      {
+        "id": "1",
+        "type": "Gradient",
+        "pos": {
+          "x": 80,
+          "y": 260
+        },
+        "params": {
+          "a": "#0ea5e9",
+          "b": "#22c55e",
+          "angle": 45,
+          "type": "linear",
+          "cx": 50,
+          "cy": 50
+        }
+      },
+      {
+        "id": "2",
+        "type": "Text",
+        "pos": {
+          "x": 80,
+          "y": 60
+        },
+        "params": {
+          "text": "Hello 👋",
+          "size": 44,
+          "color": "#ffffff",
+          "x": 40,
+          "y": 60,
+          "weight": 700,
+          "font": "Inter"
+        }
+      },
+      {
+        "id": "3",
+        "type": "Composite",
+        "pos": {
+          "x": 520,
+          "y": 170
+        },
+        "params": {
+          "blend": "normal",
+          "opacity": 100
+        }
+      },
+      {
+        "id": "4",
+        "type": "Output",
+        "pos": {
+          "x": 1133.6326945733354,
+          "y": 184.39990594944817
+        },
+        "params": {
+          "ratio": "16:9",
+          "duration": 5
+        }
+      },
+      {
+        "id": "5",
+        "type": "Motion",
+        "pos": {
+          "x": 527,
+          "y": -20.546875
+        },
+        "params": {
+          "mode": "breath",
+          "amount": 0.21,
+          "speed": 0.6
+        }
+      },
+      {
+        "id": "6",
+        "type": "Shape",
+        "pos": {
+          "x": 158.7340230373801,
+          "y": -116.67962835493037
+        },
+        "params": {
+          "shape": "circle",
+          "size": 120,
+          "color": "#8530d9",
+          "x": 614.639175257732,
+          "y": 358.63917525773195
+        }
+      }
+    ],
+    "wires": [
+      {
+        "from": {
+          "nodeId": "1",
+          "port": "layer"
+        },
+        "to": {
+          "nodeId": "3",
+          "port": "b"
+        }
+      },
+      {
+        "from": {
+          "nodeId": "3",
+          "port": "layer"
+        },
+        "to": {
+          "nodeId": "4",
+          "port": "in"
+        }
+      },
+      {
+        "from": {
+          "nodeId": "6",
+          "port": "layer"
+        },
+        "to": {
+          "nodeId": "5",
+          "port": "in"
+        }
+      },
+      {
+        "from": {
+          "nodeId": "5",
+          "port": "layer"
+        },
+        "to": {
+          "nodeId": "3",
+          "port": "a"
+        }
+      }
+    ],
+    "name": "animation"
+  }
+}
