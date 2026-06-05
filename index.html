@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.5 | 2026-06-03 19:56)</title>
-  <link rel="stylesheet" href="styles.css?v=20260603-1956">
+  <title>Oniwire (v0.2.5 | 2026-06-05 23:00)</title>
+  <link rel="stylesheet" href="styles.css?v=20260605-2300">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=Montserrat:wght@100;200;300;400;500;600;700;800;900&family=Roboto:wght@100;300;400;500;700;900&family=Open+Sans:wght@300;400;500;600;700;800&family=Lato:wght@100;300;400;700;900&family=Nunito:wght@200;300;400;500;600;700;800;900&family=Raleway:wght@100;200;300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Source+Sans+3:wght@200;300;400;500;600;700;800;900&family=Ubuntu:wght@300;400;500;700&family=Work+Sans:wght@100;200;300;400;500;600;700;800;900&family=DM+Sans:wght@100;200;300;400;500;600;700;800;900&family=Manrope:wght@200;300;400;500;600;700;800&family=Mulish:wght@200;300;400;500;600;700;800;900&family=Oswald:wght@200;300;400;500;600;700&family=Bebas+Neue&family=Fira+Sans:wght@100;200;300;400;500;600;700;800;900&family=PT+Sans:wght@400;700&family=Noto+Sans:wght@100;200;300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700;800;900&family=Karla:wght@200;300;400;500;600;700;800&family=Inconsolata:wght@200;300;400;500;600;700;800;900&display=swap">
@@ -106,15 +106,21 @@
           <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);">
             Screen
             <select id="previewZoom">
+              <option value="0.25">25%</option>
+              <option value="0.5">50%</option>
               <option value="0.7">70%</option>
               <option value="1" selected>100%</option>
               <option value="1.25">125%</option>
               <option value="1.5">150%</option>
               <option value="2">200%</option>
+              <option value="3">300%</option>
+              <option value="4">400%</option>
             </select>
           </label>
+          <button id="btnPreviewFit" title="Reset preview to 100% and center">Fit</button>
           <button id="btnSafeZone">Safe Zone</button>
           <button id="btnRuler" title="Toggle rulers. Drag from ruler bars to create guide lines. Double-click a guide to remove it.">Ruler</button>
+          <button id="btnSnapGrid" title="Snap dragged objects to ruler guides" aria-label="Snap to guides">🧲</button>
           <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask." style="display:none;">Mask Debug</button>
         </div>
         <button id="btnTips" style="margin-left:auto;" aria-pressed="false">Tips</button>
@@ -212,6 +218,7 @@
 
           <!-- stage is panned/zoomed -->
           <div class="stage" id="stage">
+            <div class="groups" id="groups"></div>
             <div class="nodes" id="nodes"></div>
           </div>
 
@@ -294,7 +301,9 @@
   const state = {
     nodes: new Map(),
     wires: [],
+    groups: new Map(),
     nextId: 1,
+    nextGroupId: 1,
 
     draggingNode: null,   // {id, ox, oy} or {ids: Set, offsets: Map}
     connecting: null,     // {nodeId, port}
@@ -334,6 +343,8 @@
 
   let copyBuffer = null;
   let pasteOffsetCount = 0;
+  let preferNodePasteOnce = false;
+  const NODE_CLIPBOARD_MARKER = "__ONIWIRE_NODE_CLIPBOARD__";
 
   const renderRoot = document.getElementById("renderRoot");
   const inspectorBody = document.getElementById("inspectorBody");
@@ -348,6 +359,7 @@
   let storedLeftPanelWidth = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim() || "260px";
 
   const editorEl = document.getElementById("editor");
+  const groupsEl = document.getElementById("groups");
   const nodesEl  = document.getElementById("nodes");
   const wiresSvg = document.getElementById("wires");
   const toastEl  = document.getElementById("toast");
@@ -447,11 +459,23 @@
   function cloneGraphSnapshot(){
     return {
       nextId: state.nextId,
+      nextGroupId: state.nextGroupId,
       panX: state.panX,
       panY: state.panY,
       zoom: state.zoom,
       selected: state.selected,
       selectedNodes: Array.from(state.selectedNodes),
+      groups: Array.from(state.groups.values()).map(g => ({
+        id: String(g.id),
+        label: String(g.label || "Group"),
+        collapsed: Boolean(g.collapsed),
+        rect: {
+          x: Number(g.rect?.x) || 0,
+          y: Number(g.rect?.y) || 0,
+          w: Math.max(80, Number(g.rect?.w) || 320),
+          h: Math.max(80, Number(g.rect?.h) || 220)
+        }
+      })),
       nodes: Array.from(state.nodes.values()).map(n => ({
         id: String(n.id),
         type: n.type,
@@ -476,13 +500,29 @@
   function restoreSnapshot(snapshot){
     if(!snapshot) return;
     state.nodes.clear();
+    state.groups.clear();
     state.wires = [];
     state.connecting = null;
     state.selected = snapshot.selected || null;
     state.selectedNodes = new Set(snapshot.selectedNodes || []);
 
     state.nextId = Number(snapshot.nextId) || 1;
+    state.nextGroupId = Number(snapshot.nextGroupId) || 1;
     state.panX = Number(snapshot.panX) || 0;
+        for(const g of (snapshot.groups || [])){
+          state.groups.set(String(g.id), {
+            id: String(g.id),
+            label: String(g.label || "Group"),
+            collapsed: Boolean(g.collapsed),
+            rect: {
+              x: Number(g.rect?.x) || 0,
+              y: Number(g.rect?.y) || 0,
+              w: Math.max(80, Number(g.rect?.w) || 320),
+              h: Math.max(80, Number(g.rect?.h) || 220)
+            }
+          });
+        }
+
     state.panY = Number(snapshot.panY) || 0;
     state.zoom = Number(snapshot.zoom) || 1;
 
@@ -520,6 +560,8 @@
   const previewZoomSel = document.getElementById("previewZoom");
   const previewViewport = document.getElementById("previewViewport");
   const previewInner = document.getElementById("previewInner"); // or previewScale if you kept that id
+  const previewFitBtn = document.getElementById("btnPreviewFit");
+  const snapGridBtn = document.getElementById("btnSnapGrid");
   const safeZoneOverlay = document.getElementById("safeZoneOverlay");
   const safeZoneBtn = document.getElementById("btnSafeZone");
   const maskDebugBtn = document.getElementById("btnMaskDebug");
@@ -529,6 +571,8 @@
 
   let safeZoneVisible = false;
   let tipsVisible = false;
+  let snapToGuideVisible = false;
+  const SNAP_GUIDE_THRESHOLD_CANVAS = 12;
 
   function setSafeZoneVisible(visible){
     safeZoneVisible = !!visible;
@@ -553,6 +597,64 @@
     setTipsVisible(!tipsVisible);
   }
 
+  function setSnapToGuideVisible(visible){
+    snapToGuideVisible = !!visible;
+    snapGridBtn?.classList.toggle("active", snapToGuideVisible);
+    snapGridBtn?.setAttribute("aria-pressed", snapToGuideVisible ? "true" : "false");
+  }
+
+  function toggleSnapToGuide(){
+    setSnapToGuideVisible(!snapToGuideVisible);
+    toast(snapToGuideVisible ? "Snap to guides on." : "Snap to guides off.");
+  }
+
+  function snapPreviewPositionToGuides(x, y){
+    if(!snapToGuideVisible || rulerGuides.length === 0) return { x, y };
+
+    const offsetX = Number(dragSnapRef.offsetX) || 0;
+    const offsetY = Number(dragSnapRef.offsetY) || 0;
+    const width = Math.max(0, Number(dragSnapRef.width) || 0);
+    const height = Math.max(0, Number(dragSnapRef.height) || 0);
+
+    let boxLeft = x - offsetX;
+    let boxTop = y - offsetY;
+    let minDx = SNAP_GUIDE_THRESHOLD_CANVAS;
+    let minDy = SNAP_GUIDE_THRESHOLD_CANVAS;
+
+    for(const g of rulerGuides){
+      const gp = Number(g.canvasPx) || 0;
+      if(g.axis === "v"){
+        const xCandidates = [boxLeft];
+        if(width > 0){
+          xCandidates.push(boxLeft + (width / 2));
+          xCandidates.push(boxLeft + width);
+        }
+        for(const candidate of xCandidates){
+          const dx = Math.abs(gp - candidate);
+          if(dx <= minDx){
+            minDx = dx;
+            boxLeft += (gp - candidate);
+          }
+        }
+      }else if(g.axis === "h"){
+        const yCandidates = [boxTop];
+        if(height > 0){
+          yCandidates.push(boxTop + (height / 2));
+          yCandidates.push(boxTop + height);
+        }
+        for(const candidate of yCandidates){
+          const dy = Math.abs(gp - candidate);
+          if(dy <= minDy){
+            minDy = dy;
+            boxTop += (gp - candidate);
+          }
+        }
+      }
+    }
+
+    return { x: boxLeft + offsetX, y: boxTop + offsetY };
+  }
+
   // -----------------------------
   // Ruler + Guide system
   // -----------------------------
@@ -567,7 +669,7 @@
   let rulersVisible = false;
   const rulerGuides = []; // { el, axis: 'h'|'v', canvasPx: number }
 
-  // Returns current transform state — scale and canvas-origin offsets in screen pixels
+  // Returns current transform state � scale and canvas-origin offsets in screen pixels
   function getTransformInfo(){
     const vw = previewViewport.clientWidth;
     const vh = previewViewport.clientHeight;
@@ -656,14 +758,14 @@
   // Position canvas elements outside the screen and redraw tick marks
   function positionAndDrawRulers(){
     if(!rulersVisible || !screenShellEl || !previewViewport) return;
-    // offsetLeft/offsetTop are always relative to the positioned screenShell ancestor —
+    // offsetLeft/offsetTop are always relative to the positioned screenShell ancestor �
     // much more reliable than BoundingClientRect subtraction during resize/zoom.
     const relLeft = previewViewport.offsetLeft;
     const relTop  = previewViewport.offsetTop;
     const sw = previewViewport.offsetWidth;
     const sh = previewViewport.offsetHeight;
 
-    // Top ruler — above screen, aligned with screen left edge
+    // Top ruler � above screen, aligned with screen left edge
     rulerTopCanvas.style.left   = relLeft + "px";
     rulerTopCanvas.style.top    = (relTop - RULER_SIZE) + "px";
     rulerTopCanvas.style.width  = sw + "px";
@@ -671,7 +773,7 @@
     rulerTopCanvas.width  = Math.max(1, Math.round(sw));
     rulerTopCanvas.height = RULER_SIZE;
 
-    // Left ruler — left of screen, aligned with screen top edge
+    // Left ruler � left of screen, aligned with screen top edge
     rulerLeftCanvas.style.left   = (relLeft - RULER_SIZE) + "px";
     rulerLeftCanvas.style.top    = relTop + "px";
     rulerLeftCanvas.style.width  = RULER_SIZE + "px";
@@ -721,7 +823,7 @@
 
   function toggleRulers(){
     setRulersVisible(!rulersVisible);
-    toast(rulersVisible ? "Rulers on — drag from ruler bars to add guides. Double-click a guide to remove." : "Rulers off.");
+    toast(rulersVisible ? "Rulers on � drag from ruler bars to add guides. Double-click a guide to remove." : "Rulers off.");
   }
 
   function createGuide(axis, canvasPx){
@@ -830,8 +932,8 @@
   }
 
   let previewBase = { w: 1280, h: 720 };
-  const PREVIEW_ZOOM_MIN = 0.5;
-  const PREVIEW_ZOOM_MAX = 3;
+  const PREVIEW_ZOOM_MIN = 0.25;
+  const PREVIEW_ZOOM_MAX = 6;
 
   let previewZoomValue = Number(previewZoomSel.value) || 1;
   let previewScale = 1;
@@ -844,6 +946,7 @@
   let isPreviewDragging = false;
   let dragStart = { x: 0, y: 0 };
   let dragBase = { x: 0, y: 0 };
+  let dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
   let dragNodeId = null;
 
   const penCanvasOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -854,7 +957,7 @@
   penCanvasOverlay.style.height = "100%";
   penCanvasOverlay.style.pointerEvents = "none";
   penCanvasOverlay.style.zIndex = "12";
-  previewInner?.appendChild(penCanvasOverlay);
+  previewViewport?.appendChild(penCanvasOverlay);
 
   const penCanvasState = {
     active: false,
@@ -868,6 +971,7 @@
     hoverCanvas: null,
     currentCanvas: null,
     selectedIndices: [],
+    startPaths: null,
     transformMeta: null
   };
 
@@ -938,10 +1042,71 @@
     return (Array.isArray(pts) ? pts : []).map(p => ({ ...p }));
   }
 
+  function clonePenPaths(paths){
+    return (Array.isArray(paths) ? paths : []).map(path => ({
+      ...path,
+      points: clonePenPoints(path?.points)
+    }));
+  }
+
   function getPenActivePathIndex(node){
     if(!node?.params) return 0;
     const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
     return clamp(Number(node.params.activePath) || 0, 0, Math.max(0, paths.length - 1));
+  }
+
+  function normalizePenPathSelectionIndices(raw, pathCount){
+    if(pathCount <= 0) return [];
+    const src = Array.isArray(raw) ? raw : [];
+    const seen = new Set();
+    const out = [];
+    for(const value of src){
+      const index = Number(value);
+      if(!Number.isInteger(index) || index < 0 || index >= pathCount || seen.has(index)) continue;
+      seen.add(index);
+      out.push(index);
+    }
+    out.sort((a, b) => a - b);
+    return out;
+  }
+
+  function getPenSelectedPathIndices(node, pathsMaybe){
+    if(!node?.params) return [];
+    const paths = Array.isArray(pathsMaybe)
+      ? pathsMaybe
+      : (Array.isArray(node.params.paths) ? node.params.paths : []);
+    const pathCount = paths.length;
+    if(pathCount <= 0) return [];
+
+    const active = getPenActivePathIndex(node);
+    const next = normalizePenPathSelectionIndices(node.params.penSelectedPaths, pathCount);
+    if(!next.length) return [active];
+    if(!next.includes(active)) return [...next, active].sort((a, b) => a - b);
+    return next;
+  }
+
+  function setPenSelectedPathIndices(node, indices, activePathIndex){
+    if(!node?.params) return [];
+    const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
+    const pathCount = paths.length;
+    if(pathCount <= 0){
+      node.params.penSelectedPaths = [];
+      node.params.activePath = 0;
+      return [];
+    }
+
+    const currentActive = getPenActivePathIndex(node);
+    let next = normalizePenPathSelectionIndices(indices, pathCount);
+    let nextActive = Number.isInteger(activePathIndex)
+      ? clamp(activePathIndex, 0, pathCount - 1)
+      : currentActive;
+
+    if(!next.length) next = [nextActive];
+    if(!next.includes(nextActive)) nextActive = next[next.length - 1];
+
+    node.params.penSelectedPaths = next;
+    node.params.activePath = nextActive;
+    return next;
   }
 
   function normalizePenSelectionIndices(raw, pointCount){
@@ -1043,6 +1208,60 @@
     return box;
   }
 
+  function getPenPathSelectionBounds(node, paths, indices){
+    const selected = normalizePenSelectionIndices(indices, Array.isArray(paths) ? paths.length : 0);
+    if(!selected.length) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for(const pathIndex of selected){
+      const path = Array.isArray(paths) ? paths[pathIndex] : null;
+      const points = normalizePenPoints(path?.points);
+      for(const point of points){
+        const coords = [
+          [point.x, point.y],
+          [point.inX, point.inY],
+          [point.outX, point.outY]
+        ];
+        for(const [x, y] of coords){
+          if(!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          if(x < minX) minX = x;
+          if(y < minY) minY = y;
+          if(x > maxX) maxX = x;
+          if(y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if(!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+
+    const pad = Math.max(12, 14 / Math.max(0.1, previewScale));
+    const box = {
+      minX: minX - pad,
+      minY: minY - pad,
+      maxX: maxX + pad,
+      maxY: maxY + pad
+    };
+    box.width = box.maxX - box.minX;
+    box.height = box.maxY - box.minY;
+    box.centerX = (box.minX + box.maxX) / 2;
+    box.centerY = (box.minY + box.maxY) / 2;
+    box.rotateHandle = {
+      x: box.centerX,
+      y: box.minY - Math.max(22, 30 / Math.max(0.1, previewScale))
+    };
+    box.corners = {
+      nw: { x: box.minX, y: box.minY, signX: -1, signY: -1 },
+      ne: { x: box.maxX, y: box.minY, signX: 1, signY: -1 },
+      se: { x: box.maxX, y: box.maxY, signX: 1, signY: 1 },
+      sw: { x: box.minX, y: box.maxY, signX: -1, signY: 1 }
+    };
+    return box;
+  }
+
   function pointInPenRect(canvasPt, rect){
     if(!canvasPt || !rect) return false;
     return canvasPt.x >= rect.minX && canvasPt.x <= rect.maxX
@@ -1078,6 +1297,30 @@
     return { kind: "none", bounds: selectionBounds };
   }
 
+  function pickPenPathSelectionControl(node, paths, selectedPathIndices, canvasPt){
+    const selectionBounds = getPenPathSelectionBounds(node, paths, selectedPathIndices);
+    if(!selectionBounds || selectedPathIndices.length < 2) return { kind: "none", bounds: null };
+
+    const radius = Math.max(8, 10 / Math.max(0.1, previewScale));
+    const radius2 = radius * radius;
+
+    if(distanceSquared(canvasPt, selectionBounds.rotateHandle) <= radius2){
+      return { kind: "selectionRotate", bounds: selectionBounds };
+    }
+
+    for(const [cornerName, corner] of Object.entries(selectionBounds.corners)){
+      if(distanceSquared(canvasPt, corner) <= radius2){
+        return { kind: "selectionScale", bounds: selectionBounds, cornerName, corner };
+      }
+    }
+
+    if(pointInPenRect(canvasPt, selectionBounds)){
+      return { kind: "selectionMove", bounds: selectionBounds };
+    }
+
+    return { kind: "none", bounds: selectionBounds };
+  }
+
   function translatePenPoints(points, indices, dx, dy){
     for(const index of indices){
       const point = points[index];
@@ -1088,6 +1331,23 @@
       point.inY += dy;
       point.outX += dx;
       point.outY += dy;
+    }
+  }
+
+  function translatePenPaths(paths, indices, dx, dy){
+    const selected = normalizePenSelectionIndices(indices, Array.isArray(paths) ? paths.length : 0);
+    for(const pathIndex of selected){
+      const path = Array.isArray(paths) ? paths[pathIndex] : null;
+      const points = Array.isArray(path?.points) ? path.points : [];
+      for(const point of points){
+        if(!point) continue;
+        point.x += dx;
+        point.y += dy;
+        point.inX += dx;
+        point.inY += dy;
+        point.outX += dx;
+        point.outY += dy;
+      }
     }
   }
 
@@ -1131,6 +1391,42 @@
     }
   }
 
+  function rotatePenPaths(paths, indices, centerX, centerY, angle){
+    const selected = normalizePenSelectionIndices(indices, Array.isArray(paths) ? paths.length : 0);
+    for(const pathIndex of selected){
+      const path = Array.isArray(paths) ? paths[pathIndex] : null;
+      const points = Array.isArray(path?.points) ? path.points : [];
+      for(const point of points){
+        const anchor = rotateCoord(point.x, point.y, centerX, centerY, angle);
+        const inHandle = rotateCoord(point.inX, point.inY, centerX, centerY, angle);
+        const outHandle = rotateCoord(point.outX, point.outY, centerX, centerY, angle);
+        point.x = anchor.x;
+        point.y = anchor.y;
+        point.inX = inHandle.x;
+        point.inY = inHandle.y;
+        point.outX = outHandle.x;
+        point.outY = outHandle.y;
+      }
+    }
+  }
+
+  function scalePenPaths(paths, indices, centerX, centerY, scaleX, scaleY){
+    const selected = normalizePenSelectionIndices(indices, Array.isArray(paths) ? paths.length : 0);
+    for(const pathIndex of selected){
+      const path = Array.isArray(paths) ? paths[pathIndex] : null;
+      const points = Array.isArray(path?.points) ? path.points : [];
+      for(const point of points){
+        if(!point) continue;
+        point.x = centerX + ((point.x - centerX) * scaleX);
+        point.y = centerY + ((point.y - centerY) * scaleY);
+        point.inX = centerX + ((point.inX - centerX) * scaleX);
+        point.inY = centerY + ((point.inY - centerY) * scaleY);
+        point.outX = centerX + ((point.outX - centerX) * scaleX);
+        point.outY = centerY + ((point.outY - centerY) * scaleY);
+      }
+    }
+  }
+
   function removePenPointsByIndices(path, indices){
     const points = clonePenPoints(normalizePenPoints(path?.points));
     const removal = normalizePenSelectionIndices(indices, points.length).sort((a, b) => b - a);
@@ -1152,6 +1448,11 @@
         strokeColor: String(node.params.strokeColor || "#ffffff"),
         strokeWidth: Math.max(0.1, Number(node.params.strokeWidth) || 2),
         strokeOpacity: Math.max(0, Math.min(1, Number.isFinite(Number(node.params.strokeOpacity)) ? Number(node.params.strokeOpacity) : 1)),
+        strokeLinecap: "round",
+        strokeTaper: "none",
+        taperStartStrength: 70,
+        taperEndStrength: 70,
+        smoothStrength: 50,
         visible: true
       }];
       node.params.activePath = 0;
@@ -1180,6 +1481,11 @@
       strokeColor: String(path.strokeColor || "#ffffff"),
       strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
       strokeOpacity: Math.max(0, Math.min(1, Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1)),
+      strokeLinecap: ["round", "butt", "square"].includes(path.strokeLinecap) ? path.strokeLinecap : "round",
+      strokeTaper: ["none", "start", "end", "both"].includes(path.strokeTaper) ? path.strokeTaper : "none",
+      taperStartStrength: clamp(Number.isFinite(Number(path.taperStartStrength)) ? Number(path.taperStartStrength) : Number(path.taperStartLen), 0, 100),
+      taperEndStrength: clamp(Number.isFinite(Number(path.taperEndStrength)) ? Number(path.taperEndStrength) : Number(path.taperEndLen), 0, 100),
+      smoothStrength: clamp(Number(path.smoothStrength), 0, 100) || 50,
       visible: path.visible !== false
     }));
   }
@@ -1191,7 +1497,9 @@
       node.params.paths = [{
         name: "Path 01", points: [], closed: false,
         fillColor: "#ffffff", fillOpacity: 0.8,
-        strokeColor: "#ffffff", strokeWidth: 2, strokeOpacity: 1, visible: true
+        strokeColor: "#ffffff", strokeWidth: 2, strokeOpacity: 1,
+        strokeLinecap: "round", strokeTaper: "none",
+        taperStartStrength: 70, taperEndStrength: 70, smoothStrength: 50, visible: true
       }];
       node.params.activePath = 0;
       return node.params.paths[0];
@@ -1473,6 +1781,29 @@
     return ((dx * dx) + (dy * dy)) <= (threshold * threshold) ? { first, threshold } : null;
   }
 
+  function findClosestPenPathTarget(node, canvasPt, options){
+    const paths = Array.isArray(options?.paths) ? options.paths : normalizePenPaths(node?.params?.paths);
+    const exclude = Number.isInteger(options?.excludeIndex) ? options.excludeIndex : -1;
+    const threshold = Math.max(PEN_PATH_INSERT_CANVAS_THRESHOLD, PEN_PATH_INSERT_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    let best = null;
+
+    for(let i = 0; i < paths.length; i++){
+      if(i === exclude) continue;
+      const path = paths[i];
+      if(!path || path.visible === false) continue;
+      const pts = normalizePenPoints(path.points);
+      if(pts.length < 2) continue;
+      const closest = getClosestPenPathPoint(node, path, canvasPt);
+      if(!closest || !Number.isFinite(closest.distance)) continue;
+      if(!best || closest.distance < best.distance){
+        best = { pathIndex: i, distance: closest.distance };
+      }
+    }
+
+    if(best && best.distance <= threshold) return best;
+    return null;
+  }
+
   function drawPenCanvasOverlay(){
     if(!penCanvasOverlay) return;
     const penNode = getSelectedPenNode();
@@ -1486,65 +1817,116 @@
     penNode.params.paths = paths;
     const activeIdx = clamp(Number(penNode.params.activePath) || 0, 0, Math.max(0, paths.length - 1));
     penNode.params.activePath = activeIdx;
+    const selectedPathIndices = getPenSelectedPathIndices(penNode, paths);
+    const selectedPathSet = new Set(selectedPathIndices);
+    const multiPathSelection = selectedPathIndices.length >= 2;
+    const selectedPathBounds = multiPathSelection ? getPenPathSelectionBounds(penNode, paths, selectedPathIndices) : null;
     const activePath = paths[activeIdx] || null;
     const selectedIndices = activePath ? getPenSelectedIndices(penNode, activePath.points) : [];
     const selectedIndexSet = new Set(selectedIndices);
+    const viewW = Math.max(1, previewViewport?.clientWidth || 1);
+    const viewH = Math.max(1, previewViewport?.clientHeight || 1);
+    const { scale, offsetX, offsetY } = getTransformInfo();
 
-    penCanvasOverlay.setAttribute("viewBox", `0 0 ${previewBase.w} ${previewBase.h}`);
+    const toScreenCoord = (x, y) => ({
+      x: (Number(x) || 0) * scale + offsetX,
+      y: (Number(y) || 0) * scale + offsetY
+    });
+
+    const toScreenPoint = (p) => ({
+      ...toScreenCoord(p?.x, p?.y),
+      ...{
+        inX: (Number(p?.inX) || 0) * scale + offsetX,
+        inY: (Number(p?.inY) || 0) * scale + offsetY,
+        outX: (Number(p?.outX) || 0) * scale + offsetX,
+        outY: (Number(p?.outY) || 0) * scale + offsetY
+      }
+    });
+
+    penCanvasOverlay.setAttribute("viewBox", `0 0 ${viewW} ${viewH}`);
+    penCanvasOverlay.setAttribute("shape-rendering", "geometricPrecision");
 
     const ghosts = [];
     const lines  = [];
     const dots   = [];
     const gizmos = [];
+    const pathSelectionGizmos = [];
+    const selectionMarqueeGizmos = [];
 
     for(let pi = 0; pi < paths.length; pi++){
       const path = paths[pi];
       if(!path.visible) continue;
 
       const isActive = pi === activeIdx;
-      const ptsCvs = path.points.map(p => penLocalToCanvas(penNode, p));
-      const d = buildPenCanvasPath(ptsCvs, path.closed);
+      const isPathSelected = selectedPathSet.has(pi);
+      const ptsScreen = path.points.map(p => toScreenPoint(penLocalToCanvas(penNode, p)));
+      const d = buildPenCanvasPath(ptsScreen, path.closed);
 
-      if(!isActive){
+      if(isPathSelected && multiPathSelection){
+        ghosts.push(`<path d="${d}" stroke="rgba(194,221,255,.92)" stroke-width="1.9" fill="${path.closed ? "rgba(140,180,255,.10)" : "rgba(0,0,0,0)"}" stroke-linecap="round" stroke-linejoin="round"/>`);
+      } else if(!isActive){
         // ghost outline only
-        ghosts.push(`<path d="${d}" stroke="rgba(160,200,255,.28)" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/>`);
+        ghosts.push(`<path d="${d}" stroke="rgba(160,200,255,.28)" stroke-width="1.35" fill="none" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`);
       } else {
-        // active path � full preview stroke + handles
-        ghosts.push(`<path d="${d}" stroke="rgba(220,235,255,.95)" stroke-width="2.2" fill="${path.closed ? "rgba(140,180,255,.14)" : "rgba(0,0,0,0)"}" />`);
-        for(let i = 0; i < ptsCvs.length; i++){
-          const p = ptsCvs[i];
+        // active path ? full preview stroke + handles
+        ghosts.push(`<path d="${d}" stroke="rgba(220,235,255,.95)" stroke-width="2.05" fill="${path.closed ? "rgba(140,180,255,.14)" : "rgba(0,0,0,0)"}" stroke-linecap="round" stroke-linejoin="round" />`);
+        for(let i = 0; i < ptsScreen.length; i++){
+          const p = ptsScreen[i];
           const sel = selectedIndexSet.has(i);
-          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.inX}" y2="${p.inY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2"/>`);
-          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.outX}" y2="${p.outY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2"/>`);
+          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.inX}" y2="${p.inY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2" stroke-linecap="round"/>`);
+          lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.outX}" y2="${p.outY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2" stroke-linecap="round"/>`);
           dots.push(`<circle cx="${p.inX}" cy="${p.inY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
           dots.push(`<circle cx="${p.outX}" cy="${p.outY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?"6.6":"5.4"}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.5"/>`);
+          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?6.6:5.4}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.5"/>`);
         }
 
-        const selectionBounds = getPenSelectionBounds(penNode, path.points, selectedIndices);
+        const selectionBounds = !multiPathSelection ? getPenSelectionBounds(penNode, path.points, selectedIndices) : null;
         if(selectionBounds && selectedIndices.length >= 2){
-          gizmos.push(`<rect x="${selectionBounds.minX}" y="${selectionBounds.minY}" width="${selectionBounds.width}" height="${selectionBounds.height}" fill="rgba(122, 162, 255, .06)" stroke="rgba(151, 189, 255, .92)" stroke-width="1.3" stroke-dasharray="6 4" rx="6"/>`);
-          gizmos.push(`<line x1="${selectionBounds.centerX}" y1="${selectionBounds.minY}" x2="${selectionBounds.rotateHandle.x}" y2="${selectionBounds.rotateHandle.y}" stroke="rgba(151, 189, 255, .92)" stroke-width="1.2"/>`);
-          gizmos.push(`<circle cx="${selectionBounds.rotateHandle.x}" cy="${selectionBounds.rotateHandle.y}" r="5.4" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.2"/>`);
+          const min = toScreenCoord(selectionBounds.minX, selectionBounds.minY);
+          const rotate = toScreenCoord(selectionBounds.rotateHandle.x, selectionBounds.rotateHandle.y);
+          const topCenter = toScreenCoord(selectionBounds.centerX, selectionBounds.minY);
+          const boxWidth = selectionBounds.width * scale;
+          const boxHeight = selectionBounds.height * scale;
+          gizmos.push(`<rect x="${min.x}" y="${min.y}" width="${boxWidth}" height="${boxHeight}" fill="rgba(122, 162, 255, .06)" stroke="rgba(151, 189, 255, .92)" stroke-width="1.3" stroke-dasharray="6 4" rx="6"/>`);
+          gizmos.push(`<line x1="${topCenter.x}" y1="${topCenter.y}" x2="${rotate.x}" y2="${rotate.y}" stroke="rgba(151, 189, 255, .92)" stroke-width="1.2" stroke-linecap="round"/>`);
+          gizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="5.4" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.2"/>`);
           for(const corner of Object.values(selectionBounds.corners)){
-            gizmos.push(`<rect x="${corner.x - 4.5}" y="${corner.y - 4.5}" width="9" height="9" rx="2.2" fill="#fef3c7" stroke="#0b1220" stroke-width="1.2"/>`);
+            const c = toScreenCoord(corner.x, corner.y);
+            gizmos.push(`<rect x="${c.x - 4.5}" y="${c.y - 4.5}" width="9" height="9" rx="2.2" fill="#fef3c7" stroke="#0b1220" stroke-width="1.2"/>`);
           }
-        }
-
-        if(penCanvasState.active && penCanvasState.kind === "marquee" && penCanvasState.startCanvas && penCanvasState.currentCanvas){
-          const marquee = getPenRect(penCanvasState.startCanvas, penCanvasState.currentCanvas);
-          gizmos.push(`<rect x="${marquee.minX}" y="${marquee.minY}" width="${marquee.width}" height="${marquee.height}" fill="rgba(122, 162, 255, .12)" stroke="rgba(186, 210, 255, .95)" stroke-width="1.2" stroke-dasharray="5 4"/>`);
         }
 
         const closeHint = shouldShowPenCloseHint(penNode, path, penCanvasState.hoverCanvas);
         if(closeHint){
-          dots.push(`<circle cx="${closeHint.first.x}" cy="${closeHint.first.y}" r="9.5" fill="none" stroke="rgba(255,226,138,.95)" stroke-width="1.8" stroke-dasharray="2 2"/>`);
-          dots.push(`<circle cx="${closeHint.first.x + 11}" cy="${closeHint.first.y - 11}" r="3.1" fill="#ffe28a" stroke="#0b1220" stroke-width="1"/>`);
+          const first = toScreenCoord(closeHint.first.x, closeHint.first.y);
+          dots.push(`<circle cx="${first.x}" cy="${first.y}" r="9.5" fill="none" stroke="rgba(255,226,138,.95)" stroke-width="1.8" stroke-dasharray="2 2"/>`);
+          dots.push(`<circle cx="${first.x + 11}" cy="${first.y - 11}" r="3.1" fill="#ffe28a" stroke="#0b1220" stroke-width="1"/>`);
         }
       }
     }
 
-    penCanvasOverlay.innerHTML = `<g>${ghosts.join("")}${lines.join("")}${gizmos.join("")}${dots.join("")}</g>`;
+    if(multiPathSelection && selectedPathBounds){
+      const min = toScreenCoord(selectedPathBounds.minX, selectedPathBounds.minY);
+      const rotate = toScreenCoord(selectedPathBounds.rotateHandle.x, selectedPathBounds.rotateHandle.y);
+      const topCenter = toScreenCoord(selectedPathBounds.centerX, selectedPathBounds.minY);
+      const boxWidth = selectedPathBounds.width * scale;
+      const boxHeight = selectedPathBounds.height * scale;
+      pathSelectionGizmos.push(`<rect x="${min.x}" y="${min.y}" width="${boxWidth}" height="${boxHeight}" fill="rgba(122, 162, 255, .05)" stroke="rgba(151, 189, 255, .98)" stroke-width="1.6" stroke-dasharray="7 5" rx="7"/>`);
+      pathSelectionGizmos.push(`<line x1="${topCenter.x}" y1="${topCenter.y}" x2="${rotate.x}" y2="${rotate.y}" stroke="rgba(151, 189, 255, .98)" stroke-width="1.5" stroke-linecap="round"/>`);
+      pathSelectionGizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="6.2" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.3"/>`);
+      for(const corner of Object.values(selectedPathBounds.corners || {})){
+        const c = toScreenCoord(corner.x, corner.y);
+        pathSelectionGizmos.push(`<rect x="${c.x - 5.5}" y="${c.y - 5.5}" width="11" height="11" rx="2.6" fill="#fef3c7" stroke="#0b1220" stroke-width="1.3"/>`);
+      }
+    }
+
+    if(penCanvasState.active && penCanvasState.kind === "marquee" && penCanvasState.startCanvas && penCanvasState.currentCanvas){
+      const marquee = getPenRect(penCanvasState.startCanvas, penCanvasState.currentCanvas);
+      const topLeft = toScreenCoord(marquee.minX, marquee.minY);
+      selectionMarqueeGizmos.push(`<rect x="${topLeft.x}" y="${topLeft.y}" width="${marquee.width * scale}" height="${marquee.height * scale}" fill="rgba(122, 162, 255, .12)" stroke="rgba(186, 210, 255, .95)" stroke-width="1.2" stroke-dasharray="5 4"/>`);
+    }
+
+    penCanvasOverlay.innerHTML = `<g>${ghosts.join("")}${lines.join("")}${gizmos.join("")}${pathSelectionGizmos.join("")}${selectionMarqueeGizmos.join("")}${dots.join("")}</g>`;
   }
 
   function pickPenControl(node, canvasPt){
@@ -1583,6 +1965,7 @@
     penCanvasState.startPoints = null;
     penCanvasState.currentCanvas = null;
     penCanvasState.selectedIndices = [];
+    penCanvasState.startPaths = null;
     penCanvasState.transformMeta = null;
   }
 
@@ -1597,6 +1980,7 @@
     penCanvasState.currentCanvas = startCanvas;
     penCanvasState.startPoints = clonePenPoints(startPoints);
     penCanvasState.selectedIndices = Array.isArray(selectedIndices) ? [...selectedIndices] : [];
+    penCanvasState.startPaths = Array.isArray(transformMeta?.startPaths) ? clonePenPaths(transformMeta.startPaths) : null;
     penCanvasState.transformMeta = transformMeta || null;
     previewViewport.setPointerCapture(pointerId);
   }
@@ -1632,6 +2016,7 @@
     previewInner.style.transform =
       `translate(${offsetX + pan.x}px, ${offsetY + pan.y}px) scale(${scale})`;
 
+    drawPenCanvasOverlay();
     syncLayoutSplitters();
     updateRulerDisplay();
   }
@@ -1659,7 +2044,16 @@
     previewZoomSel.value = valueStr;
   }
 
+  function fitPreviewView(){
+    pan.x = 0;
+    pan.y = 0;
+    syncPreviewZoomSelect(1);
+    applyPreviewTransform();
+    toast("Preview fit to 100%.");
+  }
+
   previewZoomSel.addEventListener("change", applyPreviewTransform);
+  previewFitBtn?.addEventListener("click", fitPreviewView);
   applyPreviewTransform();
 
   previewViewport.addEventListener("wheel", (e) => {
@@ -1711,19 +2105,25 @@
       return;
     }
 
-    if(selectedNode && selectedNode.type === "Pen" && previewInner.contains(e.target)){
+    if(selectedNode && selectedNode.type === "Pen" && previewViewport.contains(e.target)){
       const canvasPt = canvasPointFromPointer(e);
       if(!canvasPt) return;
 
       const activePath = getPenActivePath(selectedNode);
       if(!activePath) return;
       const activePathIndex = Number(selectedNode.params.activePath) || 0;
+      const paths = Array.isArray(selectedNode.params.paths) ? selectedNode.params.paths : [];
+      const selectedPathIndices = getPenSelectedPathIndices(selectedNode, paths);
+      const selectedPathSet = new Set(selectedPathIndices);
+      const multiPathSelection = selectedPathIndices.length >= 2;
       const points = clonePenPoints(normalizePenPoints(activePath.points));
       activePath.points = points;
       const selectedIndices = getPenSelectedIndices(selectedNode, points);
       const selectedIndexSet = new Set(selectedIndices);
       const selectionHit = pickPenSelectionControl(selectedNode, points, selectedIndices, canvasPt);
+      const pathSelectionHit = multiPathSelection ? pickPenPathSelectionControl(selectedNode, paths, selectedPathIndices, canvasPt) : { kind: "none", bounds: null };
       const hit = pickPenControl(selectedNode, canvasPt);
+      const pathHit = findClosestPenPathTarget(selectedNode, canvasPt, { paths });
 
       if(e.button === 2){
         const closestAnchor = findClosestPenAnchor(selectedNode, canvasPt);
@@ -1743,6 +2143,14 @@
       if(e.button !== 0) return;
 
       if(e.shiftKey){
+        if(pathHit){
+          const nextPaths = [...selectedPathSet, pathHit.pathIndex];
+          setPenSelectedPathIndices(selectedNode, nextPaths, pathHit.pathIndex);
+          setPenSelectedIndices(selectedNode, [], pathHit.pathIndex);
+          renderInspector();
+          drawPenCanvasOverlay();
+          return;
+        }
         if(hit.kind === "anchor"){
           if(!selectedIndexSet.has(hit.index)){
             setPenSelectedIndices(selectedNode, [...selectedIndices, hit.index], activePathIndex);
@@ -1754,6 +2162,53 @@
         beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "marquee", -1, canvasPt, points, selectedIndices, null);
         drawPenCanvasOverlay();
         return;
+      }
+
+      if(multiPathSelection && pathSelectionHit.kind !== "none"){
+        if(pathSelectionHit.kind === "selectionRotate"){
+          pushHistory();
+          beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionRotate", -1, canvasPt, points, selectedIndices, {
+            bounds: pathSelectionHit.bounds,
+            pathIndices: selectedPathIndices,
+            startPaths: clonePenPaths(paths),
+            startPathSelection: [...selectedPathIndices],
+            startAngle: Math.atan2(canvasPt.y - pathSelectionHit.bounds.centerY, canvasPt.x - pathSelectionHit.bounds.centerX)
+          });
+          drawPenCanvasOverlay();
+          return;
+        }
+
+        if(pathSelectionHit.kind === "selectionScale"){
+          pushHistory();
+          beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionScale", -1, canvasPt, points, selectedIndices, {
+            bounds: pathSelectionHit.bounds,
+            corner: pathSelectionHit.corner,
+            cornerName: pathSelectionHit.cornerName,
+            pathIndices: selectedPathIndices,
+            startPaths: clonePenPaths(paths),
+            startPathSelection: [...selectedPathIndices]
+          });
+          drawPenCanvasOverlay();
+          return;
+        }
+
+        if(pathSelectionHit.kind === "selectionMove"){
+          if(e.altKey){
+            pushHistory();
+            beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "selectionMove", -1, canvasPt, points, selectedIndices, {
+              bounds: pathSelectionHit.bounds,
+              pathIndices: selectedPathIndices,
+              startPaths: clonePenPaths(paths),
+              startPathSelection: [...selectedPathIndices]
+            });
+            drawPenCanvasOverlay();
+            return;
+          }
+          if(!(e.ctrlKey || e.metaKey)){
+            return;
+          }
+          // Ctrl+click inside bounding box falls through to path removal below
+        }
       }
 
       if(selectionHit.kind === "selectionRotate"){
@@ -1777,13 +2232,33 @@
         return;
       }
 
-      if((e.ctrlKey || e.metaKey) && hit.kind === "anchor"){
+      if((e.ctrlKey || e.metaKey) && hit.kind === "anchor" && !multiPathSelection){
         if(selectedIndexSet.has(hit.index)){
           const nextSelection = selectedIndices.filter(index => index !== hit.index);
           setPenSelectedIndices(selectedNode, nextSelection, activePathIndex);
           renderInspector();
           drawPenCanvasOverlay();
         }
+        return;
+      }
+
+      if((e.ctrlKey || e.metaKey) && pathHit){
+        if(selectedPathSet.has(pathHit.pathIndex) && selectedPathSet.size > 1){
+          const nextPaths = selectedPathIndices.filter(index => index !== pathHit.pathIndex);
+          const nextActive = nextPaths.includes(activePathIndex) ? activePathIndex : nextPaths[nextPaths.length - 1];
+          setPenSelectedPathIndices(selectedNode, nextPaths, nextActive);
+          setPenSelectedIndices(selectedNode, [], Number(selectedNode.params.activePath) || 0);
+          renderInspector();
+          drawPenCanvasOverlay();
+        }
+        return;
+      }
+
+      if(pathHit){
+        setPenSelectedPathIndices(selectedNode, [pathHit.pathIndex], pathHit.pathIndex);
+        setPenSelectedIndices(selectedNode, [], pathHit.pathIndex);
+        renderInspector();
+        drawPenCanvasOverlay();
         return;
       }
 
@@ -1971,6 +2446,36 @@
       dragStart.x = e.clientX; dragStart.y = e.clientY;
       dragBase.x = Number(selectedNode.params.x) || 0;
       dragBase.y = Number(selectedNode.params.y) || 0;
+
+      const targetEl = renderRoot.querySelector(`[data-bound-id="${selectedNode.id}"]`);
+      let boxLeft = dragBase.x;
+      let boxTop = dragBase.y;
+      let boxWidth = 0;
+      let boxHeight = 0;
+
+      if(targetEl){
+        const tRect = targetEl.getBoundingClientRect();
+        const pRect = previewInner.getBoundingClientRect();
+        boxLeft = (tRect.left - pRect.left) / previewScale;
+        boxTop = (tRect.top - pRect.top) / previewScale;
+        boxWidth = tRect.width / previewScale;
+        boxHeight = tRect.height / previewScale;
+      }else if(selectedNode.type === "Shape"){
+        const fallbackSize = Math.max(1, Number(selectedNode.params?.size) || 1);
+        const widthParam = Math.max(1, Number(selectedNode.params?.width) || fallbackSize);
+        const heightParam = Math.max(1, Number(selectedNode.params?.height) || fallbackSize);
+        boxLeft = dragBase.x - (widthParam / 2);
+        boxTop = dragBase.y - (heightParam / 2);
+        boxWidth = widthParam;
+        boxHeight = heightParam;
+      }
+
+      dragSnapRef = {
+        offsetX: dragBase.x - boxLeft,
+        offsetY: dragBase.y - boxTop,
+        width: boxWidth,
+        height: boxHeight
+      };
       return;
     }
 
@@ -1994,6 +2499,10 @@
       const activePath = (Array.isArray(pathArr) && pathArr[penCanvasState.pathIndex]) ? pathArr[penCanvasState.pathIndex] : null;
       if(!activePath) return;
 
+      const pathSelectionIndices = normalizePenSelectionIndices(penCanvasState.transformMeta?.pathIndices, Array.isArray(pathArr) ? pathArr.length : 0);
+      const hasPathGroupSelection = pathSelectionIndices.length >= 2 && Array.isArray(penCanvasState.startPaths);
+      const selectionBounds = penCanvasState.transformMeta?.bounds || null;
+
       const points = clonePenPoints(penCanvasState.startPoints);
       const idx = penCanvasState.index;
       const activeSelection = normalizePenSelectionIndices(penCanvasState.selectedIndices, points.length);
@@ -2004,6 +2513,39 @@
       const ldx = dx;
       const ldy = dy;
       penCanvasState.currentCanvas = canvasPt;
+
+      if(hasPathGroupSelection && (penCanvasState.kind === "selectionMove" || penCanvasState.kind === "selectionRotate" || penCanvasState.kind === "selectionScale")){
+        const nextPaths = clonePenPaths(penCanvasState.startPaths);
+        if(penCanvasState.kind === "selectionMove"){
+          translatePenPaths(nextPaths, pathSelectionIndices, ldx, ldy);
+        }else if(penCanvasState.kind === "selectionRotate"){
+          const startAngle = Number(penCanvasState.transformMeta?.startAngle) || 0;
+          const currentAngle = Math.atan2(canvasPt.y - selectionBounds.centerY, canvasPt.x - selectionBounds.centerX);
+          rotatePenPaths(nextPaths, pathSelectionIndices, selectionBounds.centerX, selectionBounds.centerY, currentAngle - startAngle);
+        }else if(penCanvasState.kind === "selectionScale"){
+          const corner = penCanvasState.transformMeta?.corner;
+          if(!corner) return;
+          const startDx = Math.max(0.001, corner.signX * (corner.x - selectionBounds.centerX));
+          const startDy = Math.max(0.001, corner.signY * (corner.y - selectionBounds.centerY));
+          const scaleX = Math.max(0.05, (corner.signX * (canvasPt.x - selectionBounds.centerX)) / startDx);
+          const scaleY = Math.max(0.05, (corner.signY * (canvasPt.y - selectionBounds.centerY)) / startDy);
+          if(e.shiftKey){
+            const startDiag = Math.sqrt(startDx * startDx + startDy * startDy);
+            const curDx = corner.signX * (canvasPt.x - selectionBounds.centerX);
+            const curDy = corner.signY * (canvasPt.y - selectionBounds.centerY);
+            const uniformScale = Math.max(0.05, Math.sqrt(curDx * curDx + curDy * curDy) / startDiag);
+            scalePenPaths(nextPaths, pathSelectionIndices, selectionBounds.centerX, selectionBounds.centerY, uniformScale, uniformScale);
+          } else {
+            scalePenPaths(nextPaths, pathSelectionIndices, selectionBounds.centerX, selectionBounds.centerY, scaleX, scaleY);
+          }
+        }
+
+        node.params.paths = nextPaths;
+        node.params.activePath = clamp(penCanvasState.pathIndex, 0, Math.max(0, nextPaths.length - 1));
+        evaluateAndRender();
+        drawPenCanvasOverlay();
+        return;
+      }
 
       if(penCanvasState.kind === "path"){
         for(const p of points){
@@ -2030,7 +2572,15 @@
         const startDy = Math.max(0.001, corner.signY * (corner.y - bounds.centerY));
         const scaleX = Math.max(0.05, (corner.signX * (canvasPt.x - bounds.centerX)) / startDx);
         const scaleY = Math.max(0.05, (corner.signY * (canvasPt.y - bounds.centerY)) / startDy);
-        scalePenPoints(points, activeSelection, bounds.centerX, bounds.centerY, scaleX, scaleY);
+        if(e.shiftKey){
+          const startDiag = Math.sqrt(startDx * startDx + startDy * startDy);
+          const curDx = corner.signX * (canvasPt.x - bounds.centerX);
+          const curDy = corner.signY * (canvasPt.y - bounds.centerY);
+          const uniformScale = Math.max(0.05, Math.sqrt(curDx * curDx + curDy * curDy) / startDiag);
+          scalePenPoints(points, activeSelection, bounds.centerX, bounds.centerY, uniformScale, uniformScale);
+        } else {
+          scalePenPoints(points, activeSelection, bounds.centerX, bounds.centerY, scaleX, scaleY);
+        }
       }else if(penCanvasState.kind === "marquee"){
         drawPenCanvasOverlay();
         return;
@@ -2060,7 +2610,7 @@
     }
 
     const selectedPenNode = getSelectedPenNode();
-    if(selectedPenNode && previewInner.contains(e.target)){
+    if(selectedPenNode && previewViewport.contains(e.target)){
       penCanvasState.hoverCanvas = canvasPointFromPointer(e);
       drawPenCanvasOverlay();
     }
@@ -2070,8 +2620,11 @@
       if(!node) return;
       const dx = (e.clientX - dragStart.x) / previewScale;
       const dy = (e.clientY - dragStart.y) / previewScale;
-      node.params.x = dragBase.x + dx;
-      node.params.y = dragBase.y + dy;
+      const rawX = dragBase.x + dx;
+      const rawY = dragBase.y + dy;
+      const snapped = snapPreviewPositionToGuides(rawX, rawY);
+      node.params.x = snapped.x;
+      node.params.y = snapped.y;
 
       // sync inspector inputs if present
       inspectorBody.querySelectorAll('[data-k="x"]').forEach(inp => inp.value = node.params.x);
@@ -2113,6 +2666,7 @@
     }
     penCanvasState.hoverCanvas = null;
     isPreviewDragging = false;
+    dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
     dragNodeId = null;
     isPreviewPanning = false;
     previewViewport.classList.remove("panning");
@@ -2126,6 +2680,7 @@
     }
     penCanvasState.hoverCanvas = null;
     isPreviewDragging = false;
+    dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
     dragNodeId = null;
     isPreviewPanning = false;
     previewViewport.classList.remove("panning");
@@ -2141,7 +2696,7 @@
 
   previewViewport.addEventListener("contextmenu", (e) => {
     const selectedNode = state.selected ? state.nodes.get(state.selected) : null;
-    if(selectedNode && selectedNode.type === "Pen" && previewInner.contains(e.target)){
+    if(selectedNode && selectedNode.type === "Pen" && previewViewport.contains(e.target)){
       e.preventDefault();
     }
   });
@@ -2246,6 +2801,7 @@ function syncOutputRatio(node){
   return ratio;
 }
 function canAddNodeType(type){
+  if(type === "Group") return { ok: true };
   if(!isLottieRestrictionEnabled()) return { ok: true };
   if(LOTTIE_ALLOWED_NODE_TYPES.has(type)) return { ok: true };
   return {
@@ -3755,7 +4311,7 @@ utilsApi.initProjectUtils();
         fontName: "",
         fontWeight: "700"
       },
-      icon: "🅵",
+      icon: "??",
       run: (node) => {
         const fontDataUrl = String(node.params?.fontDataUrl || "").trim();
         const fontFamily = sanitizeFontFamilyName(node.params?.fontFamily || "");
@@ -3797,6 +4353,13 @@ utilsApi.initProjectUtils();
   const NODE_DEFS = {
     ...BASIC_NODE_DEFS,
     ...SHAPE_TEXT_NODE_DEFS,
+    Group: {
+      inputs: [],
+      outputs: [],
+      defaults: { label: "Group" },
+      icon: "🗂",
+      run: () => null
+    },
     Font: createFontNodeDef(),
     Transform: window.createOniwireTransformNodeDef({
       propagateMotionFlag,
@@ -4059,11 +4622,11 @@ const HELP_GENERAL_PAGES = {
   },
   updates: {
     eyebrow: "Oniwire Help - Latest Update",
-    title: "What changed in v0.2.5 | 2026-06-03 19:56",
+    title: "What changed in v0.2.5 | 2026-06-05 23:00",
     subtitle: "v0.2.4 focuses on faster Pen workflow: multi-point selection, group transforms, clearer shortcuts, and dedicated shortcut help.",
     body: `
       <div class="helpSection">
-        <h3 class="helpSectionTitle">Latest in v0.2.5 &mdash; 2026-06-03 19:56</h3>
+        <h3 class="helpSectionTitle">Latest in v0.2.5 &mdash; 2026-06-05 23:00</h3>
         <div class="helpUpdateGrid">
           <div class="helpUpdateCard">
             <span class="helpUpdateKicker">Pen Editing</span>
@@ -4156,6 +4719,7 @@ const NODE_CATEGORIES = {
   ColorCorrect: "Operations",
   Curves: "Operations",
   Stylize: "Operations",
+  Group: "Editor",
   Output: "Output",
 };
 
@@ -4335,14 +4899,19 @@ async function evaluate(){
     }
 
     let outVal = null;
-    try { 
-      outVal = def.run(node, inputValues);
-      // If the result is a promise, await it
-      if(outVal instanceof Promise) {
-        outVal = await outVal;
+    if(node.bypassed){
+      // Pass the first connected input straight through, or null
+      outVal = inputValues[Object.keys(inputValues)[0]] ?? null;
+    } else {
+      try { 
+        outVal = def.run(node, inputValues);
+        // If the result is a promise, await it
+        if(outVal instanceof Promise) {
+          outVal = await outVal;
+        }
       }
+      catch(e){ console.error(e); outVal = null; }
     }
-    catch(e){ console.error(e); outVal = null; }
 
     const outMap = {};
     for(const op of getNodeOutputPorts(node, def)) outMap[op] = outVal;
@@ -4714,8 +5283,19 @@ async function evaluate(){
     const toDot = portElByKey.get(portKey(wire.to.nodeId, "in", wire.to.port));
     if(!fromDot || !toDot) return null;
 
-    const a = getDotCenter(fromDot);
-    const b = getDotCenter(toDot);
+    const aNodeId = String(wire.from.nodeId);
+    const bNodeId = String(wire.to.nodeId);
+    const aGroup = getCollapsedGroupForNodeId(aNodeId);
+    const bGroup = getCollapsedGroupForNodeId(bNodeId);
+
+    if(aGroup && bGroup && String(aGroup.id) === String(bGroup.id)){
+      return null;
+    }
+
+    const aDot = getDotCenter(fromDot);
+    const bDot = getDotCenter(toDot);
+    const a = aGroup ? getAnchorPointOnGroup(aGroup, aDot, "right") : aDot;
+    const b = bGroup ? getAnchorPointOnGroup(bGroup, bDot, "left") : bDot;
     const dx = Math.max(40, Math.abs(b.x - a.x) * 0.35);
     const c1 = { x: a.x + dx, y: a.y };
     const c2 = { x: b.x - dx, y: b.y };
@@ -4950,10 +5530,288 @@ async function evaluate(){
 }
 
 
+  function getNodeVisualBounds(node){
+    const nodeEl = document.querySelector(`.node[data-id="${node.id}"]`);
+    const width = nodeEl ? Math.max(40, nodeEl.offsetWidth) : 260;
+    const height = nodeEl ? Math.max(40, nodeEl.offsetHeight) : 160;
+    return {
+      left: Number(node.pos?.x) || 0,
+      top: Number(node.pos?.y) || 0,
+      right: (Number(node.pos?.x) || 0) + width,
+      bottom: (Number(node.pos?.y) || 0) + height,
+      width,
+      height
+    };
+  }
+
+  function rectsOverlap(a, b){
+    if(!a || !b) return false;
+    return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+  }
+
+  function getGroupRect(group){
+    const g = group?.rect || {};
+    const x = Number(g.x) || 0;
+    const y = Number(g.y) || 0;
+    const w = Math.max(80, Number(g.w) || 320);
+    const h = Math.max(80, Number(g.h) || 220);
+    return { left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, x, y, w, h };
+  }
+
+  function getGroupAnchorRect(group){
+    const gr = getGroupRect(group);
+    if(!group?.collapsed) return gr;
+    const h = Math.max(GROUP_COLLAPSED_HEIGHT, GROUP_HEADER_HEIGHT);
+    return {
+      ...gr,
+      height: h,
+      h,
+      bottom: gr.top + h
+    };
+  }
+
+  function getNodeIdsInsideGroup(group){
+    const gr = getGroupRect(group);
+    const inside = [];
+    for(const node of state.nodes.values()){
+      const b = getNodeVisualBounds(node);
+      if(rectsOverlap(b, gr)){
+        inside.push(node.id);
+      }
+    }
+    return inside;
+  }
+
+  function getCollapsedGroupForNodeId(nodeId){
+    const node = state.nodes.get(String(nodeId));
+    if(!node) return null;
+    const nodeBounds = getNodeVisualBounds(node);
+    for(const group of state.groups.values()){
+      if(!group.collapsed) continue;
+      if(rectsOverlap(nodeBounds, getGroupRect(group))) return group;
+    }
+    return null;
+  }
+
+  function getAnchorPointOnGroup(group, point, sideHint = "auto"){
+    const grWorld = getGroupAnchorRect(group);
+    const zoom = Number(state.zoom) || 1;
+    const gr = {
+      left: (Number(grWorld.left) || 0) * zoom + (Number(state.panX) || 0),
+      top: (Number(grWorld.top) || 0) * zoom + (Number(state.panY) || 0),
+      width: (Number(grWorld.width) || 0) * zoom,
+      height: (Number(grWorld.height) || 0) * zoom
+    };
+    gr.right = gr.left + gr.width;
+    gr.bottom = gr.top + gr.height;
+
+    if(group?.collapsed && sideHint !== "auto"){
+      const yCenter = gr.top + (gr.height / 2);
+      if(sideHint === "right") return { x: gr.right, y: yCenter };
+      if(sideHint === "left") return { x: gr.left, y: yCenter };
+    }
+
+    const cx = gr.left + (gr.width / 2);
+    const cy = gr.top + (gr.height / 2);
+    const dx = (Number(point?.x) || cx) - cx;
+    const dy = (Number(point?.y) || cy) - cy;
+    if(dx === 0 && dy === 0){
+      return { x: cx, y: cy };
+    }
+
+    const halfW = gr.width / 2;
+    const halfH = gr.height / 2;
+    const tx = dx !== 0 ? (halfW / Math.abs(dx)) : Infinity;
+    const ty = dy !== 0 ? (halfH / Math.abs(dy)) : Infinity;
+    const t = Math.min(tx, ty);
+    return {
+      x: cx + dx * t,
+      y: cy + dy * t
+    };
+  }
+
+  function computeGroupRectForNodeIds(ids){
+    const targetIds = Array.isArray(ids) ? ids : [];
+    if(targetIds.length === 0) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for(const id of targetIds){
+      const node = state.nodes.get(String(id));
+      if(!node) continue;
+      const b = getNodeVisualBounds(node);
+      minX = Math.min(minX, b.left);
+      minY = Math.min(minY, b.top);
+      maxX = Math.max(maxX, b.right);
+      maxY = Math.max(maxY, b.bottom);
+    }
+    if(!Number.isFinite(minX)) return null;
+    const pad = 24;
+    const headerPad = 34;
+    return {
+      x: minX - pad,
+      y: minY - headerPad,
+      w: Math.max(180, (maxX - minX) + (pad * 2)),
+      h: Math.max(120, (maxY - minY) + (pad + headerPad))
+    };
+  }
+
+  function createGroupFromSelectionOrEmpty(pos){
+    const ids = getSelectedNodeIds();
+    const rectFromSelection = computeGroupRectForNodeIds(ids);
+    const p = pos || { x: 120, y: 120 };
+    const rect = rectFromSelection || {
+      x: Number(p.x) || 120,
+      y: Number(p.y) || 120,
+      w: 360,
+      h: 240
+    };
+    const gid = `g${state.nextGroupId++}`;
+    const group = {
+      id: gid,
+      label: `Group ${gid.slice(1)}`,
+      collapsed: false,
+      rect: {
+        x: Number(rect.x) || 0,
+        y: Number(rect.y) || 0,
+        w: Math.max(80, Number(rect.w) || 320),
+        h: Math.max(80, Number(rect.h) || 220)
+      }
+    };
+    state.groups.set(gid, group);
+    render();
+    renderInspector();
+    requestWireDraw();
+    toast(`Added: ${group.label}`);
+    return group;
+  }
+
+  const GROUP_MIN_WIDTH = 140;
+  const GROUP_MIN_HEIGHT = 96;
+  const GROUP_HEADER_HEIGHT = 28;
+  const GROUP_COLLAPSED_HEIGHT = 32;
+
+  function renderGroups(){
+    if(!groupsEl) return;
+    groupsEl.innerHTML = "";
+
+    for(const group of state.groups.values()){
+      const isCollapsed = Boolean(group.collapsed);
+      const wrap = document.createElement("div");
+      wrap.className = "groupBox" + (isCollapsed ? " collapsed" : "");
+      wrap.dataset.gid = group.id;
+      wrap.style.left = (Number(group.rect?.x) || 0) + "px";
+      wrap.style.top = (Number(group.rect?.y) || 0) + "px";
+      wrap.style.width = Math.max(GROUP_MIN_WIDTH, Number(group.rect?.w) || 320) + "px";
+      wrap.style.height = (isCollapsed
+        ? GROUP_COLLAPSED_HEIGHT
+        : Math.max(GROUP_MIN_HEIGHT, Number(group.rect?.h) || 220)) + "px";
+
+      const memberCount = getNodeIdsInsideGroup(group).length;
+      wrap.innerHTML = `
+        <div class="groupHeader" data-gid="${group.id}" title="Drag to move group and nodes inside.">
+          <span class="groupLabel" contenteditable="true" spellcheck="false">${escapeAttr(group.label || "Group")}</span>
+          <div class="groupHeaderRight">
+            <span class="groupBadge">${memberCount} node${memberCount === 1 ? "" : "s"}</span>
+            <button class="groupCollapseBtn" type="button" title="${isCollapsed ? "Expand group" : "Collapse group"}" aria-label="${isCollapsed ? "Expand group" : "Collapse group"}">${isCollapsed ? "▸" : "▾"}</button>
+          </div>
+        </div>
+      `;
+
+      const header = wrap.querySelector(".groupHeader");
+      const labelEl = wrap.querySelector(".groupLabel");
+      const collapseBtn = wrap.querySelector(".groupCollapseBtn");
+      if(labelEl){
+        labelEl.addEventListener("mousedown", (e) => e.stopPropagation());
+        labelEl.addEventListener("keydown", (e) => {
+          if(e.key === "Enter"){
+            e.preventDefault();
+            labelEl.blur();
+          }
+        });
+        labelEl.addEventListener("blur", () => {
+          const next = String(labelEl.textContent || "").trim() || "Group";
+          group.label = next;
+          labelEl.textContent = next;
+        });
+      }
+
+      collapseBtn?.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+      });
+      collapseBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pushHistory();
+        group.collapsed = !group.collapsed;
+        render();
+      });
+
+      header?.addEventListener("mousedown", (ev) => {
+        if(ev.button !== 0) return;
+        ev.stopPropagation();
+        pushHistory();
+        const m = editorMouse(ev);
+        const mw = editorToWorld(m.x, m.y);
+        const memberIds = getNodeIdsInsideGroup(group);
+        const offsets = new Map();
+        for(const nid of memberIds){
+          const node = state.nodes.get(String(nid));
+          if(node){
+            offsets.set(String(nid), {
+              ox: mw.x - (Number(node.pos?.x) || 0),
+              oy: mw.y - (Number(node.pos?.y) || 0)
+            });
+          }
+        }
+        state.draggingNode = {
+          kind: "group",
+          id: group.id,
+          ox: mw.x - (Number(group.rect?.x) || 0),
+          oy: mw.y - (Number(group.rect?.y) || 0),
+          nodeOffsets: offsets
+        };
+      });
+
+      if(!isCollapsed){
+        const handles = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
+        for(const dir of handles){
+          const h = document.createElement("div");
+          h.className = `groupResizeHandle groupResizeHandle--${dir}`;
+          h.dataset.dir = dir;
+          h.addEventListener("mousedown", (ev) => {
+            if(ev.button !== 0) return;
+            ev.stopPropagation();
+            ev.preventDefault();
+            pushHistory();
+            const m = editorMouse(ev);
+            const mw = editorToWorld(m.x, m.y);
+            state.draggingNode = {
+              kind: "groupResize",
+              id: group.id,
+              dir,
+              startMouse: { x: mw.x, y: mw.y },
+              startRect: {
+                x: Number(group.rect?.x) || 0,
+                y: Number(group.rect?.y) || 0,
+                w: Math.max(GROUP_MIN_WIDTH, Number(group.rect?.w) || 320),
+                h: Math.max(GROUP_MIN_HEIGHT, Number(group.rect?.h) || 220)
+              }
+            };
+          });
+          wrap.appendChild(h);
+        }
+      }
+
+      groupsEl.appendChild(wrap);
+    }
+  }
+
   // -----------------------------
   // Rendering nodes
   // -----------------------------
   function render(){
+    renderGroups();
     nodesEl.innerHTML = "";
 
     for(const node of state.nodes.values()){
@@ -4966,7 +5824,12 @@ async function evaluate(){
       const el = document.createElement("div");
       const isSelected = state.selected === node.id;
       const isMultiSelected = state.selectedNodes.has(node.id);
-      el.className = "node" + (isSelected ? " selected" : "") + (isMultiSelected && !isSelected ? " multiselected" : "");
+      const isHiddenByCollapsedGroup = Boolean(getCollapsedGroupForNodeId(node.id));
+      el.className = "node"
+        + (isSelected ? " selected" : "")
+        + (isMultiSelected && !isSelected ? " multiselected" : "")
+        + (node.bypassed ? " bypassed" : "")
+        + (isHiddenByCollapsedGroup ? " groupHidden" : "");
       el.style.left = node.pos.x + "px";
       el.style.top  = node.pos.y + "px";
       el.dataset.id = node.id;
@@ -4974,7 +5837,10 @@ async function evaluate(){
       el.innerHTML = `
         <div class="nh" title="Drag node. Click body to select.">
           <div class="nname">${def.icon} ${escapeAttr(nodeName)}</div>
-          <div class="ntype">${node.id}</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="btn-bypass" data-id="${node.id}" title="Bypass node (B)" style="opacity:${node.bypassed ? 1 : 0.35}">👁</button>
+            <div class="ntype">${node.id}</div>
+          </div>
         </div>
         <div class="nbody">
           <div class="ports">
@@ -5007,6 +5873,21 @@ async function evaluate(){
 
       // Drag node header (respects zoom)
       const header = el.querySelector(".nh");
+
+        // Bypass button
+        el.querySelector(".btn-bypass").addEventListener("mousedown", (ev) => {
+          ev.stopPropagation();
+        });
+        el.querySelector(".btn-bypass").addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const n = state.nodes.get(node.id);
+          if(!n) return;
+          n.bypassed = !n.bypassed;
+          render();
+          evaluateAndRender();
+          toast(n.bypassed ? "Bypass ON" : "Bypass OFF");
+        });
+
       header.addEventListener("mousedown", (ev) => {
         if(ev.button !== 0) return;
         ev.stopPropagation();
@@ -5584,11 +6465,13 @@ async function evaluate(){
       node.params.paths = paths;
       const activeIdx = clamp(Number(node.params.activePath) || 0, 0, Math.max(0, paths.length - 1));
       node.params.activePath = activeIdx;
+      const selectedPathSet = new Set(getPenSelectedPathIndices(node, paths));
       const ap = paths[activeIdx] || {};
 
       const listHtml = paths.map((path, i) => {
         const isActive = i === activeIdx;
-        return `<div class="smItem${isActive ? " smActive" : ""}" data-sm-idx="${i}">
+        const isSelected = selectedPathSet.has(i);
+        return `<div class="smItem${isActive ? " smActive" : ""}${isSelected ? " smSelected" : ""}" data-sm-idx="${i}">
           <button type="button" class="smVis" data-sm-vis="${i}" title="${path.visible !== false ? "Hide path" : "Show path"}">${path.visible !== false ? "&#9679;" : "&#9675;"}</button>
           <span class="smLabel">${escapeAttr(path.name || ("Path " + String(i + 1).padStart(2, "0")))}</span>
           <button type="button" class="smDel" data-sm-del="${i}" title="Delete path">&#10005;</button>
@@ -5600,22 +6483,20 @@ async function evaluate(){
           <div class="smPropsTitle">&#x25B8; ${escapeAttr(ap.name || "")}</div>
           <div class="row"><label>Name</label><input type="text" data-sm-prop="name" value="${escapeAttr(ap.name || "")}" placeholder="Path name" /></div>
           <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
+          <div class="row"><label>Fill</label><div class="pill" style="margin:0;">Path paint</div></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
-          <div class="row"><label>Fill Opacity</label><input type="range" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /></div>
+          <div class="row"><label>Fill Opacity</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /><input type="range" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /></div></div>
+          <div class="row"><label>Stroke</label><div class="pill" style="margin:0;">Path outline</div></div>
           <div class="row"><label>Stroke Color</label><input type="color" data-sm-prop="strokeColor" value="${escapeAttr(ap.strokeColor || "#ffffff")}" /></div>
-          <div class="row"><label>Stroke Width</label><input type="range" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.5" value="${ap.strokeWidth ?? 2}" /></div>
-          <div class="row"><label>Stroke Opacity</label><input type="range" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /></div>
-          <div style="font-size:11px; color:#9db4d7; margin-top:4px; line-height:1.45;">
-            Draw and edit bezier paths for custom shapes.<br>
-            Shortcuts:<br>
-            &bull; Left-click: add point / select point<br>
-            &bull; Shift-click / Shift-drag: add to selection (point or box)<br>
-            &bull; Ctrl-click selected point: deselect point<br>
-            &bull; Alt-drag inside bounds: move entire shape<br>
-            &bull; Alt-click handle: toggle straight/custom handle<br>
-            &bull; Esc: clear group selection<br>
-            &bull; Right-click point: delete point
-          </div>
+          <div class="row"><label>Stroke Width</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /><input type="range" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /></div></div>
+          <div class="row"><label>Stroke Opacity</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /><input type="range" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /></div></div>
+          <div class="row"><label>Line Cap</label><select data-sm-prop="strokeLinecap">
+            <option value="round"${(ap.strokeLinecap||"round")==="round"?" selected":""}>Round</option>
+            <option value="butt"${(ap.strokeLinecap||"round")==="butt"?" selected":""}>Butt</option>
+            <option value="square"${(ap.strokeLinecap||"round")==="square"?" selected":""}>Square</option>
+          </select></div>
+          <div class="row"><label>Taper</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="taperStartStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change start taper strength"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.taperStartStrength ?? 70)}</span></button><button type="button" class="smScrubBox" data-sm-scrub="taperEndStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change end taper strength"><span class="smScrubTag">E</span><span class="smScrubValue">${Math.round(ap.taperEndStrength ?? 70)}</span></button></div></div>
+          <div class="row"><label>Smooth Strength</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /><input type="range" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /></div></div>
         </div>
       ` : "";
 
@@ -5626,6 +6507,7 @@ async function evaluate(){
             <button type="button" data-sm-new style="flex:1;">+ New Path</button>
             <button type="button" data-sm-dupe style="flex:1;">Duplicate</button>
             <button type="button" data-sm-clear-pts style="flex:1;">Clear Points</button>
+            <button type="button" data-sm-smooth style="flex:1;" title="Auto-smooth all bezier handles on the active path">Smooth</button>
           </div>
           ${propsHtml}
         </div>
@@ -6540,6 +7422,16 @@ async function evaluate(){
         return paths[idx];
       };
 
+      const syncTaperScrubUi = () => {
+        const ap = getActivePath();
+        if(!ap) return;
+        sm.querySelectorAll('[data-sm-scrub]').forEach(btn => {
+          const prop = btn.getAttribute('data-sm-scrub') || '';
+          const valueEl = btn.querySelector('.smScrubValue');
+          if(valueEl) valueEl.textContent = String(Math.round(Number(ap[prop]) || 0));
+        });
+      };
+
       const nextPathName = () => {
         const paths = node.params.paths || [];
         return "Path " + String(paths.length + 1).padStart(2, "0");
@@ -6551,8 +7443,28 @@ async function evaluate(){
           if(ev.target.closest('.smVis, .smDel')) return;
           const idx = Number(item.getAttribute('data-sm-idx'));
           if(Number.isNaN(idx)) return;
-          node.params.activePath = idx;
-          setPenSelectedIndices(node, [], idx);
+          const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
+          const current = getPenSelectedPathIndices(node, paths);
+          const set = new Set(current);
+
+          if(ev.shiftKey){
+            set.add(idx);
+            setPenSelectedPathIndices(node, [...set], idx);
+            setPenSelectedIndices(node, [], idx);
+          }else if(ev.ctrlKey || ev.metaKey){
+            if(set.has(idx) && set.size > 1){
+              set.delete(idx);
+              const next = [...set].sort((a, b) => a - b);
+              const nextActive = next.includes(Number(node.params.activePath) || 0)
+                ? (Number(node.params.activePath) || 0)
+                : next[next.length - 1];
+              setPenSelectedPathIndices(node, next, nextActive);
+              setPenSelectedIndices(node, [], Number(node.params.activePath) || 0);
+            }
+          }else{
+            setPenSelectedPathIndices(node, [idx], idx);
+            setPenSelectedIndices(node, [], idx);
+          }
           syncAndRefresh(false);
         });
       });
@@ -6577,7 +7489,11 @@ async function evaluate(){
           const paths = node.params.paths;
           if(!Array.isArray(paths) || paths.length <= 1) return;
           paths.splice(idx, 1);
-          node.params.activePath = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
+          const nextSelected = getPenSelectedPathIndices(node, paths)
+            .filter(index => index !== idx)
+            .map(index => index > idx ? index - 1 : index);
+          const nextActive = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
+          setPenSelectedPathIndices(node, nextSelected, nextActive);
           setPenSelectedIndices(node, [], Number(node.params.activePath) || 0);
           syncAndRefresh();
         });
@@ -6595,10 +7511,16 @@ async function evaluate(){
           strokeColor: "#ffffff",
           strokeWidth: 2,
           strokeOpacity: 1,
+          strokeLinecap: "round",
+          strokeTaper: "none",
+          taperStartStrength: 70,
+          taperEndStrength: 70,
+          smoothStrength: 50,
           visible: true
         });
-        node.params.activePath = node.params.paths.length - 1;
-        setPenSelectedIndices(node, [], node.params.activePath);
+        const nextActive = node.params.paths.length - 1;
+        setPenSelectedPathIndices(node, [nextActive], nextActive);
+        setPenSelectedIndices(node, [], nextActive);
         syncAndRefresh();
       });
 
@@ -6612,8 +7534,9 @@ async function evaluate(){
           points: clonePenPoints(ap.points)
         };
         node.params.paths.push(copy);
-        node.params.activePath = node.params.paths.length - 1;
-        setPenSelectedIndices(node, [], node.params.activePath);
+        const nextActive = node.params.paths.length - 1;
+        setPenSelectedPathIndices(node, [nextActive], nextActive);
+        setPenSelectedIndices(node, [], nextActive);
         syncAndRefresh();
       });
 
@@ -6626,6 +7549,97 @@ async function evaluate(){
         syncAndRefresh();
       });
 
+      // Smooth active path handles
+      sm.querySelector('[data-sm-smooth]')?.addEventListener('click', () => {
+        const ap = getActivePath();
+        if(!ap || !ap.points || ap.points.length < 2) return;
+        if(typeof window.oniwirePenSmoothPath === "function"){
+          const strength = clamp(Number(ap.smoothStrength), 0, 100) || 50;
+          ap.points = window.oniwirePenSmoothPath(ap.points, Boolean(ap.closed), strength);
+          syncAndRefresh();
+        }
+      });
+
+      sm.querySelectorAll('[data-sm-scrub]').forEach(btn => {
+        btn.addEventListener('pointerdown', (ev) => {
+          if(ev.button !== 0) return;
+          ev.preventDefault();
+          const prop = btn.getAttribute('data-sm-scrub') || '';
+          const min  = Number(btn.getAttribute('data-sm-min'));
+          const max  = Number(btn.getAttribute('data-sm-max'));
+          const step = Number(btn.getAttribute('data-sm-step')) || 1;
+
+          // Helper: always read/write the live path object, even after normalization
+          const getLivePath = () => {
+            const paths = node.params.paths;
+            if(!Array.isArray(paths) || !paths.length) return null;
+            const idx = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
+            return paths[idx];
+          };
+
+          const live = getLivePath();
+          if(!live || !(prop in live)) return;
+
+          let currentValue = Number(live[prop]) || 0;
+          let carry = 0;
+          let moved = false;
+          let rafId = null;
+
+          const valueEl = btn.querySelector('.smScrubValue');
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          btn.setPointerCapture(ev.pointerId);
+
+          const commitRender = () => {
+            rafId = null;
+            // write to the current live path (may have been replaced by normalization)
+            const p = getLivePath();
+            if(p) p[prop] = currentValue;
+            if(valueEl) valueEl.textContent = String(Math.round(currentValue));
+            evaluateAndRender();
+            drawPenCanvasOverlay();
+          };
+
+          const onMove = (moveEv) => {
+            const deltaX = moveEv.movementX !== undefined ? moveEv.movementX : 0;
+            if(deltaX === 0) return;
+            moved = true;
+
+            const scrubScale = moveEv.shiftKey ? 0.2 : 1;
+            carry += deltaX * scrubScale;
+            const units = Math.trunc(carry);
+            if(units === 0) return;
+            carry -= units;
+
+            currentValue = clamp(currentValue + (units * step), min, max);
+            // Show the number live without waiting for the full render
+            if(valueEl) valueEl.textContent = String(Math.round(currentValue));
+
+            if(rafId === null) rafId = requestAnimationFrame(commitRender);
+          };
+
+          const onUp = () => {
+            btn.removeEventListener('pointermove', onMove);
+            btn.removeEventListener('pointerup', onUp);
+            btn.removeEventListener('pointercancel', onUp);
+            try{ btn.releasePointerCapture(ev.pointerId); }catch{}
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
+            // final write + render
+            const p = getLivePath();
+            if(p) p[prop] = currentValue;
+            evaluateAndRender();
+            drawPenCanvasOverlay();
+            if(moved) pushHistory();
+          };
+
+          btn.addEventListener('pointermove', onMove);
+          btn.addEventListener('pointerup', onUp);
+          btn.addEventListener('pointercancel', onUp);
+        });
+      });
+
       // Active path property inputs
       sm.querySelectorAll('[data-sm-prop]').forEach(inp => {
         const prop = inp.getAttribute('data-sm-prop');
@@ -6634,11 +7648,18 @@ async function evaluate(){
           if(!ap) return;
           if(inp.type === 'checkbox'){
             ap[prop] = inp.checked;
-          } else if(inp.type === 'range'){
+          } else if(inp.type === 'range' || inp.type === 'number'){
             ap[prop] = Number(inp.value);
           } else {
             ap[prop] = inp.value;
           }
+
+          if(inp.type === 'range' || inp.type === 'number'){
+            sm.querySelectorAll(`[data-sm-prop="${prop}"]`).forEach(other => {
+              if(other !== inp) other.value = String(ap[prop]);
+            });
+          }
+
           if(prop === 'name'){
             const nextName = String(ap.name || '').trim() || 'Untitled Path';
             ap.name = nextName;
@@ -6653,6 +7674,8 @@ async function evaluate(){
         inp.addEventListener('input', update);
         inp.addEventListener('change', () => { update(); pushHistory(); });
       });
+
+      syncTaperScrubUi();
     });
 
     // Auto-resize textarea fields and initialize their height
@@ -6680,11 +7703,16 @@ async function evaluate(){
         const ch = Math.max(1, Math.round(Number(outNode.params.customHeight) || 0));
         if(cw > 0 && ch > 0){
           screen.style.aspectRatio = `${cw} / ${ch}`;
+          const prevW = previewBase.w, prevH = previewBase.h;
           previewBase.w = cw;
           previewBase.h = ch;
           if(previewInner){
             previewInner.style.width = previewBase.w + "px";
             previewInner.style.height = previewBase.h + "px";
+          }
+          if(previewBase.w !== prevW || previewBase.h !== prevH){
+            pan.x = 0; pan.y = 0;
+            applyPreviewTransform();
           }
           updatePreviewSelectionBox();
           return;
@@ -6693,6 +7721,7 @@ async function evaluate(){
     }
 
     const parsed = parseRatioString(ratio);
+    const prevW = previewBase.w, prevH = previewBase.h;
     if(parsed){
       const targetH = 720;
       const targetW = Math.max(1, Math.round((parsed.w / parsed.h) * targetH));
@@ -6714,9 +7743,11 @@ async function evaluate(){
       previewInner.style.height = previewBase.h + "px";
     }
 
-    // reset pan + zoom bounds
-    pan.x = 0;
-    pan.y = 0;
+    // only reset pan when canvas dimensions actually changed
+    if(previewBase.w !== prevW || previewBase.h !== prevH){
+      pan.x = 0;
+      pan.y = 0;
+    }
     applyPreviewTransform();
   }
 
@@ -6889,7 +7920,7 @@ async function evaluate(){
     await ensureHtml2CanvasLoaded();
     const html2canvasFn = window.html2canvas;
     if(typeof html2canvasFn !== "function"){
-      toast("html2canvas failed to load � cannot export.");
+      toast("html2canvas failed to load ? cannot export.");
       return;
     }
 
@@ -7554,16 +8585,26 @@ async function evaluate(){
       if(key === "c"){
         if(isTypingTarget(e.target)) return;
         e.preventDefault();
-        copySelectedNodes();
+        // Prefer native copy pipeline so we can stamp clipboard with an internal marker.
+        let copiedViaNative = false;
+        try{
+          if(typeof document.execCommand === "function"){
+            copiedViaNative = document.execCommand("copy");
+          }
+        }catch(_){/* ignore */}
+        if(!copiedViaNative){
+          copySelectedNodes();
+        }
         return;
       }
 
       if(key === "v"){
         if(isTypingTarget(e.target)) return;
-        const selectedNode = getSelectedNode();
-        if(selectedNode && selectedNode.type === "Image") return;
-        e.preventDefault();
-        pasteCopiedNodes();
+        // Ctrl/Cmd+V inside editor should prioritize Oniwire node clipboard once.
+        preferNodePasteOnce = true;
+        // Don't preventDefault here — let the paste event fire so it can
+        // handle image/text auto-create. pasteCopiedNodes() is called as
+        // fallback inside the paste handler when there's no clipboard content.
         return;
       }
     }
@@ -7593,15 +8634,66 @@ async function evaluate(){
     if(helpVisible) return;
     if(isTypingTarget(e.target)) return;
 
-    const selectedNode = getSelectedNode();
-    if(!selectedNode || selectedNode.type !== "Image") return;
+    const preferNodePaste = preferNodePasteOnce;
+    preferNodePasteOnce = false;
 
-    const file = getImageFileFromClipboardEvent(e);
-    if(!file) return;
+    const clipboardData = e.clipboardData;
+    const hasNodeClipboardMarker = Boolean(
+      clipboardData && (
+        (clipboardData.types && Array.from(clipboardData.types).includes("application/x-oniwire-nodes"))
+        || clipboardData.getData("application/x-oniwire-nodes") === NODE_CLIPBOARD_MARKER
+        || clipboardData.getData("text/plain") === NODE_CLIPBOARD_MARKER
+      )
+    );
 
+    // --- Priority: internal node clipboard (when invoked by Ctrl/Cmd+V) ---
+    if(
+      preferNodePaste
+      && copyBuffer && copyBuffer.nodes && copyBuffer.nodes.length > 0
+      && hasNodeClipboardMarker
+    ){
+      e.preventDefault();
+      e.stopPropagation();
+      pasteCopiedNodes();
+      return;
+    }
+
+    // --- Image paste ---
+    const imageFile = getImageFileFromClipboardEvent(e);
+    if(imageFile){
+      e.preventDefault();
+      e.stopPropagation();
+      const selectedNode = getSelectedNode();
+      let targetNode = (selectedNode && selectedNode.type === "Image") ? selectedNode : null;
+      if(!targetNode){
+        targetNode = addNode("Image", { x: 60 + Math.random()*200, y: 60 + Math.random()*120 });
+        if(!targetNode) return;
+      }
+      await applyImageFileToNode(targetNode, "src", imageFile, "Pasted image");
+      return;
+    }
+
+    // --- Text paste ---
+    const pastedText = e.clipboardData && e.clipboardData.getData("text/plain");
+    if(pastedText && pastedText.trim()){
+      e.preventDefault();
+      e.stopPropagation();
+      const selectedNode = getSelectedNode();
+      let targetNode = (selectedNode && selectedNode.type === "Text") ? selectedNode : null;
+      if(!targetNode){
+        targetNode = addNode("Text", { x: 60 + Math.random()*200, y: 60 + Math.random()*120 });
+        if(!targetNode) return;
+      }
+      targetNode.params.text = pastedText.trim();
+      evaluateAndRender();
+      renderInspector();
+      toast("Text pasted.");
+      return;
+    }
+
+    // --- Fallback: paste copied Oniwire nodes ---
     e.preventDefault();
-    e.stopPropagation();
-    await applyImageFileToNode(selectedNode, "src", file, "Pasted image");
+    pasteCopiedNodes();
   });
 
   editorEl.addEventListener("mousedown", (e) => {
@@ -7675,7 +8767,72 @@ async function evaluate(){
     if(state.draggingNode){
       const mw = editorToWorld(m.x, m.y);
 
-      if(state.draggingNode.ids){
+      if(state.draggingNode.kind === "groupResize"){
+        const g = state.groups.get(String(state.draggingNode.id));
+        if(g){
+          const startRect = state.draggingNode.startRect || { x: 0, y: 0, w: GROUP_MIN_WIDTH, h: GROUP_MIN_HEIGHT };
+          const startMouse = state.draggingNode.startMouse || { x: mw.x, y: mw.y };
+          const dir = String(state.draggingNode.dir || "se");
+          const dx = mw.x - startMouse.x;
+          const dy = mw.y - startMouse.y;
+
+          let x = startRect.x;
+          let y = startRect.y;
+          let w = startRect.w;
+          let h = startRect.h;
+
+          if(dir.includes("e")) w = Math.max(GROUP_MIN_WIDTH, startRect.w + dx);
+          if(dir.includes("s")) h = Math.max(GROUP_MIN_HEIGHT, startRect.h + dy);
+          if(dir.includes("w")){
+            const nextW = Math.max(GROUP_MIN_WIDTH, startRect.w - dx);
+            x = startRect.x + (startRect.w - nextW);
+            w = nextW;
+          }
+          if(dir.includes("n")){
+            const nextH = Math.max(GROUP_MIN_HEIGHT, startRect.h - dy);
+            y = startRect.y + (startRect.h - nextH);
+            h = nextH;
+          }
+
+          g.rect.x = x;
+          g.rect.y = y;
+          g.rect.w = w;
+          g.rect.h = h;
+
+          const groupEl = document.querySelector(`.groupBox[data-gid="${g.id}"]`);
+          if(groupEl){
+            groupEl.style.left = x + "px";
+            groupEl.style.top = y + "px";
+            groupEl.style.width = w + "px";
+            groupEl.style.height = h + "px";
+          }
+        }
+      } else if(state.draggingNode.kind === "group"){
+        const g = state.groups.get(String(state.draggingNode.id));
+        if(g){
+          g.rect.x = mw.x - state.draggingNode.ox;
+          g.rect.y = mw.y - state.draggingNode.oy;
+
+          const groupEl = document.querySelector(`.groupBox[data-gid="${g.id}"]`);
+          if(groupEl){
+            groupEl.style.left = g.rect.x + "px";
+            groupEl.style.top = g.rect.y + "px";
+          }
+
+          for(const [nid, offset] of (state.draggingNode.nodeOffsets || new Map()).entries()){
+            const n = state.nodes.get(String(nid));
+            if(!n) continue;
+            n.pos.x = mw.x - offset.ox;
+            n.pos.y = mw.y - offset.oy;
+            const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+            if(nodeEl){
+              nodeEl.style.left = n.pos.x + "px";
+              nodeEl.style.top  = n.pos.y + "px";
+            }
+          }
+          requestWireDraw();
+        }
+      } else if(state.draggingNode.ids){
         // Drag multiple nodes
         for(const nid of state.draggingNode.ids){
           const n = state.nodes.get(nid);
@@ -7708,9 +8865,11 @@ async function evaluate(){
         }
       }
 
-      updateWireDropCandidateFromDrag();
-      if(state.hoverWireCandidate){
-        state.hoverWireCandidate = null;
+      if(state.draggingNode.kind !== "group"){
+        updateWireDropCandidateFromDrag();
+        if(state.hoverWireCandidate){
+          state.hoverWireCandidate = null;
+        }
       }
     }else if(state.wireDropCandidate){
       state.wireDropCandidate = null;
@@ -7730,7 +8889,7 @@ async function evaluate(){
 
   window.addEventListener("mouseup", (e) => {
     const dragSnapshot = state.draggingNode;
-    const wasSingleDrag = Boolean(dragSnapshot && !dragSnapshot.ids);
+    const wasSingleDrag = Boolean(dragSnapshot && !dragSnapshot.ids && !dragSnapshot.kind);
     let insertedByDrop = false;
     if(e.button === 0 && wasSingleDrag){
       insertedByDrop = autoInsertDraggedNodeIntoWire(dragSnapshot.id);
@@ -7848,9 +9007,21 @@ function serializeGraph(){
   return {
     version: "0.2.1",
     nextId: state.nextId,
+    nextGroupId: state.nextGroupId,
     panX: state.panX,
     panY: state.panY,
     zoom: state.zoom,
+    groups: Array.from(state.groups.values()).map(g => ({
+      id: String(g.id),
+      label: String(g.label || "Group"),
+      collapsed: Boolean(g.collapsed),
+      rect: {
+        x: Number(g.rect?.x) || 0,
+        y: Number(g.rect?.y) || 0,
+        w: Math.max(80, Number(g.rect?.w) || 320),
+        h: Math.max(80, Number(g.rect?.h) || 220)
+      }
+    })),
     nodes: Array.from(state.nodes.values()).map(n => ({
       id: String(n.id),
       type: n.type,
@@ -7907,6 +9078,24 @@ function copySelectedNodes(){
   pasteOffsetCount = 0;
   toast(`Copied ${nodes.length} node${nodes.length > 1 ? "s" : ""}.`);
 }
+
+window.addEventListener("copy", (e) => {
+  if(helpVisible) return;
+  if(isTypingTarget(e.target)) return;
+
+  const ids = getSelectedNodeIds();
+  if(ids.length === 0) return;
+
+  copySelectedNodes();
+
+  // Stamp clipboard so paste can reliably distinguish internal node copies
+  // from unrelated OS clipboard content (images/text from other apps).
+  try{
+    e.clipboardData?.setData("application/x-oniwire-nodes", NODE_CLIPBOARD_MARKER);
+    e.clipboardData?.setData("text/plain", NODE_CLIPBOARD_MARKER);
+    e.preventDefault();
+  }catch(_){/* ignore */}
+});
 
 function pasteCopiedNodes(){
   if(!copyBuffer || copyBuffer.nodes.length === 0){
@@ -8071,6 +9260,22 @@ window.addEventListener("keydown", (e) => {
   // Don't delete when typing in inputs/fields
   if(isTypingTarget(e.target)) return;
 
+  // B — toggle bypass on selected node(s)
+  if(e.code === "KeyB"){
+    const targets = state.selectedNodes.size > 0
+      ? [...state.selectedNodes].map(id => state.nodes.get(id)).filter(Boolean)
+      : [getSelectedNode()].filter(Boolean);
+    if(targets.length === 0) return;
+    e.preventDefault();
+    // If any are not bypassed, bypass all; otherwise un-bypass all
+    const anyOn = targets.some(n => !n.bypassed);
+    targets.forEach(n => { n.bypassed = anyOn; });
+    render();
+    evaluateAndRender();
+    toast(anyOn ? "Bypass ON" : "Bypass OFF");
+    return;
+  }
+
   if(e.key === "Delete" || e.key === "Backspace"){
     // prevent browser back navigation from Backspace (some browsers)
     e.preventDefault();
@@ -8139,13 +9344,29 @@ function loadGraph(data){
   }
 
   state.nodes.clear();
+  state.groups.clear();
   state.wires = [];
   state.connecting = null;
   state.selected = null;
   state.selectedNodes.clear();
 
   state.nextId = Number(data.nextId) || 1;
+  state.nextGroupId = Number(data.nextGroupId) || 1;
   state.panX = Number(data.panX) || 0;
+    for(const g of (data.groups || [])){
+      state.groups.set(String(g.id), {
+        id: String(g.id),
+        label: String(g.label || "Group"),
+        collapsed: Boolean(g.collapsed),
+        rect: {
+          x: Number(g.rect?.x) || 0,
+          y: Number(g.rect?.y) || 0,
+          w: Math.max(80, Number(g.rect?.w) || 320),
+          h: Math.max(80, Number(g.rect?.h) || 220)
+        }
+      });
+    }
+
   state.panY = Number(data.panY) || 0;
   state.zoom = Number(data.zoom) || 1;
 
@@ -8200,6 +9421,7 @@ function loadGraph(data){
   });
   nodeMenuApi.bind();
 
+  snapGridBtn?.addEventListener("click", toggleSnapToGuide);
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
   rulerBtn?.addEventListener("click", toggleRulers);
@@ -8274,7 +9496,7 @@ function loadGraph(data){
         link.click();
         document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 10000);
-        toast(`Exported JSON ✅ (${(blob.size / 1024).toFixed(1)} KB)`);
+        toast(`Exported JSON ? (${(blob.size / 1024).toFixed(1)} KB)`);
       } catch(err) {
         console.error("Export failed:", err);
         toast(`Export failed: ${String(err?.message || err || "Unknown").slice(0, 100)}`);
@@ -8319,6 +9541,11 @@ function loadGraph(data){
   // Node creation
   // -----------------------------
   function addNode(type, pos){
+    if(type === "Group"){
+      const createdGroup = createGroupFromSelectionOrEmpty(pos);
+      return createdGroup ? { id: createdGroup.id, type: "Group" } : null;
+    }
+
     const gate = canAddNodeType(type);
     if(!gate.ok){
       toast(gate.reason || "Node blocked by export mode");
@@ -8372,10 +9599,12 @@ function loadGraph(data){
   function resetGraph(){
     try{
       state.nodes.clear();
+      state.groups.clear();
       state.wires = [];
       state.connecting = null;
       state.selected = null;
       state.nextId = 1;
+      state.nextGroupId = 1;
     
       // Reset editor view
       state.panX = 0;
@@ -8555,7 +9784,7 @@ function loadGraph(data){
 
     // ---- Hook into evaluateAndRender ----
     // After each graph re-render, re-sync to the current playhead.
-    // We do NOT pause � the RAF loop keeps running uninterrupted.
+    // We do NOT pause ? the RAF loop keeps running uninterrupted.
     const _origEAR = evaluateAndRender;
     evaluateAndRender = async function(...args){
       await _origEAR.apply(this, args);
@@ -8577,7 +9806,7 @@ function loadGraph(data){
       }
     });
 
-    // Auto-start � animation plays immediately on load.
+    // Auto-start ? animation plays immediately on load.
     // Only a deliberate user action (press Pause / Stop) will halt it.
     play();
     updateUI();

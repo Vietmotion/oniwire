@@ -282,17 +282,24 @@ select#nodeType optgroup{
 
 .previewSelectionBox{
   position:absolute;
-  border: 1.5px solid rgba(122,167,255,.9);
+  border: 2px solid rgba(147,190,255,.98);
+  box-shadow:
+    0 0 0 1px rgba(20,34,62,.9),
+    0 0 12px rgba(118,169,255,.35);
+  border-radius: 2px;
   pointer-events: none;
 }
 
 .previewSelectionDot{
   position:absolute;
-  width:8px;
-  height:8px;
+  width:12px;
+  height:12px;
   border-radius: 499.5px;
-  background: rgba(122,167,255,.95);
-  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  background: radial-gradient(circle at 35% 35%, rgba(235,245,255,1), rgba(132,186,255,1));
+  border: 1.5px solid rgba(36,64,112,.95);
+  box-shadow:
+    0 0 0 1px rgba(12,20,35,.5),
+    0 2px 8px rgba(8,15,28,.45);
   pointer-events: auto;
   cursor: nwse-resize;
 }
@@ -1390,6 +1397,7 @@ select optgroup{
 }
 
 .wires{ position:absolute; inset:0; pointer-events:none; }
+.groups{ position:absolute; inset:0; }
 .nodes{ position:absolute; inset:0; }
 
 .wires{
@@ -1404,6 +1412,102 @@ select optgroup{
   inset:0;
   z-index: 10; /* ✅ below wires */
 }
+
+.groupBox{
+  position: absolute;
+  border: 1.5px solid rgba(120, 170, 255, 0.45);
+  background: rgba(80, 130, 220, 0.09);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(200, 220, 255, 0.08);
+  overflow: hidden;
+}
+
+.groupHeader{
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(230, 240, 255, 0.95);
+  border-bottom: 1px solid rgba(190, 215, 255, 0.2);
+  background: rgba(90, 138, 225, 0.25);
+  cursor: grab;
+  user-select: none;
+}
+
+.groupHeaderRight{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.groupCollapseBtn{
+  border: 1px solid rgba(200, 220, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(234, 242, 255, 0.95);
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.groupCollapseBtn:hover{
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.groupHeader:active{
+  cursor: grabbing;
+}
+
+.groupLabel{
+  outline: none;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.groupLabel:focus{
+  background: rgba(255,255,255,.12);
+}
+
+.groupBadge{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(224, 236, 255, 0.8);
+}
+
+.groupBox.collapsed{
+  background: rgba(80, 130, 220, 0.12);
+}
+
+.groupBox.collapsed .groupHeader{
+  border-bottom: none;
+}
+
+.groupResizeHandle{
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(190, 220, 255, 0.85);
+  background: rgba(75, 126, 218, 0.95);
+  box-shadow: 0 0 0 1px rgba(8, 14, 24, 0.35);
+}
+
+.groupResizeHandle--n{ top: -5px; left: calc(50% - 5px); cursor: ns-resize; }
+.groupResizeHandle--e{ right: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+.groupResizeHandle--s{ bottom: -5px; left: calc(50% - 5px); cursor: ns-resize; }
+.groupResizeHandle--w{ left: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+.groupResizeHandle--ne{ right: -5px; top: -5px; cursor: nesw-resize; }
+.groupResizeHandle--nw{ left: -5px; top: -5px; cursor: nwse-resize; }
+.groupResizeHandle--se{ right: -5px; bottom: -5px; cursor: nwse-resize; }
+.groupResizeHandle--sw{ left: -5px; bottom: -5px; cursor: nesw-resize; }
 
 
 .node{
@@ -1428,6 +1532,11 @@ select optgroup{
   background: rgba(180,142,255,.03);
 }
 
+.node.groupHidden{
+  opacity: 0;
+  pointer-events: none;
+}
+
 .nh{
   padding:10px 12px;
   display:flex;
@@ -1438,6 +1547,33 @@ select optgroup{
   cursor:grab;
 }
 .nh:active{ cursor:grabbing; }
+
+.btn-bypass{
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: opacity 0.15s, background 0.15s;
+  pointer-events: all;
+}
+.btn-bypass:hover{ background: rgba(255,255,255,.10); opacity:1 !important; }
+
+.node.bypassed{
+  opacity: 0.5;
+  filter: grayscale(0.7) saturate(0.4);
+}
+.node.bypassed .nh{
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    rgba(255,255,255,.03) 5px,
+    rgba(255,255,255,.03) 10px
+  );
+}
 
 .nname{ display:flex; gap:8px; align-items:center; font-size:13px; font-weight:650; }
 .ntype{
@@ -1745,6 +1881,11 @@ select optgroup{
   border-color:rgba(100,155,255,.35);
 }
 
+.smItem.smSelected:not(.smActive){
+  background:rgba(120,152,210,.14);
+  border-color:rgba(122,162,222,.28);
+}
+
 .smVis{
   background:none; border:none;
   color:rgba(255,255,255,.5);
@@ -1776,6 +1917,55 @@ select optgroup{
   color:rgba(140,180,255,.9);
   font-weight:600;
   letter-spacing:.02em;
+}
+
+.smScrubRow{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+
+.smScrubBox{
+  min-width:92px;
+  padding:8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.96);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  justify-content:flex-start;
+  cursor: ew-resize;
+  user-select:none;
+  touch-action:none;
+  transition: background .12s ease, border-color .12s ease, transform .12s ease, opacity .12s ease;
+}
+
+.smScrubBox:hover{
+  background: rgba(255,255,255,.09);
+  border-color: rgba(255,255,255,.14);
+}
+
+.smScrubBox:active{
+  transform: translateY(1px);
+}
+
+.smScrubBox.isMuted{
+  opacity: .55;
+}
+
+.smScrubTag{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(255,255,255,.72);
+  letter-spacing: .04em;
+}
+
+.smScrubValue{
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1;
 }
 /* ─────────────────────────────────────────────────── */
 
