@@ -649,6 +649,9 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		const x = Number(p.x) || 0;
 		const y = Number(p.y) || 0;
 		const fallbackColor = String(p.color || "#3b82f6");
+		const strokeColor = String(p.strokeColor || "#ffffff");
+		const strokeWidth = Math.max(0, Number(p.strokeWidth) || 0);
+		const strokeOpacity = Math.max(0, Math.min(1, Number(p.strokeOpacity) || 0));
 		const padding = Math.max(2, Math.ceil(Math.max(width, height) * 0.05));
 		const canvas = document.createElement("canvas");
 		canvas.width = Math.max(1, Math.ceil(width + (padding * 2)));
@@ -660,6 +663,17 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		applyCanvasFillStyle(ctx, fillSpec, fallbackColor, canvas.width, canvas.height);
 		traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2);
 		ctx.fill();
+		if(strokeWidth > 0 && strokeOpacity > 0){
+			ctx.save();
+			ctx.globalAlpha = strokeOpacity;
+			ctx.strokeStyle = strokeColor;
+			ctx.lineWidth = strokeWidth;
+			ctx.lineJoin = "round";
+			ctx.lineCap = "round";
+			traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2);
+			ctx.stroke();
+			ctx.restore();
+		}
 
 		return {
 			dataUrl: canvas.toDataURL("image/png"),
@@ -850,7 +864,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			return ["a", "b"];
 		}
 
-		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite", "Pen"]);
+		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite", "Pen", "Glow"]);
 		const usedNodeIds = new Set();
 		(function walk(nodeId){
 			const id = String(nodeId || "");
@@ -916,6 +930,16 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				};
 				const srcId = findInput(node.id, ["in", "layer", "source"]);
 				return srcId ? decodeLayer(srcId, next) : null;
+			}
+
+			if(node.type === "Glow"){
+				const srcId = findInput(node.id, ["in", "layer", "source"]);
+				if(!srcId) return null;
+				if(!decodeLayer._glowWarned){
+					decodeLayer._glowWarned = true;
+					toast("Lottie note: Glow effect is skipped (exported as source layer).", 4200);
+				}
+				return decodeLayer(srcId, accum);
 			}
 
 			if(node.type === "Color"){
@@ -1775,35 +1799,50 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return null;
 	};
 
-	CompactGraphPlayer.prototype.drawShape = function(ctx, shapeType, x, y, size){
-		var r = size / 2;
+	CompactGraphPlayer.prototype.drawShape = function(ctx, shapeType, x, y, width, height){
+		var w = Math.max(1, toNumber(width, 100));
+		var h = Math.max(1, toNumber(height, w));
+		var rx = w / 2;
+		var ry = h / 2;
 		ctx.beginPath();
-		if(shapeType === 'square'){ ctx.rect(x-r, y-r, size, size); return; }
-		if(shapeType === 'triangle'){ ctx.moveTo(x, y-r); ctx.lineTo(x+r, y+r); ctx.lineTo(x-r, y+r); ctx.closePath(); return; }
-		if(shapeType === 'diamond'){ ctx.moveTo(x, y-r); ctx.lineTo(x+r, y); ctx.lineTo(x, y+r); ctx.lineTo(x-r, y); ctx.closePath(); return; }
+		if(shapeType === 'square' || shapeType === 'rectangle'){
+			ctx.rect(x - rx, y - ry, w, h);
+			return;
+		}
+		if(shapeType === 'triangle'){ ctx.moveTo(x, y - ry); ctx.lineTo(x + rx, y + ry); ctx.lineTo(x - rx, y + ry); ctx.closePath(); return; }
+		if(shapeType === 'diamond'){ ctx.moveTo(x, y - ry); ctx.lineTo(x + rx, y); ctx.lineTo(x, y + ry); ctx.lineTo(x - rx, y); ctx.closePath(); return; }
 		if(shapeType === 'hexagon'){
 			for(var i=0;i<6;i++){
-				var a = (Math.PI/3)*i - Math.PI/2;
-				var px = x + Math.cos(a)*r;
-				var py = y + Math.sin(a)*r;
+				var a = (Math.PI / 3) * i - Math.PI / 2;
+				var px = x + Math.cos(a) * rx;
+				var py = y + Math.sin(a) * ry;
 				if(i===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
 			}
 			ctx.closePath();
 			return;
 		}
 		if(shapeType === 'star'){
-			var r2 = r*0.5;
-			for(var j=0;j<10;j++){
-				var a2 = (Math.PI/5)*j - Math.PI/2;
-				var rr = (j % 2 === 0) ? r : r2;
-				var sx = x + Math.cos(a2)*rr;
-				var sy = y + Math.sin(a2)*rr;
+			var starPts = [
+				[0.5, 0],
+				[0.61, 0.35],
+				[0.98, 0.35],
+				[0.68, 0.57],
+				[0.79, 0.91],
+				[0.5, 0.7],
+				[0.21, 0.91],
+				[0.32, 0.57],
+				[0.02, 0.35],
+				[0.39, 0.35]
+			];
+			for(var j=0;j<starPts.length;j++){
+				var sx = x - rx + (starPts[j][0] * w);
+				var sy = y - ry + (starPts[j][1] * h);
 				if(j===0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
 			}
 			ctx.closePath();
 			return;
 		}
-		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
 	};
 
 	CompactGraphPlayer.prototype.getOpaqueBounds = function(sourceCanvas){
@@ -2002,13 +2041,18 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		else if(node.type === 'Shape'){
 			var c2 = this.createLayer();
 			var size = Math.max(1, toNumber(params.size, 100));
+			var shapeWidth = Math.max(1, toNumber(params.width, size));
+			var shapeHeight = Math.max(1, toNumber(params.height, size));
 			var x = toNumber(params.x, c2.canvas.width / 2);
 			var y = toNumber(params.y, c2.canvas.height / 2);
+			var strokeColor = String(params.strokeColor || '#ffffff');
+			var strokeWidth = Math.max(0, toNumber(params.strokeWidth, 0));
+			var strokeOpacity = clamp(toNumber(params.strokeOpacity, 1), 0, 1);
 			var fillInShape = this.getInput(nodeId, ['fill','color','paint'], timeSec, cache);
 			if(fillInShape && fillInShape.canvas){
 				var shapeMaskLayer = this.createLayer();
 				shapeMaskLayer.ctx.fillStyle = '#ffffff';
-				this.drawShape(shapeMaskLayer.ctx, params.shape || 'circle', x, y, size);
+				this.drawShape(shapeMaskLayer.ctx, params.shape || 'circle', x, y, shapeWidth, shapeHeight);
 				shapeMaskLayer.ctx.fill();
 				c2.ctx.drawImage(fillInShape.canvas, 0, 0);
 				c2.ctx.globalCompositeOperation = 'destination-in';
@@ -2016,8 +2060,19 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				c2.ctx.globalCompositeOperation = 'source-over';
 			}else{
 				c2.ctx.fillStyle = params.color || '#3b82f6';
-				this.drawShape(c2.ctx, params.shape || 'circle', x, y, size);
+				this.drawShape(c2.ctx, params.shape || 'circle', x, y, shapeWidth, shapeHeight);
 				c2.ctx.fill();
+			}
+			if(strokeWidth > 0 && strokeOpacity > 0){
+				c2.ctx.save();
+				c2.ctx.globalAlpha = strokeOpacity;
+				c2.ctx.strokeStyle = strokeColor;
+				c2.ctx.lineWidth = strokeWidth;
+				c2.ctx.lineCap = 'round';
+				c2.ctx.lineJoin = 'round';
+				this.drawShape(c2.ctx, params.shape || 'circle', x, y, shapeWidth, shapeHeight);
+				c2.ctx.stroke();
+				c2.ctx.restore();
 			}
 			result = this.attachTimelineMeta({ canvas: c2.canvas }, 0, 0);
 		}

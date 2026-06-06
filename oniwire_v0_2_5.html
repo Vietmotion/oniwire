@@ -26,7 +26,7 @@
     }
   </style>
   <script src="vendor/html2canvas.min.js"></script>
-  <script src="scripts/export.js?v=20260329a"></script>
+  <script src="scripts/export.js?v=20260606e"></script>
   <script src="scripts/node-menu.js"></script>
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
@@ -120,6 +120,7 @@
           <button id="btnPreviewFit" title="Reset preview to 100% and center">Fit</button>
           <button id="btnSafeZone">Safe Zone</button>
           <button id="btnRuler" title="Toggle rulers. Drag from ruler bars to create guide lines. Double-click a guide to remove it.">Ruler</button>
+          <button id="btnRulerLock" title="Lock or unlock ruler guides (L)" aria-label="Lock or unlock ruler guides" aria-pressed="false">🔓</button>
           <button id="btnSnapGrid" title="Snap dragged objects to ruler guides" aria-label="Snap to guides">🧲</button>
           <button id="btnMaskDebug" title="Show the premask canvas being used for export. Red border = mask found, grey = no mask." style="display:none;">Mask Debug</button>
         </div>
@@ -243,6 +244,25 @@
       </div>
     </div>
 
+    <button id="btnCoffee" class="coffeeBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="Support Oniwire">
+      <span class="coffeeBtnIcon" aria-hidden="true">☕</span>
+      <span class="coffeeBtnLabel">Give Me A Coffee</span>
+    </button>
+    <div id="coffeeBoard" class="coffeeBoard isHidden" role="dialog" aria-modal="false" aria-labelledby="coffeeBoardTitle" aria-hidden="true">
+      <button id="btnCloseCoffeeBoard" class="coffeeBoardClose" type="button" aria-label="Close support board">X</button>
+      <div class="coffeeBoardEyebrow">Support Oniwire</div>
+      <h3 id="coffeeBoardTitle" class="coffeeBoardTitle"><span class="coffeeBoardTitleIcon">☕</span> Fuel the next update</h3>
+      <p class="coffeeBoardText">
+        Thank you for enjoying this app. If you want to help, you can send a little coffee via PayPal,
+        or support me with tokens so I can keep pushing Oniwire forward with better features and polish.
+      </p>
+      <div class="coffeeBoardEmail">PayPal: viet.motiondesign@gmail.com</div>
+      <div class="coffeeBoardActions">
+        <button id="btnCopyCoffeeEmail" type="button">Copy Email</button>
+        <a id="btnOpenPaypalCoffee" class="coffeePaypalLink" target="_blank" rel="noopener noreferrer" href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=viet.motiondesign%40gmail.com&currency_code=USD">Open PayPal</a>
+      </div>
+    </div>
+
   </div>
 
 <!-- Node Search (Tab Menu) -->
@@ -258,7 +278,7 @@
     <div class="helpHeader">
       <div>
         <div class="helpEyebrow" id="helpEyebrow">Oniwire Help - Introduction</div>
-        <h2 class="helpTitle" id="helpTitle">Build visuals by connecting ideas, not by fighting the timeline.</h2>
+        <h2 class="helpTitle" id="helpTitle">Build visuals by connecting ideas.</h2>
         <p class="helpSubtitle" id="helpSubtitle">Oniwire is a node-based visual creation app for building layered motion graphics and generative compositions in a direct, flexible way.</p>
       </div>
       <button type="button" class="helpClose" id="btnCloseHelp" aria-label="Close help">X</button>
@@ -373,6 +393,10 @@
   const helpSubtitleEl = document.getElementById("helpSubtitle");
   const helpNodeNavEl = document.getElementById("helpNodeNav");
   const helpContentEl = document.getElementById("helpContent");
+  const coffeeBtn = document.getElementById("btnCoffee");
+  const coffeeBoard = document.getElementById("coffeeBoard");
+  const closeCoffeeBoardBtn = document.getElementById("btnCloseCoffeeBoard");
+  const copyCoffeeEmailBtn = document.getElementById("btnCopyCoffeeEmail");
 
   let helpVisible = false;
   let lastHelpFocus = null;
@@ -495,6 +519,14 @@
     if(state.history.length > state.historyMax){
       state.history.shift();
     }
+  }
+
+  function setCoffeeBoardVisible(visible){
+    const isVisible = Boolean(visible);
+    coffeeBoard?.classList.toggle("isHidden", !isVisible);
+    coffeeBoard?.setAttribute("aria-hidden", isVisible ? "false" : "true");
+    coffeeBtn?.setAttribute("aria-expanded", isVisible ? "true" : "false");
+    appEl?.classList.toggle("coffeeFocus", isVisible);
   }
 
   function restoreSnapshot(snapshot){
@@ -665,8 +697,10 @@
   const rulerGuideLayer = document.getElementById("rulerGuideLayer");
   const screenShellEl   = document.getElementById("screenShell");
   const RULER_SIZE = 18;
+  const rulerLockBtn   = document.getElementById("btnRulerLock");
 
   let rulersVisible = false;
+  let rulerLocked = false;
   const rulerGuides = []; // { el, axis: 'h'|'v', canvasPx: number }
 
   // Returns current transform state � scale and canvas-origin offsets in screen pixels
@@ -821,6 +855,22 @@
     if(rulersVisible) requestAnimationFrame(updateRulerDisplay);
   }
 
+  function setRulerLocked(v){
+    rulerLocked = !!v;
+    if(rulerLockBtn){
+      rulerLockBtn.textContent = rulerLocked ? "🔒" : "🔓";
+      rulerLockBtn.classList.toggle("active", rulerLocked);
+      rulerLockBtn.setAttribute("aria-pressed", rulerLocked ? "true" : "false");
+      rulerLockBtn.setAttribute("title", rulerLocked ? "Unlock ruler guides (L)" : "Lock ruler guides (L)");
+      rulerLockBtn.setAttribute("aria-label", rulerLocked ? "Unlock ruler guides" : "Lock ruler guides");
+    }
+  }
+
+  function toggleRulerLock(){
+    setRulerLocked(!rulerLocked);
+    toast(rulerLocked ? "Ruler guides locked." : "Ruler guides unlocked.");
+  }
+
   function toggleRulers(){
     setRulersVisible(!rulersVisible);
     toast(rulersVisible ? "Rulers on � drag from ruler bars to add guides. Double-click a guide to remove." : "Rulers off.");
@@ -835,6 +885,7 @@
     else             el.style.left = (canvasPx * scale + offsetX) + "px";
 
     el.addEventListener("dblclick", (e) => {
+      if(rulerLocked) return;
       e.stopPropagation();
       const idx = rulerGuides.findIndex(g => g.el === el);
       if(idx !== -1) rulerGuides.splice(idx, 1);
@@ -842,6 +893,7 @@
     });
 
     el.addEventListener("pointerdown", (e) => {
+      if(rulerLocked) return;
       if(e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
@@ -873,6 +925,7 @@
 
   function setupRulerBarDrag(canvasEl, axis){
     canvasEl?.addEventListener("pointerdown", (e) => {
+      if(rulerLocked) return;
       if(e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
@@ -948,6 +1001,8 @@
   let dragBase = { x: 0, y: 0 };
   let dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
   let dragNodeId = null;
+  let previewShapeResize = null;
+  const SHAPE_RESIZE_MIN_SIZE = 10;
 
   const penCanvasOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   penCanvasOverlay.id = "penCanvasOverlay";
@@ -1555,6 +1610,58 @@
     return {
       x: clamp(x, 0, previewBase.w),
       y: clamp(y, 0, previewBase.h)
+    };
+  }
+
+  function getShapeNodeSize(node){
+    const fallbackSize = Math.max(1, Number(node?.params?.size) || 1);
+    const width = Math.max(1, Number(node?.params?.width) || fallbackSize);
+    const height = Math.max(1, Number(node?.params?.height) || fallbackSize);
+    return { width, height };
+  }
+
+  function getShapeResizeCursor(edge){
+    if(!edge) return "";
+    const hasHorizontal = !!(edge.left || edge.right);
+    const hasVertical = !!(edge.top || edge.bottom);
+    if(hasHorizontal && hasVertical){
+      const useNwSe = (edge.left && edge.top) || (edge.right && edge.bottom);
+      return useNwSe ? "nwse-resize" : "nesw-resize";
+    }
+    if(hasHorizontal) return "ew-resize";
+    if(hasVertical) return "ns-resize";
+    return "";
+  }
+
+  function pickShapeResizeEdge(node, ev){
+    if(!node || node.type !== "Shape") return null;
+
+    const targetEl = renderRoot.querySelector(`[data-bound-id="${node.id}"]`);
+    if(!targetEl) return null;
+
+    const rect = targetEl.getBoundingClientRect();
+    const margin = 8;
+    if(
+      ev.clientX < (rect.left - margin)
+      || ev.clientX > (rect.right + margin)
+      || ev.clientY < (rect.top - margin)
+      || ev.clientY > (rect.bottom + margin)
+    ){
+      return null;
+    }
+
+    const nearLeft = Math.abs(ev.clientX - rect.left) <= margin;
+    const nearRight = Math.abs(ev.clientX - rect.right) <= margin;
+    const nearTop = Math.abs(ev.clientY - rect.top) <= margin;
+    const nearBottom = Math.abs(ev.clientY - rect.bottom) <= margin;
+    if(!nearLeft && !nearRight && !nearTop && !nearBottom) return null;
+
+    return {
+      left: nearLeft,
+      right: nearRight,
+      top: nearTop,
+      bottom: nearBottom,
+      cursor: getShapeResizeCursor({ left: nearLeft, right: nearRight, top: nearTop, bottom: nearBottom })
     };
   }
 
@@ -2432,6 +2539,27 @@
 
     if(e.button !== 0) return;
 
+    const resizeEdge = pickShapeResizeEdge(selectedNode, e);
+    if(resizeEdge){
+      const { width, height } = getShapeNodeSize(selectedNode);
+      const baseX = Number(selectedNode.params?.x) || 0;
+      const baseY = Number(selectedNode.params?.y) || 0;
+      pushHistory();
+      previewShapeResize = {
+        nodeId: selectedNode.id,
+        edge: resizeEdge,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startLeft: baseX - (width / 2),
+        startRight: baseX + (width / 2),
+        startTop: baseY - (height / 2),
+        startBottom: baseY + (height / 2)
+      };
+      previewViewport.style.cursor = resizeEdge.cursor || "";
+      previewViewport.setPointerCapture(e.pointerId);
+      return;
+    }
+
     const canDrag = selectedNode
       && selectedNode.params
       && typeof selectedNode.params.x !== "undefined"
@@ -2461,9 +2589,7 @@
         boxWidth = tRect.width / previewScale;
         boxHeight = tRect.height / previewScale;
       }else if(selectedNode.type === "Shape"){
-        const fallbackSize = Math.max(1, Number(selectedNode.params?.size) || 1);
-        const widthParam = Math.max(1, Number(selectedNode.params?.width) || fallbackSize);
-        const heightParam = Math.max(1, Number(selectedNode.params?.height) || fallbackSize);
+        const { width: widthParam, height: heightParam } = getShapeNodeSize(selectedNode);
         boxLeft = dragBase.x - (widthParam / 2);
         boxTop = dragBase.y - (heightParam / 2);
         boxWidth = widthParam;
@@ -2490,7 +2616,18 @@
 
 
   previewViewport.addEventListener("pointermove", (e) => {
+    if(state.spaceDown && !isPreviewPanning && !previewShapeResize && !penCanvasState.active){
+      previewViewport.style.cursor = "grab";
+    }
+
+    if(!penCanvasState.active && !previewShapeResize && !isPreviewDragging && !isPreviewPanning){
+      const hoverNode = state.selected ? state.nodes.get(state.selected) : null;
+      const hoverEdge = pickShapeResizeEdge(hoverNode, e);
+      previewViewport.style.cursor = state.spaceDown ? "grab" : (hoverEdge?.cursor || "");
+    }
+
     if(penCanvasState.active){
+      previewViewport.style.cursor = state.spaceDown ? "grab" : "";
       const node = penCanvasState.nodeId ? state.nodes.get(penCanvasState.nodeId) : null;
       const canvasPt = canvasPointFromPointer(e);
       if(!node || node.type !== "Pen" || !canvasPt) return;
@@ -2615,6 +2752,80 @@
       drawPenCanvasOverlay();
     }
 
+    if(previewShapeResize){
+      const node = previewShapeResize.nodeId ? state.nodes.get(previewShapeResize.nodeId) : null;
+      if(!node) return;
+      previewViewport.style.cursor = previewShapeResize.edge?.cursor || "";
+
+      const lockUniform = !!node.params?.uniform;
+
+      const dx = (e.clientX - previewShapeResize.startClientX) / previewScale;
+      const dy = (e.clientY - previewShapeResize.startClientY) / previewScale;
+
+      let left = previewShapeResize.startLeft;
+      let right = previewShapeResize.startRight;
+      let top = previewShapeResize.startTop;
+      let bottom = previewShapeResize.startBottom;
+
+      if(previewShapeResize.edge.left){
+        left = Math.min(right - SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startLeft + dx);
+      }
+      if(previewShapeResize.edge.right){
+        right = Math.max(left + SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startRight + dx);
+      }
+      if(previewShapeResize.edge.top){
+        top = Math.min(bottom - SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startTop + dy);
+      }
+      if(previewShapeResize.edge.bottom){
+        bottom = Math.max(top + SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startBottom + dy);
+      }
+
+      if(lockUniform){
+        const startWidth = Math.max(SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startRight - previewShapeResize.startLeft);
+        const startHeight = Math.max(SHAPE_RESIZE_MIN_SIZE, previewShapeResize.startBottom - previewShapeResize.startTop);
+        const currentWidth = Math.max(SHAPE_RESIZE_MIN_SIZE, right - left);
+        const currentHeight = Math.max(SHAPE_RESIZE_MIN_SIZE, bottom - top);
+        const targetSize = Math.max(SHAPE_RESIZE_MIN_SIZE, currentWidth, currentHeight);
+
+        if(previewShapeResize.edge.left && !previewShapeResize.edge.right){
+          left = previewShapeResize.startRight - targetSize;
+          right = previewShapeResize.startRight;
+        }else if(previewShapeResize.edge.right && !previewShapeResize.edge.left){
+          left = previewShapeResize.startLeft;
+          right = previewShapeResize.startLeft + targetSize;
+        }else{
+          const cx = (previewShapeResize.startLeft + previewShapeResize.startRight) / 2;
+          left = cx - (targetSize / 2);
+          right = cx + (targetSize / 2);
+        }
+
+        if(previewShapeResize.edge.top && !previewShapeResize.edge.bottom){
+          top = previewShapeResize.startBottom - targetSize;
+          bottom = previewShapeResize.startBottom;
+        }else if(previewShapeResize.edge.bottom && !previewShapeResize.edge.top){
+          top = previewShapeResize.startTop;
+          bottom = previewShapeResize.startTop + targetSize;
+        }else{
+          const cy = (previewShapeResize.startTop + previewShapeResize.startBottom) / 2;
+          top = cy - (targetSize / 2);
+          bottom = cy + (targetSize / 2);
+        }
+      }
+
+      node.params.x = (left + right) / 2;
+      node.params.y = (top + bottom) / 2;
+      node.params.width = Math.max(SHAPE_RESIZE_MIN_SIZE, right - left);
+      node.params.height = Math.max(SHAPE_RESIZE_MIN_SIZE, bottom - top);
+
+      inspectorBody.querySelectorAll('[data-k="x"]').forEach(inp => inp.value = node.params.x);
+      inspectorBody.querySelectorAll('[data-k="y"]').forEach(inp => inp.value = node.params.y);
+      inspectorBody.querySelectorAll('[data-k="width"]').forEach(inp => inp.value = node.params.width);
+      inspectorBody.querySelectorAll('[data-k="height"]').forEach(inp => inp.value = node.params.height);
+
+      evaluateAndRender();
+      return;
+    }
+
     if(isPreviewDragging){
       const node = dragNodeId ? state.nodes.get(dragNodeId) : null;
       if(!node) return;
@@ -2665,6 +2876,8 @@
       renderInspector();
     }
     penCanvasState.hoverCanvas = null;
+    previewViewport.style.cursor = state.spaceDown ? "grab" : "";
+    previewShapeResize = null;
     isPreviewDragging = false;
     dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
     dragNodeId = null;
@@ -2679,6 +2892,8 @@
       renderInspector();
     }
     penCanvasState.hoverCanvas = null;
+    previewViewport.style.cursor = state.spaceDown ? "grab" : "";
+    previewShapeResize = null;
     isPreviewDragging = false;
     dragSnapRef = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
     dragNodeId = null;
@@ -2688,6 +2903,7 @@
   });
 
   previewViewport.addEventListener("pointerleave", () => {
+    previewViewport.style.cursor = state.spaceDown ? "grab" : "";
     if(penCanvasState.hoverCanvas){
       penCanvasState.hoverCanvas = null;
       drawPenCanvasOverlay();
@@ -2750,7 +2966,7 @@ const exportAnimationJSON = exportApi.exportAnimationJSON;
 const exportEmbedJS = exportApi.exportEmbedJS;
 const exportLottieJSON = exportApi.exportLottieJSON;
 
-const LOTTIE_ALLOWED_NODE_TYPES = new Set(["Output", "Shape", "Text", "Transform", "Motion", "Color", "Gradient", "Ramp", "Composite"]);
+const LOTTIE_ALLOWED_NODE_TYPES = new Set(["Output", "Shape", "Text", "Transform", "Motion", "Color", "Gradient", "Ramp", "Composite", "Glow"]);
 
 function isLottieRestrictionEnabled(){
   const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
@@ -2828,11 +3044,12 @@ utilsApi.initProjectUtils();
     return "circle";
   }
 
-  function resolveMaskMetaFromEl(maskEl){
+  function resolveMaskMetaFromEl(maskEl, options = {}){
     if(!maskEl) return null;
+    const includeNested = options.includeNested !== false;
     const hasMaskData = Boolean(maskEl.dataset?.maskShape || maskEl.dataset?.maskPathData);
     const direct = hasMaskData ? maskEl : null;
-    const nested = direct ? null : maskEl.querySelector?.("[data-mask-shape], [data-mask-path-data]");
+    const nested = (includeNested && !direct) ? maskEl.querySelector?.("[data-mask-shape], [data-mask-path-data]") : null;
     const target = direct || nested;
     if(!target) return null;
 
@@ -2862,7 +3079,9 @@ utilsApi.initProjectUtils();
       width: Number(target.dataset.maskWidth || target.dataset.maskSize || 120),
       height: Number(target.dataset.maskHeight || target.dataset.maskSize || 120),
       x: Number(target.dataset.maskX || 100),
-      y: Number(target.dataset.maskY || 100)
+      y: Number(target.dataset.maskY || 100),
+      strokeWidth: Number(target.dataset.maskStrokeWidth || 0),
+      strokeOpacity: Number(target.dataset.maskStrokeOpacity || 0)
     };
   }
 
@@ -2873,6 +3092,10 @@ utilsApi.initProjectUtils();
     const height = Number(meta.height || meta.size || width);
     const x = Number(meta.x || 100);
     const y = Number(meta.y || 100);
+    const strokeWidth = Math.max(0, Number(meta.strokeWidth) || 0);
+    const strokeOpacity = Math.max(0, Math.min(1, Number(meta.strokeOpacity) || 0));
+    const rx = Math.max(1, width / 2);
+    const ry = Math.max(1, height / 2);
 
     const w = previewBase?.w || 1280;
     const h = previewBase?.h || 720;
@@ -2880,7 +3103,6 @@ utilsApi.initProjectUtils();
     // Use alpha-driven fills so CSS masking works consistently across engines.
     const baseFill = invert ? "rgba(255,255,255,1)" : "rgba(255,255,255,0)";
     const shapeFill = invert ? "rgba(255,255,255,0)" : "rgba(255,255,255,1)";
-    const r = Math.max(width, height) / 2;
 
     let shapeSvg = "";
     if(shapeType === "path"){
@@ -2907,49 +3129,56 @@ utilsApi.initProjectUtils();
     }else{
     switch(shapeType){
       case "circle":
-        shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+        shapeSvg = `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="${shapeFill}" />`;
         break;
       case "rectangle":
         shapeSvg = `<rect x="${x - width / 2}" y="${y - height / 2}" width="${width}" height="${height}" fill="${shapeFill}" />`;
         break;
       case "triangle":
         shapeSvg = `<polygon points="${[
-          [x, y - r],
-          [x + r, y + r],
-          [x - r, y + r]
+          [x, y - ry],
+          [x + rx, y + ry],
+          [x - rx, y + ry]
         ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
         break;
       case "diamond":
         shapeSvg = `<polygon points="${[
-          [x, y - r],
-          [x + r, y],
-          [x, y + r],
-          [x - r, y]
+          [x, y - ry],
+          [x + rx, y],
+          [x, y + ry],
+          [x - rx, y]
         ].map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
         break;
       case "hexagon": {
-        const pts = [];
-        for(let i=0;i<6;i++){
-          const a = (Math.PI/3)*i - Math.PI/6;
-          pts.push([x + r*Math.cos(a), y + r*Math.sin(a)]);
-        }
+        const pts = [
+          [x, y - ry],
+          [x + rx, y - (ry * 0.5)],
+          [x + rx, y + (ry * 0.5)],
+          [x, y + ry],
+          [x - rx, y + (ry * 0.5)],
+          [x - rx, y - (ry * 0.5)]
+        ];
         shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
         break;
       }
       case "star": {
-        const pts = [];
-        const r1 = r;
-        const r2 = r * 0.5;
-        for(let i=0;i<10;i++){
-          const a = (Math.PI/5)*i - Math.PI/2;
-          const rr = i % 2 === 0 ? r1 : r2;
-          pts.push([x + rr*Math.cos(a), y + rr*Math.sin(a)]);
-        }
+        const pts = [
+          [x - rx + (0.5 * width), y - ry + (0 * height)],
+          [x - rx + (0.61 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.98 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.68 * width), y - ry + (0.57 * height)],
+          [x - rx + (0.79 * width), y - ry + (0.91 * height)],
+          [x - rx + (0.5 * width), y - ry + (0.7 * height)],
+          [x - rx + (0.21 * width), y - ry + (0.91 * height)],
+          [x - rx + (0.32 * width), y - ry + (0.57 * height)],
+          [x - rx + (0.02 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.39 * width), y - ry + (0.35 * height)]
+        ];
         shapeSvg = `<polygon points="${pts.map(p => p.join(",")).join(" ")}" fill="${shapeFill}" />`;
         break;
       }
       default:
-        shapeSvg = `<circle cx="${x}" cy="${y}" r="${r}" fill="${shapeFill}" />`;
+        shapeSvg = `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="${shapeFill}" />`;
     }
     }
 
@@ -3390,6 +3619,166 @@ utilsApi.initProjectUtils();
     }
   }
 
+  function getGradientTextBakeMeta(el){
+    if(!(el instanceof HTMLElement)) return null;
+    let cs = null;
+    try{ cs = getComputedStyle(el); }catch(_){ cs = null; }
+
+    const inlineBg = String(el.style.background || "");
+    const inlineBgImg = String(el.style.backgroundImage || "");
+    const computedBg = String(cs?.background || "");
+    const computedBgImg = String(cs?.backgroundImage || "");
+    const clip = String(el.style.webkitBackgroundClip || el.style.backgroundClip || cs?.webkitBackgroundClip || cs?.backgroundClip || "").toLowerCase();
+    const textFill = String(el.style.webkitTextFillColor || cs?.webkitTextFillColor || "").toLowerCase();
+
+    const gradientValue = [inlineBg, inlineBgImg, computedBg, computedBgImg]
+      .find(v => String(v || "").includes("gradient(")) || "";
+
+    const hasText = String(el.textContent || "").replace(/\s+/g, " ").trim().length > 0;
+    const isTextClip = clip.includes("text");
+    const transparentFill = textFill.includes("transparent") || textFill.includes("rgba(0, 0, 0, 0)");
+
+    if(!gradientValue || !hasText || !isTextClip || !transparentFill) return null;
+    return { gradientValue };
+  }
+
+  async function bakeGradientTextElementsForCapture(rootEl, html2canvasFn){
+    if(!(rootEl instanceof HTMLElement) || typeof html2canvasFn !== "function") return;
+
+    const candidates = [rootEl, ...Array.from(rootEl.querySelectorAll("*"))]
+      .filter(el => el instanceof HTMLElement)
+      .map(el => ({ el, meta: getGradientTextBakeMeta(el) }))
+      .filter(item => Boolean(item.meta));
+
+    if(!candidates.length) return;
+
+    for(const { el, meta } of candidates){
+      if(!(el instanceof HTMLElement) || !meta) continue;
+      if(!el.isConnected || !el.parentNode) continue;
+
+      const rect = el.getBoundingClientRect();
+      const pad = 8;
+      const naturalW = Math.max(
+        1,
+        Number(el.scrollWidth) || 0,
+        Number(el.offsetWidth) || 0,
+        Number(el.clientWidth) || 0
+      );
+      const naturalH = Math.max(
+        1,
+        Number(el.scrollHeight) || 0,
+        Number(el.offsetHeight) || 0,
+        Number(el.clientHeight) || 0
+      );
+      const w = Math.max(1, Math.ceil(naturalW), Math.ceil(rect.width));
+      const h = Math.max(1, Math.ceil(naturalH), Math.ceil(rect.height));
+      const bw = w + (pad * 2);
+      const bh = h + (pad * 2);
+      if(w < 1 || h < 1) continue;
+
+      const offscreenWrap = document.createElement("div");
+      offscreenWrap.style.cssText = `position:fixed;left:-200vw;top:-200vh;width:${bw}px;height:${bh}px;overflow:hidden;pointer-events:none;z-index:-1;background:transparent;`;
+
+      const maskClone = el.cloneNode(true);
+      if(maskClone instanceof HTMLElement){
+        maskClone.style.position = "absolute";
+        maskClone.style.left = `${pad}px`;
+        maskClone.style.top = `${pad}px`;
+        maskClone.style.width = `${w}px`;
+        maskClone.style.height = `${h}px`;
+        maskClone.style.transform = "none";
+        maskClone.style.background = "none";
+        maskClone.style.backgroundImage = "none";
+        maskClone.style.color = "#ffffff";
+        maskClone.style.webkitTextFillColor = "#ffffff";
+        maskClone.style.backgroundClip = "border-box";
+        maskClone.style.webkitBackgroundClip = "border-box";
+      }
+
+      const gradientLayer = document.createElement("div");
+      gradientLayer.style.position = "absolute";
+      gradientLayer.style.left = `${pad}px`;
+      gradientLayer.style.top = `${pad}px`;
+      gradientLayer.style.width = `${w}px`;
+      gradientLayer.style.height = `${h}px`;
+      gradientLayer.style.background = meta.gradientValue;
+
+      offscreenWrap.appendChild(gradientLayer);
+      offscreenWrap.appendChild(maskClone);
+      document.body.appendChild(offscreenWrap);
+
+      let gradientCanvas = null;
+      let maskCanvas = null;
+      try{
+        gradientCanvas = await html2canvasFn(gradientLayer, {
+          backgroundColor: null,
+          width: bw,
+          height: bh,
+          scale: 1,
+          useCORS: true,
+          foreignObjectRendering: false,
+          windowWidth: bw,
+          windowHeight: bh,
+          x: 0,
+          y: 0,
+          scrollX: 0,
+          scrollY: 0,
+          logging: false,
+        });
+
+        maskCanvas = await html2canvasFn(maskClone, {
+          backgroundColor: null,
+          width: bw,
+          height: bh,
+          scale: 1,
+          useCORS: true,
+          foreignObjectRendering: false,
+          windowWidth: bw,
+          windowHeight: bh,
+          x: 0,
+          y: 0,
+          scrollX: 0,
+          scrollY: 0,
+          logging: false,
+        });
+      }catch(_){
+        gradientCanvas = null;
+        maskCanvas = null;
+      }finally{
+        if(offscreenWrap.parentNode) offscreenWrap.parentNode.removeChild(offscreenWrap);
+      }
+
+      if(!gradientCanvas || !maskCanvas) continue;
+
+      const baked = document.createElement("canvas");
+      baked.width = bw;
+      baked.height = bh;
+      const bctx = baked.getContext("2d");
+      if(!bctx) continue;
+      bctx.clearRect(0, 0, bw, bh);
+      bctx.drawImage(gradientCanvas, 0, 0);
+      bctx.globalCompositeOperation = "destination-in";
+      bctx.drawImage(maskCanvas, 0, 0);
+      bctx.globalCompositeOperation = "source-over";
+
+      const bakedImg = document.createElement("img");
+      bakedImg.src = baked.toDataURL("image/png");
+      bakedImg.alt = "";
+      bakedImg.draggable = false;
+      bakedImg.style.cssText = el.style.cssText;
+      bakedImg.style.left = `${(Number.parseFloat(el.style.left) || 0) - pad}px`;
+      bakedImg.style.top = `${(Number.parseFloat(el.style.top) || 0) - pad}px`;
+      bakedImg.style.width = `${bw}px`;
+      bakedImg.style.height = `${bh}px`;
+      bakedImg.style.background = "none";
+      bakedImg.style.backgroundImage = "none";
+      bakedImg.style.objectFit = "fill";
+      bakedImg.style.objectPosition = "0 0";
+
+      el.parentNode.replaceChild(bakedImg, el);
+    }
+  }
+
   // Bakes CSS filter effects (from Stylize and similar nodes) to canvas before html2canvas capture.
   // html2canvas ignores the CSS `filter` property, so we pre-bake: capture unfiltered content,
   // apply the filter via CanvasRenderingContext2D.filter, then replace the element with a baked img.
@@ -3517,6 +3906,7 @@ utilsApi.initProjectUtils();
         // Keep filtered pre-bake consistent with main export capture path:
         // first normalize img object-fit, then bake CSS masks before html2canvas.
         await bakeCloneImagesForCapture(isolatedWrap);
+        await bakeGradientTextElementsForCapture(isolatedWrap, html2canvasFn);
         await bakeMaskedElementsForHtml2canvas(isolatedWrap, html2canvasFn);
         capturedCanvas = await html2canvasFn(isolatedWrap, {
           backgroundColor: null,
@@ -3654,35 +4044,39 @@ utilsApi.initProjectUtils();
     const height = Number(meta.height || meta.size || width);
     const x = Number(meta.x || 100);
     const y = Number(meta.y || 100);
-    const r = Math.max(width, height) / 2;
+    const rx = Math.max(1, width / 2);
+    const ry = Math.max(1, height / 2);
 
     ctx.beginPath();
     switch(shapeType){
       case "circle":
-        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
         break;
       case "rectangle":
         ctx.rect(x - width / 2, y - height / 2, width, height);
         break;
       case "triangle":
-        ctx.moveTo(x, y - r);
-        ctx.lineTo(x + r, y + r);
-        ctx.lineTo(x - r, y + r);
+        ctx.moveTo(x, y - ry);
+        ctx.lineTo(x + rx, y + ry);
+        ctx.lineTo(x - rx, y + ry);
         ctx.closePath();
         break;
       case "diamond":
-        ctx.moveTo(x, y - r);
-        ctx.lineTo(x + r, y);
-        ctx.lineTo(x, y + r);
-        ctx.lineTo(x - r, y);
+        ctx.moveTo(x, y - ry);
+        ctx.lineTo(x + rx, y);
+        ctx.lineTo(x, y + ry);
+        ctx.lineTo(x - rx, y);
         ctx.closePath();
         break;
       case "hexagon": {
-        const pts = [];
-        for(let i = 0; i < 6; i++){
-          const a = (Math.PI / 3) * i - Math.PI / 6;
-          pts.push([x + r * Math.cos(a), y + r * Math.sin(a)]);
-        }
+        const pts = [
+          [x, y - ry],
+          [x + rx, y - (ry * 0.5)],
+          [x + rx, y + (ry * 0.5)],
+          [x, y + ry],
+          [x - rx, y + (ry * 0.5)],
+          [x - rx, y - (ry * 0.5)]
+        ];
         ctx.moveTo(pts[0][0], pts[0][1]);
         for(let i = 1; i < pts.length; i++){
           ctx.lineTo(pts[i][0], pts[i][1]);
@@ -3691,14 +4085,18 @@ utilsApi.initProjectUtils();
         break;
       }
       case "star": {
-        const outer = r;
-        const inner = r * 0.5;
-        const pts = [];
-        for(let i = 0; i < 10; i++){
-          const a = (Math.PI / 5) * i - Math.PI / 2;
-          const rr = i % 2 === 0 ? outer : inner;
-          pts.push([x + rr * Math.cos(a), y + rr * Math.sin(a)]);
-        }
+        const pts = [
+          [x - rx + (0.5 * width), y - ry + (0 * height)],
+          [x - rx + (0.61 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.98 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.68 * width), y - ry + (0.57 * height)],
+          [x - rx + (0.79 * width), y - ry + (0.91 * height)],
+          [x - rx + (0.5 * width), y - ry + (0.7 * height)],
+          [x - rx + (0.21 * width), y - ry + (0.91 * height)],
+          [x - rx + (0.32 * width), y - ry + (0.57 * height)],
+          [x - rx + (0.02 * width), y - ry + (0.35 * height)],
+          [x - rx + (0.39 * width), y - ry + (0.35 * height)]
+        ];
         ctx.moveTo(pts[0][0], pts[0][1]);
         for(let i = 1; i < pts.length; i++){
           ctx.lineTo(pts[i][0], pts[i][1]);
@@ -3707,10 +4105,14 @@ utilsApi.initProjectUtils();
         break;
       }
       default:
-        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
         break;
     }
     ctx.fill();
+    if(strokeWidth > 0 && strokeOpacity > 0){
+      ctx.lineWidth = strokeWidth;
+      ctx.stroke();
+    }
     ctx.restore();
     return true;
   }
@@ -3757,7 +4159,7 @@ utilsApi.initProjectUtils();
     localMaskCtx.clearRect(0, 0, w, h);
 
     let drew = false;
-    const shapeMeta = resolveMaskMetaFromEl(maskedEl);
+    const shapeMeta = resolveMaskMetaFromEl(maskedEl, { includeNested: false });
     if(shapeMeta && drawShapeMaskToContext(localMaskCtx, shapeMeta)){
       drew = true;
     }
@@ -3863,7 +4265,7 @@ utilsApi.initProjectUtils();
 
       if(drewCssMask) continue;
 
-      const shapeMeta = resolveMaskMetaFromEl(el);
+      const shapeMeta = resolveMaskMetaFromEl(el, { includeNested: false });
       if(shapeMeta && drawShapeMaskToContext(combinedCtx, shapeMeta)){
         foundMask = true;
       }
@@ -3879,7 +4281,7 @@ utilsApi.initProjectUtils();
 
     const maskedEls = [rootEl, ...Array.from(rootEl.querySelectorAll("*"))].filter(el => {
       if(!(el instanceof HTMLElement)) return false;
-      if(resolveMaskMetaFromEl(el)) return true;
+      if(resolveMaskMetaFromEl(el, { includeNested: false })) return true;
       const { maskValue } = readElementMaskStyle(el);
       return Boolean(maskValue && maskValue !== "none" && extractMaskUrlFromValue(maskValue));
     });
@@ -3887,6 +4289,7 @@ utilsApi.initProjectUtils();
     let bakedAny = false;
     for(const maskedEl of maskedEls){
       if(!(maskedEl instanceof HTMLElement)) continue;
+      const hasShapeMeta = Boolean(resolveMaskMetaFromEl(maskedEl, { includeNested: false }));
       let hasCssMaskImage = false;
       try{
         const inlineMask = (maskedEl.style.maskImage && maskedEl.style.maskImage !== "none")
@@ -3901,7 +4304,7 @@ utilsApi.initProjectUtils();
           );
         }
       }catch(_){ }
-      if(!hasCssMaskImage) continue;
+      if(!hasCssMaskImage && !hasShapeMeta) continue;
 
       const elemW = Math.max(1, Math.round(maskedEl.clientWidth || rootEl.clientWidth || previewBase?.w || 1280));
       const elemH = Math.max(1, Math.round(maskedEl.clientHeight || rootEl.clientHeight || previewBase?.h || 720));
@@ -4311,7 +4714,7 @@ utilsApi.initProjectUtils();
         fontName: "",
         fontWeight: "700"
       },
-      icon: "??",
+      icon: "Aa",
       run: (node) => {
         const fontDataUrl = String(node.params?.fontDataUrl || "").trim();
         const fontFamily = sanitizeFontFamilyName(node.params?.fontFamily || "");
@@ -4537,14 +4940,14 @@ const NODE_TIPS = {
 
 const TIPS_DEFAULT = [
   "<strong>Welcome!</strong> This is an online node-based visual creation app.",
-  "- Press <kbd>Tab</kbd> to search and add nodes.<br>- Press <kbd>Shift+O</kbd> to quick-connect to Output.",
+  "- Press <kbd>Tab</kbd> to search and add nodes.<br>- Press <kbd>Shift+O</kbd> to quick-connect to Output.<br>- Press <kbd>L</kbd> to lock/unlock ruler guides.",
   "Editor: <kbd>Space</kbd>+Drag to pan | Wheel to zoom | Click a node to inspect it."
 ];
 
 const HELP_GENERAL_PAGES = {
   introduction: {
     eyebrow: "Oniwire Help - Introduction",
-    title: "Build visuals by connecting ideas, not by fighting the timeline.",
+    title: "Build visuals by connecting ideas.",
     subtitle: "Oniwire is a node-based visual creation app for building layered motion graphics and generative compositions in a direct, flexible way.",
     body: `
       <div class="helpHero">
@@ -4600,6 +5003,7 @@ const HELP_GENERAL_PAGES = {
       <div class="helpSection">
         <h3 class="helpSectionTitle">Preview</h3>
         <ul class="helpChecklist">
+          <li><kbd>L</kbd> locks/unlocks ruler guide editing.</li>
           <li>Preview zoom dropdown changes screen scale.</li>
           <li>When zoomed above 100%, drag to pan the preview.</li>
         </ul>
@@ -5648,7 +6052,7 @@ async function evaluate(){
     }
     if(!Number.isFinite(minX)) return null;
     const pad = 24;
-    const headerPad = 34;
+    const headerPad = GROUP_HEADER_HEIGHT + 18;
     return {
       x: minX - pad,
       y: minY - headerPad,
@@ -5691,9 +6095,54 @@ async function evaluate(){
   const GROUP_MIN_HEIGHT = 96;
   const GROUP_HEADER_HEIGHT = 28;
   const GROUP_COLLAPSED_HEIGHT = 32;
+  let groupContextMenuEl = null;
+  let groupContextMenuGroupId = null;
+
+  function closeGroupContextMenu(){
+    groupContextMenuGroupId = null;
+    if(groupContextMenuEl){
+      groupContextMenuEl.remove();
+      groupContextMenuEl = null;
+    }
+  }
+
+  function openGroupContextMenu(clientX, clientY, groupId){
+    if(!editorEl || !groupId) return;
+    closeGroupContextMenu();
+
+    const group = state.groups.get(String(groupId));
+    if(!group) return;
+
+    const menu = document.createElement("div");
+    menu.className = "groupContextMenu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = '<button type="button" class="groupContextMenuItem" data-action="clear">Clear group</button>';
+    menu.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+    });
+
+    const editorRect = editorEl.getBoundingClientRect();
+    const localX = clientX - editorRect.left;
+    const localY = clientY - editorRect.top;
+
+    menu.style.left = Math.max(6, localX) + "px";
+    menu.style.top = Math.max(6, localY) + "px";
+
+    editorEl.appendChild(menu);
+
+    const menuRect = menu.getBoundingClientRect();
+    const maxLeft = Math.max(6, editorRect.width - menuRect.width - 6);
+    const maxTop = Math.max(6, editorRect.height - menuRect.height - 6);
+    menu.style.left = Math.min(Math.max(6, localX), maxLeft) + "px";
+    menu.style.top = Math.min(Math.max(6, localY), maxTop) + "px";
+
+    groupContextMenuEl = menu;
+    groupContextMenuGroupId = String(group.id);
+  }
 
   function renderGroups(){
     if(!groupsEl) return;
+    closeGroupContextMenu();
     groupsEl.innerHTML = "";
 
     for(const group of state.groups.values()){
@@ -5772,6 +6221,11 @@ async function evaluate(){
           nodeOffsets: offsets
         };
       });
+      header?.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        openGroupContextMenu(ev.clientX, ev.clientY, group.id);
+      });
 
       if(!isCollapsed){
         const handles = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
@@ -5806,6 +6260,50 @@ async function evaluate(){
       groupsEl.appendChild(wrap);
     }
   }
+
+  editorEl?.addEventListener("mousedown", () => {
+    closeGroupContextMenu();
+  });
+
+  editorEl?.addEventListener("contextmenu", (e) => {
+    if(!groupContextMenuEl) return;
+    if(groupContextMenuEl.contains(e.target)){
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    closeGroupContextMenu();
+  }, true);
+
+  window.addEventListener("keydown", (e) => {
+    if(e.key === "Escape"){
+      closeGroupContextMenu();
+    }
+  });
+
+  editorEl?.addEventListener("click", (e) => {
+    const menuItem = e.target.closest?.(".groupContextMenuItem");
+    if(!menuItem) return;
+    e.stopPropagation();
+    const action = menuItem.getAttribute("data-action");
+    const gid = String(groupContextMenuGroupId || "");
+    const group = state.groups.get(gid);
+    if(!group) {
+      closeGroupContextMenu();
+      return;
+    }
+
+    if(action === "clear"){
+      const label = String(group.label || group.id || "Group");
+      pushHistory();
+      state.groups.delete(gid);
+      closeGroupContextMenu();
+      render();
+      renderInspector();
+      requestWireDraw();
+      toast(`Cleared: ${label}`);
+    }
+  });
 
   // -----------------------------
   // Rendering nodes
@@ -6485,29 +6983,29 @@ async function evaluate(){
           <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
           <div class="row"><label>Fill</label><div class="pill" style="margin:0;">Path paint</div></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
-          <div class="row"><label>Fill Opacity</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /><input type="range" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /></div></div>
+          <div class="row"><label>Fill Opacity</label><div class="smRangePair"><input type="number" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /><input type="range" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 0.8}" /></div></div>
           <div class="row"><label>Stroke</label><div class="pill" style="margin:0;">Path outline</div></div>
           <div class="row"><label>Stroke Color</label><input type="color" data-sm-prop="strokeColor" value="${escapeAttr(ap.strokeColor || "#ffffff")}" /></div>
-          <div class="row"><label>Stroke Width</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /><input type="range" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /></div></div>
-          <div class="row"><label>Stroke Opacity</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /><input type="range" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /></div></div>
+          <div class="row"><label>Stroke Width</label><div class="smRangePair"><input type="number" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /><input type="range" data-sm-prop="strokeWidth" min="0.1" max="20" step="0.1" value="${ap.strokeWidth ?? 2}" /></div></div>
+          <div class="row"><label>Stroke Opacity</label><div class="smRangePair"><input type="number" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /><input type="range" data-sm-prop="strokeOpacity" min="0" max="1" step="0.01" value="${ap.strokeOpacity ?? 1}" /></div></div>
           <div class="row"><label>Line Cap</label><select data-sm-prop="strokeLinecap">
             <option value="round"${(ap.strokeLinecap||"round")==="round"?" selected":""}>Round</option>
             <option value="butt"${(ap.strokeLinecap||"round")==="butt"?" selected":""}>Butt</option>
             <option value="square"${(ap.strokeLinecap||"round")==="square"?" selected":""}>Square</option>
           </select></div>
           <div class="row"><label>Taper</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="taperStartStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change start taper strength"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.taperStartStrength ?? 70)}</span></button><button type="button" class="smScrubBox" data-sm-scrub="taperEndStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change end taper strength"><span class="smScrubTag">E</span><span class="smScrubValue">${Math.round(ap.taperEndStrength ?? 70)}</span></button></div></div>
-          <div class="row"><label>Smooth Strength</label><div style="display:grid; grid-template-columns:68px 1fr; gap:8px; align-items:center;"><input type="number" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /><input type="range" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /></div></div>
+          <div class="row"><label>Smooth Strength</label><div class="smRangePair"><input type="number" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /><input type="range" data-sm-prop="smoothStrength" min="0" max="100" step="1" value="${ap.smoothStrength ?? 50}" /></div></div>
         </div>
       ` : "";
 
       controlHtml = `
         <div class="shapeManager" data-k="${f.k}">
           <div class="smList">${listHtml || '<div style="color:#667;font-size:11px;padding:8px;">No paths yet. Click "+ New Path".</div>'}</div>
-          <div style="display:flex; gap:6px; margin-top:8px;">
-            <button type="button" data-sm-new style="flex:1;">+ New Path</button>
-            <button type="button" data-sm-dupe style="flex:1;">Duplicate</button>
-            <button type="button" data-sm-clear-pts style="flex:1;">Clear Points</button>
-            <button type="button" data-sm-smooth style="flex:1;" title="Auto-smooth all bezier handles on the active path">Smooth</button>
+          <div class="smActions">
+            <button type="button" data-sm-new class="smActionBtn">+ New Path</button>
+            <button type="button" data-sm-dupe class="smActionBtn">Duplicate</button>
+            <button type="button" data-sm-clear-pts class="smActionBtn">Clear Points</button>
+            <button type="button" data-sm-smooth class="smActionBtn" title="Auto-smooth all bezier handles on the active path">Smooth</button>
           </div>
           ${propsHtml}
         </div>
@@ -6561,6 +7059,14 @@ async function evaluate(){
     } else {
       controlHtml = `
         <input data-k="${f.k}" type="${f.type}" value="${escapeAttr(node.params[f.k] ?? "")}" style="${disabledControlStyle}"${disabledAttr}${disabledTitleAttr} />
+      `;
+    }
+
+    if(f.type === "shapeManager"){
+      return `
+        <div class="row rowFull" style="${rowMutedStyle}"${disabledTitleAttr}>
+          ${controlHtml}
+        </div>
       `;
     }
 
@@ -6749,12 +7255,22 @@ async function evaluate(){
         const exportType = btn.getAttribute('data-export-btn');
         const projectName = document.getElementById("projectName")?.value?.trim() || "animation";
         const runExport = (job) => {
-          Promise.resolve().then(job).catch((err) => {
+          try{
+            const out = job();
+            if(out && typeof out.then === "function"){
+              out.catch((err) => {
+                console.error("Export action failed", err);
+                const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+                toast(`Export failed: ${msg}`);
+              });
+            }
+          }catch(err){
             console.error("Export action failed", err);
             const msg = String(err?.message || err || "Unknown error").slice(0, 120);
             toast(`Export failed: ${msg}`);
-          });
+          }
         };
+
         if(exportType === "exportAnimJSON" || exportType === "exportAnimationJSON" || exportType === "exportJSON"){
           runExport(() => exportAnimationJSON(projectName));
         }else if(exportType === "exportEmbedJS"){
@@ -6764,7 +7280,7 @@ async function evaluate(){
         }else if(exportType === "exportMp4"){
           runExport(() => exportMp4(projectName));
         }else{
-          runExport(() => exportCanvasAsImage(exportType));
+          runExport(() => exportCanvasAsImage(exportType, { saveHandle: null, projectName }));
         }
       });
     });
@@ -7904,43 +8420,66 @@ async function evaluate(){
     overlay.addEventListener("click", (e) => { if(e.target === overlay) overlay.remove(); }, { once: true });
   }
 
-  async function exportCanvasWithBlend(format){
-    const exportScale = 2;
-    const w = Math.max(1, Math.round(previewBase.w));
-    const h = Math.max(1, Math.round(previewBase.h));
+  let stillExportInProgress = false;
+
+  async function exportCanvasWithBlend(format, options = {}){
+    if(stillExportInProgress){
+      toast("Export already running...");
+      return;
+    }
+    stillExportInProgress = true;
+
+    const exportScale = 1;
+    const srcW = Math.max(1, Math.round(previewBase.w));
+    const srcH = Math.max(1, Math.round(previewBase.h));
+    const MAX_STILL_EXPORT_PIXELS = 4_000_000;
+    const srcPixels = srcW * srcH;
+    const downscale = srcPixels > MAX_STILL_EXPORT_PIXELS
+      ? Math.sqrt(MAX_STILL_EXPORT_PIXELS / srcPixels)
+      : 1;
+    const w = Math.max(1, Math.round(srcW * downscale));
+    const h = Math.max(1, Math.round(srcH * downscale));
     const mimeType = format === "exportPNG" ? "image/png" : "image/jpeg";
     const ext = format === "exportPNG" ? "png" : "jpg";
     const quality = format === "exportPNG" ? undefined : 0.95;
 
-    if(!renderRoot || !renderRoot.firstElementChild){
-      toast("Nothing to export.");
-      return;
-    }
-
-    await ensureHtml2CanvasLoaded();
-    const html2canvasFn = window.html2canvas;
-    if(typeof html2canvasFn !== "function"){
-      toast("html2canvas failed to load ? cannot export.");
-      return;
-    }
-
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-    let capturedCanvas = null;
-    const hasCssMaskInScene = sceneHasCssMask(renderRoot);
-    const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
-    const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
-    const hasImagesInScene = renderRoot.querySelector("img") !== null;
-    const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
-    const premaskCanvas = (hasMaskInScene && hasImagesInScene)
-      ? await buildLuminanceMaskCanvas(renderRoot, w, h)
-      : null;
-    const preserveAlpha = format === "exportPNG";
-    const captureOptions = {
-      disableBakeMaskedElements: false,
-      ...(preserveAlpha ? { backgroundColor: null } : {})
-    };
     try{
+      if(!renderRoot || !renderRoot.firstElementChild){
+        toast("Nothing to export.");
+        return;
+      }
+      if(downscale < 1){
+        toast("Large canvas detected: export is downscaled for stability.");
+      }
+
+      await ensureHtml2CanvasLoaded();
+      const html2canvasFn = window.html2canvas;
+      if(typeof html2canvasFn !== "function"){
+        toast("html2canvas failed to load ? cannot export.");
+        return;
+      }
+
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      let capturedCanvas = null;
+      const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+      const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
+      const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
+      const hasImagesInScene = renderRoot.querySelector("img") !== null;
+      const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
+      const premaskCanvas = (hasMaskInScene && hasImagesInScene)
+        ? await buildLuminanceMaskCanvas(renderRoot, w, h)
+        : null;
+      const preserveAlpha = format === "exportPNG";
+      const captureOptions = {
+        disableBakeMaskedElements: false,
+        ...(preserveAlpha ? { backgroundColor: null } : {})
+      };
+
+      // Fast path first: lighter DOM snapshot capture is less likely to stall UI.
+      if(!capturedCanvas){
+        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
+      }
       if(!capturedCanvas){
         capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions);
       }
@@ -7953,49 +8492,123 @@ async function evaluate(){
       if(!capturedCanvas){
         capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
       }
-    }catch(err){
-      console.warn("exportCanvasWithBlend capture failed", err);
-    }
+      if(!capturedCanvas){
+        const directCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
+        if(directCanvas) capturedCanvas = directCanvas;
+      }
 
-    if(!capturedCanvas){
-      toast("Export failed.");
-      return;
-    }
-
-    // Scale up to exportScale for higher quality still image
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = w * exportScale;
-    exportCanvas.height = h * exportScale;
-    const exportCtx = exportCanvas.getContext("2d");
-    if(!exportCtx){ toast("Export failed."); return; }
-
-    exportCtx.imageSmoothingEnabled = true;
-    exportCtx.imageSmoothingQuality = "high";
-    if(format !== "exportPNG"){
-      exportCtx.fillStyle = "#000000";
-      exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-    }
-    drawCanvasPreservingAspect(exportCtx, capturedCanvas, exportCanvas.width, exportCanvas.height);
-
-    exportCanvas.toBlob(blob => {
-      if(!blob){
+      if(!capturedCanvas){
         toast("Export failed.");
         return;
       }
-      const link = document.createElement("a");
+
+      // Scale up to exportScale for higher quality still image
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = w * exportScale;
+      exportCanvas.height = h * exportScale;
+      const exportCtx = exportCanvas.getContext("2d");
+      if(!exportCtx){ toast("Export failed."); return; }
+
+      exportCtx.imageSmoothingEnabled = true;
+      exportCtx.imageSmoothingQuality = "high";
+      if(format !== "exportPNG"){
+        exportCtx.fillStyle = "#000000";
+        exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      }
+      drawCanvasPreservingAspect(exportCtx, capturedCanvas, exportCanvas.width, exportCanvas.height);
+
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
-      link.href = URL.createObjectURL(blob);
-      link.download = `export_${timestamp}.${ext}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-      toast(`Exported as ${ext.toUpperCase()} OK`);
-    }, mimeType, quality);
+      const saveHandle = options?.saveHandle || null;
+      const safeBase = String(options?.projectName || "export").trim().replace(/[\\/:*?"<>|]+/g, "_") || "export";
+      const fileName = `${safeBase}_${timestamp}.${ext}`;
+      const triggerDownload = (href) => {
+        if(!href) return false;
+        const link = document.createElement("a");
+        link.href = href;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return true;
+      };
+
+      const toBlobOnce = (timeoutMs = 5000) => new Promise((resolve) => {
+        let settled = false;
+        const done = (value) => {
+          if(settled) return;
+          settled = true;
+          resolve((value && Number(value.size) > 0) ? value : null);
+        };
+        try{
+          exportCanvas.toBlob(done, mimeType, quality);
+          setTimeout(() => done(null), Math.max(1000, Number(timeoutMs) || 5000));
+        }catch(_){
+          done(null);
+        }
+      });
+
+      let finalBlob = await toBlobOnce(5000);
+      if(!finalBlob){
+        // Give browser a frame to breathe before one retry.
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        finalBlob = await toBlobOnce(5000);
+      }
+
+      if(!finalBlob){
+        // Expensive dataURL fallback only on moderate canvas sizes to avoid UI freezes.
+        const pixelBudget = 8_000_000;
+        if((exportCanvas.width * exportCanvas.height) <= pixelBudget){
+          try{
+            const dataUrl = exportCanvas.toDataURL(mimeType, quality);
+            if(dataUrl && dataUrl.startsWith("data:")){
+              const response = await fetch(dataUrl);
+              const dataBlob = await response.blob();
+              if(dataBlob && Number(dataBlob.size) > 0) finalBlob = dataBlob;
+            }
+          }catch(_){ }
+        }
+      }
+
+      if(!finalBlob || Number(finalBlob.size) <= 0){
+        toast("Export failed (empty image data).");
+        return;
+      }
+
+      if(saveHandle){
+        let writable = null;
+        try{
+          writable = await saveHandle.createWritable();
+          await writable.write(finalBlob);
+          await writable.close();
+          toast(`Exported as ${ext.toUpperCase()} OK`);
+          return;
+        }catch(_){
+          try{ await writable?.abort?.(); }catch(__){ }
+          // Fall back to anchor download when file-system write is unavailable.
+        }
+      }
+
+      if(finalBlob){
+        const url = URL.createObjectURL(finalBlob);
+        const ok = triggerDownload(url);
+        if(ok){
+          toast(`Exported as ${ext.toUpperCase()} OK`);
+          return;
+        }
+      }
+
+      toast("Export failed.");
+    }catch(err){
+      console.warn("exportCanvasWithBlend failed", err);
+      const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+      toast(`Export failed: ${msg}`);
+    }finally{
+      stillExportInProgress = false;
+    }
   }
 
-  function exportCanvasAsImage(format){
-    exportCanvasWithBlend(format);
+  function exportCanvasAsImage(format, options = null){
+    return exportCanvasWithBlend(format, options || {});
   }
 
   // -----------------------------------------------
@@ -8248,6 +8861,7 @@ async function evaluate(){
 
     await waitForRenderableImages(tmpWrap, 1200);
     await bakeCloneImagesForCapture(tmpWrap);
+    await bakeGradientTextElementsForCapture(tmpWrap, html2canvasFn);
     await bakeFilteredElementsForCapture(tmpWrap, html2canvasFn);
     const bakedMaskedEls = disableBakeMaskedElements
       ? false
@@ -8567,6 +9181,19 @@ async function evaluate(){
   // -----------------------------
   // Pan + Zoom controls for editor
   // -----------------------------
+  function syncSpacePanCursorState(){
+    const hint = !!state.spaceDown;
+    editorEl?.classList.toggle("spacePanHint", hint && !state.isPanning);
+    previewViewport?.classList.toggle("spacePanHint", hint && !isPreviewPanning && !previewShapeResize);
+
+    if(!hint){
+      editorEl.style.cursor = "default";
+      if(!isPreviewPanning && !previewShapeResize){
+        previewViewport.style.cursor = "";
+      }
+    }
+  }
+
   window.addEventListener("keydown", (e) => {
     if(helpVisible) return;
 
@@ -8616,18 +9243,17 @@ async function evaluate(){
     if(isNodeSearchOpen()) return;
 
     state.spaceDown = true;
-    editorEl.style.cursor = "grab";
+    syncSpacePanCursorState();
     e.preventDefault();
   });
 
   window.addEventListener("keyup", (e) => {
     if(e.code !== "Space") return;
-    if(isTypingTarget(e.target)) return;
 
     state.spaceDown = false;
     state.isPanning = false;
     state.panStart = null;
-    editorEl.style.cursor = "default";
+    syncSpacePanCursorState();
   });
 
   window.addEventListener("paste", async (e) => {
@@ -8706,6 +9332,7 @@ async function evaluate(){
       state.isPanning = true;
       state.panStart = { x: m.x, y: m.y, panX: state.panX, panY: state.panY };
       editorEl.style.cursor = "grabbing";
+      syncSpacePanCursorState();
       e.preventDefault();
       return;
     }
@@ -8773,6 +9400,17 @@ async function evaluate(){
           const startRect = state.draggingNode.startRect || { x: 0, y: 0, w: GROUP_MIN_WIDTH, h: GROUP_MIN_HEIGHT };
           const startMouse = state.draggingNode.startMouse || { x: mw.x, y: mw.y };
           const dir = String(state.draggingNode.dir || "se");
+          const cursorByDir = {
+            n: "ns-resize",
+            s: "ns-resize",
+            e: "ew-resize",
+            w: "ew-resize",
+            ne: "nesw-resize",
+            sw: "nesw-resize",
+            nw: "nwse-resize",
+            se: "nwse-resize"
+          };
+          document.body.style.cursor = cursorByDir[dir] || "";
           const dx = mw.x - startMouse.x;
           const dy = mw.y - startMouse.y;
 
@@ -8895,6 +9533,7 @@ async function evaluate(){
       insertedByDrop = autoInsertDraggedNodeIntoWire(dragSnapshot.id);
     }
     state.draggingNode = null;
+    document.body.style.cursor = "";
     if(!insertedByDrop && state.wireDropCandidate){
       state.wireDropCandidate = null;
       requestWireDraw();
@@ -8935,6 +9574,7 @@ async function evaluate(){
 
       // If space still held, stay in grab mode, else default
       editorEl.style.cursor = state.spaceDown ? "grab" : "default";
+      syncSpacePanCursorState();
     }
   });
 
@@ -9335,6 +9975,18 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+// L toggles ruler lock/unlock
+window.addEventListener("keydown", (e) => {
+  if(helpVisible) return;
+  if(isTypingTarget(e.target)) return;
+  if(isNodeSearchOpen()) return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  if(e.key.toLowerCase() !== "l") return;
+
+  e.preventDefault();
+  toggleRulerLock();
+});
+
 
 
 function loadGraph(data){
@@ -9425,18 +10077,52 @@ function loadGraph(data){
   tipsBtn?.addEventListener("click", toggleTips);
   safeZoneBtn?.addEventListener("click", toggleSafeZone);
   rulerBtn?.addEventListener("click", toggleRulers);
+  rulerLockBtn?.addEventListener("click", toggleRulerLock);
   maskDebugBtn?.addEventListener("click", () => showMaskDebugOverlay());
   buildHelpNavigation();
+
+  setRulerLocked(false);
 
   setLeftPanelCollapsed(true);
   setInspectorExpanded(true);
   setTipsVisible(false);
 
   helpBtn?.addEventListener("click", () => openHelp(activeHelpPage));
+  coffeeBtn?.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+  });
+  coffeeBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setCoffeeBoardVisible(true);
+  });
+  coffeeBoard?.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+  });
+  closeCoffeeBoardBtn?.addEventListener("click", () => setCoffeeBoardVisible(false));
+  copyCoffeeEmailBtn?.addEventListener("click", async () => {
+    const email = "viet.motiondesign@gmail.com";
+    try{
+      await navigator.clipboard.writeText(email);
+      toast("Copied: viet.motiondesign@gmail.com");
+    }catch(_){
+      toast("Could not copy email. Please copy manually.");
+    }
+  });
   helpCloseBtn?.addEventListener("click", closeHelp);
   helpStartBtn?.addEventListener("click", closeHelp);
   helpOverlay?.addEventListener("mousedown", (e) => {
     if(e.target === helpOverlay) closeHelp();
+  });
+  document.addEventListener("mousedown", (e) => {
+    if(coffeeBoard?.classList.contains("isHidden")) return;
+    const clickedInsideBoard = coffeeBoard?.contains(e.target);
+    const clickedButton = coffeeBtn?.contains(e.target);
+    if(!clickedInsideBoard && !clickedButton){
+      setCoffeeBoardVisible(false);
+    }
+  });
+  window.addEventListener("keydown", (e) => {
+    if(e.key === "Escape") setCoffeeBoardVisible(false);
   });
 
   inspectorExpandBtn?.addEventListener("click", () => {
