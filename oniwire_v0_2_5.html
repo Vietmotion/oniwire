@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.5 | 2026-06-05 23:00)</title>
-  <link rel="stylesheet" href="styles.css?v=20260605-2300">
+  <title>Oniwire (v0.2.5 | 2026-06-07 17:52)</title>
+  <link rel="stylesheet" href="styles.css?v=20260607-1752">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=Montserrat:wght@100;200;300;400;500;600;700;800;900&family=Roboto:wght@100;300;400;500;700;900&family=Open+Sans:wght@300;400;500;600;700;800&family=Lato:wght@100;300;400;700;900&family=Nunito:wght@200;300;400;500;600;700;800;900&family=Raleway:wght@100;200;300;400;500;600;700;800;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Source+Sans+3:wght@200;300;400;500;600;700;800;900&family=Ubuntu:wght@300;400;500;700&family=Work+Sans:wght@100;200;300;400;500;600;700;800;900&family=DM+Sans:wght@100;200;300;400;500;600;700;800;900&family=Manrope:wght@200;300;400;500;600;700;800&family=Mulish:wght@200;300;400;500;600;700;800;900&family=Oswald:wght@200;300;400;500;600;700&family=Bebas+Neue&family=Fira+Sans:wght@100;200;300;400;500;600;700;800;900&family=PT+Sans:wght@400;700&family=Noto+Sans:wght@100;200;300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700;800;900&family=Karla:wght@200;300;400;500;600;700;800&family=Inconsolata:wght@200;300;400;500;600;700;800;900&display=swap">
@@ -44,8 +44,6 @@
   <script src="scripts/nodes/stylize.js"></script>
   <script src="scripts/nodes/clone.js"></script>
   <script src="scripts/nodes/composite.js"></script>
-  <script src="scripts/nodes/mask.js"></script>
-  <script src="scripts/nodes/freeze.js"></script>
   <script src="scripts/nodes/output.js"></script>
   <script src="scripts/nodes-clone-composite.js"></script>
   <script src="scripts/nodes.js"></script>
@@ -327,6 +325,9 @@
 
     draggingNode: null,   // {id, ox, oy} or {ids: Set, offsets: Map}
     connecting: null,     // {nodeId, port}
+    rewiringFromInput: null, // {nodeId, port} while moving an existing input wire
+    rewireOriginalWire: null, // {from,to} snapshot used to restore on cancelled rewire
+    rewireSnapshotWires: null, // full wire snapshot to guarantee no loss on cancelled rewire
     selected: null,       // nodeId (for single selection)
     selectedNodes: new Set(), // Set of selected node IDs for multi-select
     toastTimer: null,
@@ -359,7 +360,13 @@
 
     // wire hover candidate for visual feedback / right-click delete
     hoverWireCandidate: null,
+
+    // node id currently highlighted as a releasable connection target
+    connectHoverNodeId: null,
   };
+
+  const EDITOR_MIN_ZOOM = 0.06;
+  const EDITOR_MAX_ZOOM = 4.5;
 
   let copyBuffer = null;
   let pasteOffsetCount = 0;
@@ -535,6 +542,7 @@
     state.groups.clear();
     state.wires = [];
     state.connecting = null;
+    state.rewiringFromInput = null;
     state.selected = snapshot.selected || null;
     state.selectedNodes = new Set(snapshot.selectedNodes || []);
 
@@ -3806,6 +3814,25 @@ utilsApi.initProjectUtils();
       const transfers = filterEl.querySelectorAll("feComponentTransfer");
       if(!transfers.length) return null;
 
+      // Detect Stylize Brutal's grayscale pre-stage:
+      // feColorMatrix matrix rows are repeated luminance weights.
+      let useLuminanceInput = false;
+      const matrixEl = filterEl.querySelector("feColorMatrix[type='matrix']");
+      if(matrixEl){
+        const values = String(matrixEl.getAttribute("values") || "")
+          .trim()
+          .split(/\s+/)
+          .map(Number)
+          .filter(Number.isFinite);
+        if(values.length >= 15){
+          const r0 = values[0], g0 = values[1], b0 = values[2];
+          const row2Same = Math.abs(values[5] - r0) < 0.0005 && Math.abs(values[6] - g0) < 0.0005 && Math.abs(values[7] - b0) < 0.0005;
+          const row3Same = Math.abs(values[10] - r0) < 0.0005 && Math.abs(values[11] - g0) < 0.0005 && Math.abs(values[12] - b0) < 0.0005;
+          const looksLikeLuma = Math.abs(r0 - 0.2126) < 0.01 && Math.abs(g0 - 0.7152) < 0.01 && Math.abs(b0 - 0.0722) < 0.01;
+          useLuminanceInput = row2Same && row3Same && looksLikeLuma;
+        }
+      }
+
       let slope = 1;
       let intercept = 0;
       const linearR = transfers[0]?.querySelector?.("feFuncR[type='linear']");
@@ -3830,7 +3857,7 @@ utilsApi.initProjectUtils();
         }
       }
       if(!tableR?.length || !tableG?.length || !tableB?.length) return null;
-      return { slope, intercept, tableR, tableG, tableB };
+      return { slope, intercept, tableR, tableG, tableB, useLuminanceInput };
     }
 
     function applySvgUrlFilterToCanvas(canvas, spec){
@@ -3841,7 +3868,7 @@ utilsApi.initProjectUtils();
       if(width <= 0 || height <= 0) return false;
       const img = ctx.getImageData(0, 0, width, height);
       const data = img.data;
-      const { slope, intercept, tableR, tableG, tableB } = spec;
+      const { slope, intercept, tableR, tableG, tableB, useLuminanceInput } = spec;
 
       for(let i = 0; i < data.length; i += 4){
         const a = data[i + 3];
@@ -3849,11 +3876,26 @@ utilsApi.initProjectUtils();
         const r = data[i] / 255;
         const g = data[i + 1] / 255;
         const b = data[i + 2] / 255;
-        const gray = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-        const contrasted = Math.max(0, Math.min(1, (gray * slope) + intercept));
-        data[i] = Math.round(sampleTableAt(tableR, contrasted) * 255);
-        data[i + 1] = Math.round(sampleTableAt(tableG, contrasted) * 255);
-        data[i + 2] = Math.round(sampleTableAt(tableB, contrasted) * 255);
+
+        // Match feComponentTransfer behavior:
+        // - Curves-like filters: per-channel transfer.
+        // - Stylize Brutal: luminance pre-stage feeds all channels equally.
+        let rt, gt, bt;
+        if(useLuminanceInput){
+          const gray = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+          const t = Math.max(0, Math.min(1, (gray * slope) + intercept));
+          rt = t;
+          gt = t;
+          bt = t;
+        }else{
+          rt = Math.max(0, Math.min(1, (r * slope) + intercept));
+          gt = Math.max(0, Math.min(1, (g * slope) + intercept));
+          bt = Math.max(0, Math.min(1, (b * slope) + intercept));
+        }
+
+        data[i] = Math.round(sampleTableAt(tableR, rt) * 255);
+        data[i + 1] = Math.round(sampleTableAt(tableG, gt) * 255);
+        data[i + 2] = Math.round(sampleTableAt(tableB, bt) * 255);
       }
       ctx.putImageData(img, 0, 0);
       return true;
@@ -4264,11 +4306,6 @@ utilsApi.initProjectUtils();
       }
 
       if(drewCssMask) continue;
-
-      const shapeMeta = resolveMaskMetaFromEl(el, { includeNested: false });
-      if(shapeMeta && drawShapeMaskToContext(combinedCtx, shapeMeta)){
-        foundMask = true;
-      }
     }
 
     return foundMask && canvasHasOpaquePixels(combinedMaskCanvas) ? combinedMaskCanvas : null;
@@ -4281,7 +4318,6 @@ utilsApi.initProjectUtils();
 
     const maskedEls = [rootEl, ...Array.from(rootEl.querySelectorAll("*"))].filter(el => {
       if(!(el instanceof HTMLElement)) return false;
-      if(resolveMaskMetaFromEl(el, { includeNested: false })) return true;
       const { maskValue } = readElementMaskStyle(el);
       return Boolean(maskValue && maskValue !== "none" && extractMaskUrlFromValue(maskValue));
     });
@@ -4289,7 +4325,6 @@ utilsApi.initProjectUtils();
     let bakedAny = false;
     for(const maskedEl of maskedEls){
       if(!(maskedEl instanceof HTMLElement)) continue;
-      const hasShapeMeta = Boolean(resolveMaskMetaFromEl(maskedEl, { includeNested: false }));
       let hasCssMaskImage = false;
       try{
         const inlineMask = (maskedEl.style.maskImage && maskedEl.style.maskImage !== "none")
@@ -4304,7 +4339,7 @@ utilsApi.initProjectUtils();
           );
         }
       }catch(_){ }
-      if(!hasCssMaskImage && !hasShapeMeta) continue;
+      if(!hasCssMaskImage) continue;
 
       const elemW = Math.max(1, Math.round(maskedEl.clientWidth || rootEl.clientWidth || previewBase?.w || 1280));
       const elemH = Math.max(1, Math.round(maskedEl.clientHeight || rootEl.clientHeight || previewBase?.h || 720));
@@ -4772,17 +4807,6 @@ utilsApi.initProjectUtils();
     }),
     ...MOTION_GLOW_NODE_DEFS,
     ...CLONE_COMPOSITE_NODE_DEFS,
-    Mask: window.createOniwireMaskNodeDef({
-      normalizeRampStops,
-      resolveGradientMetaFromEl,
-      resolveMaskMetaFromEl,
-      buildRampMaskUrl,
-      buildGradientMaskUrl,
-      buildShapeMaskUrl,
-      hasMotionFlag,
-      startLiveMaskUpdate
-    }),
-    Freeze: window.createOniwireFreezeNodeDef({ hasMotionFlag, renderLayerToDataUrl }),
     Output: window.createOniwireOutputNodeDef()
   };
 
@@ -4852,8 +4876,8 @@ const NODE_TIPS = {
     "Connect a <em>Ramp</em> node to set the color stops. Choose direction and style in the inspector."
   ],
   Ramp: [
-    "<strong>Ramp</strong> - Defines color stops for Gradient or Mask nodes.",
-    "Add/remove stops, drag to reorder. Output connects to Gradient -> fill, or Mask -> mask input."
+    "<strong>Ramp</strong> - Defines color stops for Gradient and mask-driven effects.",
+    "Add/remove stops, drag to reorder. Output connects to Gradient -> fill, or Composite -> mask input."
   ],
   Shape: [
     "<strong>Shape</strong> - Draws a geometric shape.",
@@ -4923,15 +4947,6 @@ const NODE_TIPS = {
     "Use <em>+ Input</em> to add layers (stacked bottom-to-top). Set blend mode and opacity per node.",
     "Supports: normal, screen, multiply, overlay, add, and more."
   ],
-  Mask: [
-    "<strong>Mask</strong> - Applies a luminance mask to a layer.",
-    "<em>source</em> -> layer to mask. <em>mask</em> -> Ramp, Shape, or Gradient node as the mask shape.",
-    "Toggle <em>Invert</em> to flip the masked area."
-  ],
-  Freeze: [
-    "<strong>Freeze</strong> - Captures a live layer as a static image snapshot.",
-    "<em>in</em> -> any live or animated layer. Stops animation and bakes it into a still frame."
-  ],
   Output: [
     "<strong>Output</strong> - The final output of your node graph.",
     "Connect your finished layer here. Only one Output node is needed - it drives the preview."
@@ -4965,7 +4980,7 @@ const HELP_GENERAL_PAGES = {
           <ul class="helpChecklist">
             <li>Press Tab to open node search.</li>
             <li>Add a few source nodes like Text, Shape, Gradient, or Image.</li>
-            <li>Blend and adjust them with Composite, Transform, Glow, Mask, or Color Correct.</li>
+            <li>Blend and adjust them with Composite, Transform, Glow, Curves, or Color Correct.</li>
             <li>Connect the last layer to Output to preview the result.</li>
           </ul>
         </div>
@@ -5026,11 +5041,11 @@ const HELP_GENERAL_PAGES = {
   },
   updates: {
     eyebrow: "Oniwire Help - Latest Update",
-    title: "What changed in v0.2.5 | 2026-06-05 23:00",
+    title: "What changed in v0.2.5 | 2026-06-07 17:52",
     subtitle: "v0.2.4 focuses on faster Pen workflow: multi-point selection, group transforms, clearer shortcuts, and dedicated shortcut help.",
     body: `
       <div class="helpSection">
-        <h3 class="helpSectionTitle">Latest in v0.2.5 &mdash; 2026-06-05 23:00</h3>
+        <h3 class="helpSectionTitle">Latest in v0.2.5 &mdash; 2026-06-07 17:52</h3>
         <div class="helpUpdateGrid">
           <div class="helpUpdateCard">
             <span class="helpUpdateKicker">Pen Editing</span>
@@ -5092,8 +5107,8 @@ const HELP_GENERAL_PAGES = {
             <p>Image -> Color Correct -> Transform -> Output. Useful for trying the grading and positioning flow on one layer.</p>
           </div>
           <div class="helpExampleCard">
-            <h4>Masked reveal</h4>
-            <p>Gradient or Image -> Mask -> Output, with Shape or Ramp feeding the mask input. Good for learning two-input nodes.</p>
+            <h4>Composite mask workflow</h4>
+            <p>Gradient or Image -> Composite -> Output, with Shape or Ramp feeding Composite mask input. Good for learning multi-input blending.</p>
           </div>
         </div>
       </div>
@@ -5113,13 +5128,11 @@ const NODE_CATEGORIES = {
   Pen: "Generators",
   Transform: "Operations",
   Clone: "Operations",
-  Freeze: "Operations",
   MotionIn: "Motion",
   Motion: "Motion",
   MotionOut: "Motion",
   Glow: "Operations",
   Composite: "Operations",
-  Mask: "Operations",
   ColorCorrect: "Operations",
   Curves: "Operations",
   Stylize: "Operations",
@@ -5767,6 +5780,129 @@ async function evaluate(){
     const preferred = ["layer", "out", "output", "result"];
     for(const p of preferred) if(ports.includes(p)) return p;
     return ports[0];
+  }
+
+  function chooseBestInputPortForConnection(node, fromPort){
+    const def = NODE_DEFS[node?.type];
+    const ports = getNodeInputPorts(node, def);
+    if(!ports.length) return null;
+
+    const freePorts = ports.filter(p => !findWireToInput(node.id, p));
+    const candidates = freePorts.length ? freePorts : ports;
+    const src = String(fromPort || "");
+
+    if(src && candidates.includes(src)) return src;
+
+    const preferredBySource = {
+      layer: ["in", "layer", "a", "b", "c", "d", "e", "source", "input", "fill", "stroke", "mask"],
+      in: ["in", "a", "b", "source", "input", "layer"],
+      ramp: ["ramp", "fill", "in", "a"],
+      font: ["font", "in", "a"],
+      fill: ["fill", "in", "a", "b"],
+      stroke: ["stroke", "in", "a", "b"],
+      mask: ["mask", "in", "a", "b"]
+    };
+    const sourcePreferred = preferredBySource[src] || [];
+    for(const p of sourcePreferred){
+      if(candidates.includes(p)) return p;
+    }
+
+    const genericPreferred = ["in", "layer", "a", "b", "c", "d", "e", "source", "input", "fill", "stroke", "mask", "bg"];
+    for(const p of genericPreferred){
+      if(candidates.includes(p)) return p;
+    }
+
+    return candidates[0];
+  }
+
+  function completeConnectionToInput(nodeId, port){
+    if(!state.connecting) return false;
+
+    const from = {
+      nodeId: String(state.connecting.nodeId),
+      port: String(state.connecting.port)
+    };
+    const to = {
+      nodeId: String(nodeId),
+      port: String(port)
+    };
+    const rewireFrom = state.rewiringFromInput;
+
+    // If this is a rewire drag, remove the original destination first.
+    if(rewireFrom){
+      state.wires = state.wires.filter(w => !(
+        String(w.to.nodeId) === String(rewireFrom.nodeId)
+        && String(w.to.port) === String(rewireFrom.port)
+        && String(w.from.nodeId) === String(from.nodeId)
+        && String(w.from.port) === String(from.port)
+      ));
+    }
+
+    // one wire per input
+    state.wires = state.wires.filter(w => !(String(w.to.nodeId) === to.nodeId && String(w.to.port) === to.port));
+    state.wires.push({ from, to });
+    state.connecting = null;
+    state.rewiringFromInput = null;
+    state.rewireOriginalWire = null;
+    state.rewireSnapshotWires = null;
+    toast(`Connected -> ${to.nodeId}.${to.port}`);
+
+    evaluateAndRender();
+    renderActiveDots();
+    requestWireDraw();
+    return true;
+  }
+
+  function cancelPendingConnection(options = null){
+    if(!state.connecting) return;
+
+    const reason = options?.reason || "Cancelled connection.";
+    let removedWire = false;
+
+    // For input rewire drags: releasing in blank space should unstring that input.
+    const rewireFrom = state.rewiringFromInput;
+    const from = state.connecting;
+    if(rewireFrom){
+      const exactMatchExists = state.wires.some(w => (
+        String(w.to.nodeId) === String(rewireFrom.nodeId)
+        && String(w.to.port) === String(rewireFrom.port)
+        && String(w.from.nodeId) === String(from?.nodeId)
+        && String(w.from.port) === String(from?.port)
+      ));
+
+      const inputHasAnyWire = state.wires.some(w => (
+        String(w.to.nodeId) === String(rewireFrom.nodeId)
+        && String(w.to.port) === String(rewireFrom.port)
+      ));
+
+      if(exactMatchExists || inputHasAnyWire){
+        pushHistory();
+        if(exactMatchExists){
+          state.wires = state.wires.filter(w => !(
+            String(w.to.nodeId) === String(rewireFrom.nodeId)
+            && String(w.to.port) === String(rewireFrom.port)
+            && String(w.from.nodeId) === String(from?.nodeId)
+            && String(w.from.port) === String(from?.port)
+          ));
+        } else {
+          state.wires = state.wires.filter(w => !(
+            String(w.to.nodeId) === String(rewireFrom.nodeId)
+            && String(w.to.port) === String(rewireFrom.port)
+          ));
+        }
+        removedWire = true;
+      }
+    }
+
+    state.connecting = null;
+    state.rewiringFromInput = null;
+    state.rewireOriginalWire = null;
+    state.rewireSnapshotWires = null;
+    state.connectHoverNodeId = null;
+    if(removedWire) evaluateAndRender();
+    renderActiveDots();
+    requestWireDraw();
+    toast(reason);
   }
 
   function updateWireDropCandidateFromDrag(){
@@ -6439,18 +6575,34 @@ async function evaluate(){
           if(io === "out"){
             // Start dragging a connection
             state.connecting = { nodeId, port };
+            state.rewiringFromInput = null;
+            state.rewireOriginalWire = null;
+            state.rewireSnapshotWires = null;
             toast(`Connecting from ${nodeId}.${port}`);
             renderActiveDots();
             requestWireDraw();
             ev.preventDefault();
           } else if(io === "in"){
-            // Click input to remove existing wire
+            // If connected, start rewiring from the current source without deleting first.
             const existing = findWireToInput(nodeId, port);
             if(existing){
-              state.wires = state.wires.filter(w => w !== existing);
-              toast(`Removed wire into ${nodeId}.${port}`);
-              evaluateAndRender();
+              state.connecting = {
+                nodeId: String(existing.from.nodeId),
+                port: String(existing.from.port)
+              };
+              state.rewiringFromInput = { nodeId: String(nodeId), port: String(port) };
+              state.rewireOriginalWire = {
+                from: { nodeId: String(existing.from.nodeId), port: String(existing.from.port) },
+                to: { nodeId: String(existing.to.nodeId), port: String(existing.to.port) }
+              };
+              state.rewireSnapshotWires = state.wires.map(w => ({
+                from: { nodeId: String(w.from.nodeId), port: String(w.from.port) },
+                to: { nodeId: String(w.to.nodeId), port: String(w.to.port) }
+              }));
+              toast(`Rewiring ${nodeId}.${port}...`);
+              renderActiveDots();
               requestWireDraw();
+              ev.preventDefault();
             }
           }
         });
@@ -6482,18 +6634,7 @@ async function evaluate(){
           const port = dot.getAttribute("data-name");
 
           if(io === "in"){
-            const from = state.connecting;
-            const to = { nodeId, port };
-
-            // one wire per input
-            state.wires = state.wires.filter(w => !(w.to.nodeId === to.nodeId && w.to.port === to.port));
-            state.wires.push({ from, to });
-            state.connecting = null;
-            toast(`Connected -> ${to.nodeId}.${to.port}`);
-
-            evaluateAndRender();
-            renderActiveDots();
-            requestWireDraw();
+            completeConnectionToInput(nodeId, port);
           }
         });
 
@@ -6536,6 +6677,52 @@ async function evaluate(){
       const key = portKey(state.connecting.nodeId,"out",state.connecting.port);
       const dot = portElByKey.get(key) || document.querySelector(`[data-port="${key}"]`);
       if(dot) dot.classList.add("active");
+    } else if(state.connectHoverNodeId){
+      state.connectHoverNodeId = null;
+    }
+
+    document.querySelectorAll(".node.connect-releasable").forEach(el => {
+      el.classList.remove("connect-releasable");
+    });
+
+    if(state.connecting && state.connectHoverNodeId){
+      const hoveredNodeEl = document.querySelector(`.node[data-id="${state.connectHoverNodeId}"]`);
+      if(hoveredNodeEl) hoveredNodeEl.classList.add("connect-releasable");
+    }
+  }
+
+  function findNodeElementAtClientPoint(clientX, clientY){
+    const topEl = document.elementFromPoint(clientX, clientY);
+    const directNode = topEl?.closest?.(".node[data-id]");
+    if(directNode) return directNode;
+
+    for(const nodeEl of document.querySelectorAll(".node[data-id]")){
+      const r = nodeEl.getBoundingClientRect();
+      if(clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom){
+        return nodeEl;
+      }
+    }
+    return null;
+  }
+
+  function updateConnectionHoverNode(clientX, clientY){
+    let nextNodeId = null;
+    if(state.connecting){
+      const nodeEl = findNodeElementAtClientPoint(clientX, clientY);
+      const nodeId = String(nodeEl?.getAttribute?.("data-id") || "");
+      if(nodeId){
+        const node = state.nodes.get(nodeId);
+        const fromNodeId = String(state.connecting.nodeId || "");
+        const bestPort = (nodeId !== fromNodeId && node)
+          ? chooseBestInputPortForConnection(node, state.connecting.port)
+          : null;
+        if(bestPort) nextNodeId = nodeId;
+      }
+    }
+
+    if(state.connectHoverNodeId !== nextNodeId){
+      state.connectHoverNodeId = nextNodeId;
+      renderActiveDots();
     }
   }
 
@@ -7010,6 +7197,31 @@ async function evaluate(){
           ${propsHtml}
         </div>
       `;
+    } else if(f.type === "compositeInputOrder"){
+      const ports = Array.isArray(node.params?.inputPorts) && node.params.inputPorts.length
+        ? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
+        : ["a", "b"];
+
+      const rows = ports.map((port, idx) => {
+        const wire = state.wires.find(w => String(w?.to?.nodeId) === String(node.id) && String(w?.to?.port) === String(port));
+        const fromNode = wire ? state.nodes.get(String(wire?.from?.nodeId)) : null;
+        const fromName = fromNode
+          ? String(fromNode.name || getNodeDisplayName(fromNode.type))
+          : "Not connected";
+        return `
+          <div class="compInputItem" draggable="true" data-comp-input-port="${escapeAttr(port)}" data-comp-input-index="${idx}" title="Drag to reorder inputs">
+            <span class="compInputPort">${escapeAttr(port)}:</span>
+            <span class="compInputSource">${escapeAttr(fromName)}</span>
+            <span class="compInputHandle" aria-hidden="true">${idx + 1}</span>
+          </div>
+        `;
+      }).join("");
+
+      controlHtml = `
+        <div class="compInputOrderBox" data-comp-input-order-box="1">
+          ${rows || '<div class="compInputEmpty">No layer inputs.</div>'}
+        </div>
+      `;
     } else if(f.type === "textarea"){
       const val = escapeAttr(node.params[f.k] ?? '');
       controlHtml = `
@@ -7366,6 +7578,68 @@ async function evaluate(){
           renderInspector();
           toast(`Composite input removed: ${removed}`);
         }
+      });
+    });
+
+    inspectorBody.querySelectorAll('[data-comp-input-order-box]').forEach(box => {
+      let draggingPort = null;
+
+      const clearDragVisuals = () => {
+        box.querySelectorAll('.compInputItem').forEach(item => {
+          item.classList.remove('isDragging');
+          item.classList.remove('isDragOver');
+        });
+      };
+
+      box.querySelectorAll('[data-comp-input-port]').forEach(item => {
+        item.addEventListener('dragstart', (ev) => {
+          draggingPort = item.getAttribute('data-comp-input-port');
+          item.classList.add('isDragging');
+          if(ev.dataTransfer){
+            ev.dataTransfer.effectAllowed = 'move';
+            try{ ev.dataTransfer.setData('text/plain', draggingPort || ''); }catch(_){ }
+          }
+        });
+
+        item.addEventListener('dragend', () => {
+          draggingPort = null;
+          clearDragVisuals();
+        });
+
+        item.addEventListener('dragover', (ev) => {
+          if(!draggingPort) return;
+          ev.preventDefault();
+          item.classList.add('isDragOver');
+          if(ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        });
+
+        item.addEventListener('dragleave', () => {
+          item.classList.remove('isDragOver');
+        });
+
+        item.addEventListener('drop', (ev) => {
+          ev.preventDefault();
+          item.classList.remove('isDragOver');
+          const targetPort = item.getAttribute('data-comp-input-port');
+          if(!draggingPort || !targetPort || draggingPort === targetPort) return;
+
+          const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
+            ? [...node.params.inputPorts]
+            : ["a", "b"];
+
+          const fromIdx = currentPorts.indexOf(draggingPort);
+          const toIdx = currentPorts.indexOf(targetPort);
+          if(fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+
+          pushHistory();
+          const [moved] = currentPorts.splice(fromIdx, 1);
+          currentPorts.splice(toIdx, 0, moved);
+          node.params.inputPorts = currentPorts;
+
+          render();
+          evaluateAndRender();
+          renderInspector();
+        });
       });
     });
 
@@ -8459,16 +8733,32 @@ async function evaluate(){
         return;
       }
 
+      const runCaptureAttempt = async (label, task, timeoutMs = 7000) => {
+        try{
+          const out = await Promise.race([
+            task(),
+            new Promise((resolve) => setTimeout(() => resolve(null), Math.max(1000, Number(timeoutMs) || 7000)))
+          ]);
+          if(!out){
+            console.warn(`Capture attempt returned empty: ${label}`);
+          }
+          return out;
+        }catch(err){
+          console.warn(`Capture attempt failed: ${label}`, err);
+          return null;
+        }
+      };
+
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
       let capturedCanvas = null;
       const hasCssMaskInScene = sceneHasCssMask(renderRoot);
-      const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
-      const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
+      const hasMaskInScene = hasCssMaskInScene;
       const hasImagesInScene = renderRoot.querySelector("img") !== null;
       const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
+      const hasClipPathInScene = sceneHasClipPath(renderRoot);
       const premaskCanvas = (hasMaskInScene && hasImagesInScene)
-        ? await buildLuminanceMaskCanvas(renderRoot, w, h)
+        ? await runCaptureAttempt("buildLuminanceMaskCanvas", () => buildLuminanceMaskCanvas(renderRoot, w, h), 5000)
         : null;
       const preserveAlpha = format === "exportPNG";
       const captureOptions = {
@@ -8476,24 +8766,76 @@ async function evaluate(){
         ...(preserveAlpha ? { backgroundColor: null } : {})
       };
 
-      // Fast path first: lighter DOM snapshot capture is less likely to stall UI.
-      if(!capturedCanvas){
-        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
-      }
-      if(!capturedCanvas){
-        capturedCanvas = await captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions);
+      // Clip-path heavy scenes (shape/clone silhouettes) are more reliable via
+      // DOM snapshot renderer. Prefer that first to avoid rectangle flattening.
+      if(hasClipPathInScene){
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasFromDomSnapshot (clip-path first)",
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+            6000
+          );
+        }
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasWithHtml2canvas (clip-path fallback)",
+            () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+            9000
+          );
+        }
+      }else if(hasFilterEffectsInScene){
+        // Curves and other filter nodes rely on baked filter capture. Prioritize
+        // html2canvas path when filters are present.
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasWithHtml2canvas (filters)",
+            () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+            9000
+          );
+        }
+      }else{
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasFromDomSnapshot (fast path)",
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+            5000
+          );
+        }
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasWithHtml2canvas (fallback)",
+            () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+            9000
+          );
+        }
       }
       if(!capturedCanvas && hasFilterEffectsInScene){
-        capturedCanvas = await captureLiveFrameCanvasWithHtml2canvas(w, h, html2canvasFn, premaskCanvas, captureOptions);
+        capturedCanvas = await runCaptureAttempt(
+          "captureLiveFrameCanvasWithHtml2canvas",
+          () => captureLiveFrameCanvasWithHtml2canvas(w, h, html2canvasFn, premaskCanvas, captureOptions),
+          9000
+        );
       }
       if(!capturedCanvas){
-        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
+        capturedCanvas = await runCaptureAttempt(
+          "captureFrameCanvasFromDomSnapshot (retry-1)",
+          () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+          5000
+        );
       }
       if(!capturedCanvas){
-        capturedCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
+        capturedCanvas = await runCaptureAttempt(
+          "captureFrameCanvasFromDomSnapshot (retry-2)",
+          () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+          5000
+        );
       }
       if(!capturedCanvas){
-        const directCanvas = await captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha });
+        const directCanvas = await runCaptureAttempt(
+          "captureFrameCanvasFromDomSnapshot (last chance)",
+          () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+          5000
+        );
         if(directCanvas) capturedCanvas = directCanvas;
       }
 
@@ -8819,6 +9161,24 @@ async function evaluate(){
     return false;
   }
 
+  function sceneHasClipPath(rootEl){
+    if(!(rootEl instanceof HTMLElement)) return false;
+    const all = [rootEl, ...rootEl.querySelectorAll("*")];
+    for(const el of all){
+      if(!(el instanceof HTMLElement)) continue;
+      const inlineClip = (el.style.clipPath && el.style.clipPath !== "none")
+        || (el.style.webkitClipPath && el.style.webkitClipPath !== "none");
+      if(inlineClip) return true;
+      try{
+        const cs = getComputedStyle(el);
+        if((cs.clipPath && cs.clipPath !== "none") || (cs.webkitClipPath && cs.webkitClipPath !== "none")){
+          return true;
+        }
+      }catch(_){ }
+    }
+    return false;
+  }
+
   function maskHasMotion(rootEl){
     if(!(rootEl instanceof HTMLElement)) return false;
     const maskedEls = rootEl.querySelectorAll("[data-mask-shape], [data-mask-path-data], [style*='mask-image'], [style*='-webkit-mask-image']");
@@ -9008,8 +9368,7 @@ async function evaluate(){
       const frameDurationUs = Math.round(1_000_000 / fps);
 
       const hasCssMaskInScene = sceneHasCssMask(renderRoot);
-      const hasMetaMaskInScene = renderRoot.querySelector("[data-mask-shape], [data-mask-path-data]") !== null;
-      const hasMaskInScene = hasCssMaskInScene || hasMetaMaskInScene;
+      const hasMaskInScene = hasCssMaskInScene;
       const hasImagesInScene = renderRoot.querySelector("img") !== null;
       const hasAnimatedMask = maskHasMotion(renderRoot);
       const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
@@ -9373,6 +9732,7 @@ async function evaluate(){
   window.addEventListener("mousemove", (e) => {
     const m = editorMouse(e);
     state.mouse = m;
+    updateConnectionHoverNode(e.clientX, e.clientY);
 
     // Panning
     if(state.isPanning && state.panStart){
@@ -9557,14 +9917,22 @@ async function evaluate(){
     // Cancel connection if releasing outside of a port
     if(state.connecting){
       const target = e.target;
-      const isDot = target?.classList?.contains("dot");
-      const isInputDot = isDot && target.getAttribute("data-io") === "in";
-      
-      if(!isInputDot){
-        state.connecting = null;
-        renderActiveDots();
-        requestWireDraw();
-        toast("Cancelled connection.");
+      const inputDot = target?.closest?.('.dot[data-io="in"]');
+
+      if(!inputDot){
+        const dropNodeEl = target?.closest?.(".node[data-id]");
+        const dropNodeId = String(dropNodeEl?.getAttribute?.("data-id") || "");
+        const dropNode = dropNodeId ? state.nodes.get(dropNodeId) : null;
+        const fromNodeId = String(state.connecting.nodeId || "");
+        const bestPort = (dropNode && dropNodeId && dropNodeId !== fromNodeId)
+          ? chooseBestInputPortForConnection(dropNode, state.connecting.port)
+          : null;
+
+        if(bestPort){
+          completeConnectionToInput(dropNodeId, bestPort);
+        } else {
+          cancelPendingConnection({ reason: "Cancelled connection." });
+        }
       }
     }
 
@@ -9588,7 +9956,7 @@ async function evaluate(){
 
     const delta = -e.deltaY;
     const factor = Math.exp(delta * 0.0012);
-    const nextZoom = clamp(state.zoom * factor, 0.25, 2.5);
+    const nextZoom = clamp(state.zoom * factor, EDITOR_MIN_ZOOM, EDITOR_MAX_ZOOM);
 
     state.zoom = nextZoom;
 
@@ -9629,10 +9997,7 @@ async function evaluate(){
     
     if(!isDot && !isNode){
       if(state.connecting){
-        state.connecting = null;
-        renderActiveDots();
-        requestWireDraw();
-        toast("Cancelled connection.");
+        cancelPendingConnection({ reason: "Cancelled connection." });
       }
       
       // Clear selection when clicking background (unless Ctrl/Cmd held)
@@ -9828,6 +10193,7 @@ function deleteSelectedNode(){
   state.selected = null;
   state.selectedNodes.clear();
   state.connecting = null;
+  state.rewiringFromInput = null;
 
   render();
   renderInspector();
@@ -9882,6 +10248,7 @@ function quickConnectSelectedToOutput(){
   });
 
   state.connecting = null;
+  state.rewiringFromInput = null;
   state.selected = prevSelected;
   state.selectedNodes = prevSelectedNodes;
 
@@ -9891,6 +10258,31 @@ function quickConnectSelectedToOutput(){
   requestWireDraw();
 
   toast(`Connected ${node.id}.${outPort} -> ${outputNode.id}.in`);
+}
+
+function centerEditorOnOutputNode(){
+  const outputNode = findFirstOutputNode();
+  if(!outputNode){
+    toast("No Output node found.");
+    return;
+  }
+
+  const outputEl = document.querySelector(`.node[data-id="${outputNode.id}"]`);
+  const halfW = outputEl ? ((outputEl.offsetWidth || 240) / 2) : 120;
+  const halfH = outputEl ? ((outputEl.offsetHeight || 90) / 2) : 45;
+  const worldX = outputNode.pos.x + halfW;
+  const worldY = outputNode.pos.y + halfH;
+
+  const viewW = Math.max(1, editorEl?.clientWidth || 1);
+  const viewH = Math.max(1, editorEl?.clientHeight || 1);
+
+  // Jump back to the standard editor zoom so Output is easy to find.
+  state.zoom = 1;
+
+  state.panX = (viewW / 2) - (worldX * state.zoom);
+  state.panY = (viewH / 2) - (worldY * state.zoom);
+  applyEditorTransform();
+  toast("Centered on Output node (zoom reset).");
 }
 
 // Delete / Backspace key handler
@@ -9957,21 +10349,21 @@ window.addEventListener("keydown", (e) => {
   drawPenCanvasOverlay();
 });
 
-// Shift+O quick connect to Output
+// O centers view on Output node. Shift+O quick connects selected node to Output.
 window.addEventListener("keydown", (e) => {
   if(helpVisible) return;
   if(isTypingTarget(e.target)) return;
   if(isNodeSearchOpen()) return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
 
-  const isQuickConnect = e.shiftKey
-    && !e.ctrlKey
-    && !e.metaKey
-    && !e.altKey
-    && e.key.toLowerCase() === "o";
+  if(e.key.toLowerCase() !== "o") return;
 
-  if(isQuickConnect){
+  e.preventDefault();
+  if(e.shiftKey){
     e.preventDefault();
     quickConnectSelectedToOutput();
+  }else{
+    centerEditorOnOutputNode();
   }
 });
 
@@ -9999,6 +10391,7 @@ function loadGraph(data){
   state.groups.clear();
   state.wires = [];
   state.connecting = null;
+  state.rewiringFromInput = null;
   state.selected = null;
   state.selectedNodes.clear();
 
@@ -10259,6 +10652,13 @@ function loadGraph(data){
       node.params.y = Math.round((ch - fontSize) / 2);
     }
 
+    if(type === "Shape"){
+      const cw = Math.max(1, Number(previewBase?.w) || 1280);
+      const ch = Math.max(1, Number(previewBase?.h) || 720);
+      node.params.x = Math.round(cw / 2);
+      node.params.y = Math.round(ch / 2);
+    }
+
     if(type === "Output"){
       normalizeOutputRatioParams(node);
       syncOutputRatio(node);
@@ -10288,6 +10688,7 @@ function loadGraph(data){
       state.groups.clear();
       state.wires = [];
       state.connecting = null;
+      state.rewiringFromInput = null;
       state.selected = null;
       state.nextId = 1;
       state.nextGroupId = 1;

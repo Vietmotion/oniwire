@@ -232,6 +232,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       width: 120,
       height: 120,
       color: "#3b82f6",
+      fillOpacity: 1,
       strokeColor: "#ffffff",
       strokeWidth: 0,
       strokeOpacity: 1,
@@ -257,6 +258,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       const strokeColor = String(node.params.strokeColor || "#ffffff");
       const strokeWidth = Math.max(0, Number(node.params.strokeWidth) || 0);
       const strokeOpacity = clamp(node.params.strokeOpacity, 0, 1);
+      const fillOpacity = clamp(node.params.fillOpacity, 0, 1);
       const shapeType = node.params.shape || "circle";
 
       let fillValue = fallbackColor;
@@ -299,6 +301,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       shape.style.height = height + "px";
       shape.style.background = fillValue;
       shape.style.backgroundColor = fallbackColor;
+      shape.style.opacity = String(fillOpacity);
       applyBasicShapeStyle(shape, shapeType);
 
       const strokeOverlay = buildStrokeSvg(shapeType, width, height, strokeColor, strokeWidth, strokeOpacity);
@@ -327,6 +330,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
         texturedFrame.style.height = height + "px";
         texturedFrame.style.overflow = "hidden";
         texturedFrame.style.pointerEvents = "none";
+        texturedFrame.style.opacity = String(fillOpacity);
 
         const localClip = getLocalShapeClipPath(shapeType);
         if(localClip){
@@ -379,6 +383,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       { k: "height", type: "range", label: "Height", min: 10, max: 1500, step: 1 },
       { k: "uniform", type: "checkbox", label: "Uniform" },
       { k: "color", type: "color", label: "Color" },
+      { k: "fillOpacity", type: "range", label: "Fill Opacity", min: 0, max: 1, step: 0.01 },
       { k: "strokeColor", type: "color", label: "Stroke" },
       { k: "strokeWidth", type: "range", label: "Stroke Width", min: 0, max: 200, step: 1 },
       { k: "strokeOpacity", type: "range", label: "Stroke Opacity", min: 0, max: 1, step: 0.01 },

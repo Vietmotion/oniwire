@@ -189,7 +189,20 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 			try{
 				const text = await file.text();
 				const data = JSON.parse(text);
-				loadGraph(data);
+
+				// Accept both raw graph JSON and wrapped animation-data exports.
+				const graphPayload = (() => {
+					if(data && Array.isArray(data.nodes)) return data;
+					if(data && data.project && Array.isArray(data.project.nodes)) return data.project;
+					return null;
+				})();
+
+				if(!graphPayload){
+					toast("Import failed (unsupported Oniwire JSON format).");
+					return;
+				}
+
+				loadGraph(graphPayload);
 				toast(`Imported: ${file.name} ✅`);
 			}catch(e){
 				console.error(e);

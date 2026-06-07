@@ -193,7 +193,8 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
       ]},
       {k:"opacity", type:"range", label:"Opacity %", min:0, max:100, step:1},
-      { type:"actionButtons", label:"Inputs", buttons:[{ label:"+ Input", id:"compositeAddInput" }, { label:"- Input", id:"compositeRemoveInput" }] }
+      { type:"actionButtons", label:"Inputs", buttons:[{ label:"+ Input", id:"compositeAddInput" }, { label:"- Input", id:"compositeRemoveInput" }] },
+      { k:"inputPorts", type:"compositeInputOrder", label:"Input Order" }
     ])
   };
 };
