@@ -2189,14 +2189,14 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				var radialMode = String(params.radialMode || 'simple');
 				var angleStart = toNumber(params.angleStart, 0);
 				var angleStep = toNumber(params.angleStep, 45);
-				var centerX = toNumber(params.centerX, 0);
-				var centerY = toNumber(params.centerY, 0);
+				var pivotX = toNumber(params.pivotX, c4.canvas.width / 2);
+				var pivotY = toNumber(params.pivotY, c4.canvas.height / 2);
 				var drawAt = function(dx, dy){ c4.ctx.drawImage(srcC.canvas, dx, dy); };
 				if(mode === 'radial'){
 					if(radialMode === 'advanced'){
 						for(var i2=0;i2<radialCount;i2++){
 							var ang = (angleStart - 90 + angleStep * i2) * (Math.PI/180);
-							drawAt(centerX + Math.cos(ang)*radius, centerY + Math.sin(ang)*radius);
+							drawAt(pivotX + Math.cos(ang)*radius, pivotY + Math.sin(ang)*radius);
 						}
 					}else{
 						var evenStep = 360 / radialCount;

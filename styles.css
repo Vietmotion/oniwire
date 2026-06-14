@@ -564,6 +564,16 @@ select{
   background-size: 14px;
 }
 
+#projectList{
+  display:block;
+  width:100%;
+  min-height:34px;
+  box-sizing:border-box;
+  position: relative;
+  z-index: 5;
+  margin-bottom: 4px;
+}
+
 select option{
   background: #0f1620;
   color: rgba(255,255,255,.9);
@@ -1664,6 +1674,69 @@ select optgroup{
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* Preview layer picker (right-click select, Photoshop-style) */
+.previewLayerMenu{
+  position: fixed;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 5px;
+  border-radius: 8px;
+  border: 1px solid rgba(150, 185, 245, 0.45);
+  background: rgba(9, 14, 24, 0.96);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+}
+
+.previewLayerMenuHeader{
+  font-size: 10px;
+  font-weight: 650;
+  color: rgba(157, 180, 215, 0.75);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  margin-bottom: 4px;
+}
+
+.previewLayerMenuItem{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: rgba(230, 240, 255, 0.95);
+  font-size: 12px;
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.previewLayerMenuItem:hover{
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.previewLayerMenuItem.isActive{
+  background: rgba(79, 124, 207, 0.22);
+  color: #e8f2ff;
+}
+
+.previewLayerMenuIcon{
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: .85;
+  line-height: 1;
+}
+
+.previewLayerMenuLabel{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 
 .node{
   position:absolute;
@@ -1800,18 +1873,20 @@ select optgroup{
 .toast{
   position:absolute;
   left:14px;
-  bottom:14px;
-  padding:10px 12px;
-  border-radius: 7px;
-  border:1px solid var(--line);
-  background: rgba(0,0,0,.40);
-  color: var(--muted);
-  font-size:12px;
+  top:14px;
+  padding:10px 16px;
+  border-radius: 8px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(30,30,35,.92);
+  color: #e8e8e8;
+  font-size:13px;
+  font-weight:500;
   max-width: 640px;
   pointer-events:none;
   opacity:0;
-  transform: translateY(6px);
-  transition: opacity .2s ease, transform .2s ease;
+  transform: translateY(-8px);
+  transition: opacity .18s ease, transform .18s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,.45);
 }
 .toast.show{ opacity:1; transform: translateY(0); }
 
@@ -2161,6 +2236,38 @@ select optgroup{
   font-size: 14px;
   font-weight: 650;
   line-height: 1;
+}
+
+.clonePivotCompact{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap:8px;
+  align-items:center;
+  min-width:0;
+}
+
+.clonePivotScrub{
+  padding:8px 10px;
+}
+
+.clonePivotCenterBtn{
+  height:36px;
+  padding:0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: rgba(236,244,255,.96);
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.clonePivotCenterBtn:hover{
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.16);
+}
+
+.clonePivotCenterBtn:active{
+  transform: translateY(1px);
 }
 /* ─────────────────────────────────────────────────── */
 

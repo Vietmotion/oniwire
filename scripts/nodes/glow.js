@@ -20,12 +20,14 @@ window.createOniwireGlowNodeDef = function createOniwireGlowNodeDef({ propagateM
         const glowLayer = src.el.cloneNode(true);
         const t = clamp((Number(node.params.threshold) || 0) / 100, 0, 1);
         const intensity = clamp((Number(node.params.intensity) || 0) / 100, 0, 1);
-        const brightness = 1 + t * 0.9;
-        const contrast = 1 + t * 3.0;
+        const brightness = 1 + t * 0.75;
+        const contrast = 1 + t * 2.8;
+        const saturation = 1 + t * 0.55;
 
         glowLayer.style.position = "absolute";
         glowLayer.style.inset = "0";
-        glowLayer.style.filter = `grayscale(1) brightness(${brightness}) contrast(${contrast}) blur(${blur}px)`;
+        // Preserve source hue and only bloom brighter pixels instead of turning the glow white.
+        glowLayer.style.filter = `saturate(${saturation}) brightness(${brightness}) contrast(${contrast}) blur(${blur}px)`;
         glowLayer.style.mixBlendMode = "screen";
         glowLayer.style.opacity = String(intensity);
         glowLayer.style.pointerEvents = "none";

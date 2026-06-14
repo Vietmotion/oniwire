@@ -272,6 +272,14 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
   function findMaskHost(el){
     if(!el) return null;
     const hasMask = (n) => Boolean(n?.style?.maskImage || n?.style?.webkitMaskImage);
+    // Only accept a mask directly on the incoming layer.
+    // Descendant masks belong to upstream internals and should not clip Stylize vignette.
+    return hasMask(el) ? el : null;
+  }
+
+  function findAnyMaskHost(el){
+    if(!el) return null;
+    const hasMask = (n) => Boolean(n?.style?.maskImage || n?.style?.webkitMaskImage);
     if(hasMask(el)) return el;
     const nodes = el.querySelectorAll ? el.querySelectorAll("*") : [];
     for(const node of nodes){
@@ -280,12 +288,38 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
     return null;
   }
 
+  function applyMaskStyles(targetEl, hostEl, fallbackX, fallbackY, canvasWidth, canvasHeight){
+    if(!targetEl || !hostEl) return;
+    const srcMask = hostEl.style.maskImage || hostEl.style.webkitMaskImage;
+    if(!srcMask) return;
+
+    targetEl.style.maskImage = srcMask;
+    targetEl.style.webkitMaskImage = srcMask;
+    targetEl.style.maskMode = hostEl.style.maskMode || hostEl.style.webkitMaskMode || "alpha";
+    targetEl.style.webkitMaskMode = hostEl.style.webkitMaskMode || hostEl.style.maskMode || "alpha";
+    targetEl.style.maskRepeat = hostEl.style.maskRepeat || hostEl.style.webkitMaskRepeat || "no-repeat";
+    targetEl.style.webkitMaskRepeat = hostEl.style.webkitMaskRepeat || hostEl.style.maskRepeat || "no-repeat";
+
+    const maskPos = hostEl.style.maskPosition || hostEl.style.webkitMaskPosition;
+    const maskSize = hostEl.style.maskSize || hostEl.style.webkitMaskSize;
+    targetEl.style.maskPosition = maskPos || `${fallbackX}px ${fallbackY}px`;
+    targetEl.style.webkitMaskPosition = maskPos || `${fallbackX}px ${fallbackY}px`;
+    targetEl.style.maskSize = maskSize || `${canvasWidth}px ${canvasHeight}px`;
+    targetEl.style.webkitMaskSize = maskSize || `${canvasWidth}px ${canvasHeight}px`;
+
+    if(hostEl.style.transform){
+      targetEl.style.transform = hostEl.style.transform;
+      targetEl.style.transformOrigin = hostEl.style.transformOrigin || "50% 50%";
+    }
+  }
+
   return {
     inputs: ["in"],
     outputs: ["layer"],
     defaults: {
       preset: "lookup",
       lookupPreset: "comic",
+      effectCoverage: "composition",
       amount: 70,
       texture: 45,
       glitchShift: 8,
@@ -358,7 +392,13 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       fxFrame.style.height = `${bh}px`;
       fxFrame.style.overflow = "hidden";
       fxFrame.style.pointerEvents = "none";
-      const maskHost = findMaskHost(src.el) || src.el;
+      const effectCoverage = String(node.params.effectCoverage || "composition");
+      const maskHost = effectCoverage === "upstreamMask"
+        ? (findAnyMaskHost(src.el) || findMaskHost(src.el))
+        : null;
+      if(maskHost){
+        applyMaskStyles(fxFrame, maskHost, -bx, -by, canvasWidth, canvasHeight);
+      }
 
       const base = src.el;
       base.style.position = "absolute";
@@ -464,30 +504,6 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
         const alpha = (vignette / 100) * 0.6;
         overlay.style.background = `radial-gradient(circle at center, rgba(0,0,0,0) 45%, rgba(0,0,0,${alpha.toFixed(3)}) 100%)`;
 
-        // Keep vignette constrained to the same mask so it does not darken outside the masked shape.
-        const srcMask = maskHost.style.maskImage || maskHost.style.webkitMaskImage;
-        if(srcMask){
-          overlay.style.maskImage = srcMask;
-          overlay.style.webkitMaskImage = srcMask;
-          overlay.style.maskMode = maskHost.style.maskMode || maskHost.style.webkitMaskMode || "alpha";
-          overlay.style.webkitMaskMode = maskHost.style.webkitMaskMode || maskHost.style.maskMode || "alpha";
-          overlay.style.maskRepeat = maskHost.style.maskRepeat || maskHost.style.webkitMaskRepeat || "no-repeat";
-          overlay.style.webkitMaskRepeat = maskHost.style.webkitMaskRepeat || maskHost.style.maskRepeat || "no-repeat";
-
-          const maskPos = maskHost.style.maskPosition || maskHost.style.webkitMaskPosition;
-          const maskSize = maskHost.style.maskSize || maskHost.style.webkitMaskSize;
-          overlay.style.maskPosition = maskPos || `${-bx}px ${-by}px`;
-          overlay.style.webkitMaskPosition = maskPos || `${-bx}px ${-by}px`;
-          overlay.style.maskSize = maskSize || `${canvasWidth}px ${canvasHeight}px`;
-          overlay.style.webkitMaskSize = maskSize || `${canvasWidth}px ${canvasHeight}px`;
-
-          // Match host transform when mask sits on a transformed descendant (e.g. Composite -> Transform -> Stylize).
-          if(maskHost.style.transform){
-            overlay.style.transform = maskHost.style.transform;
-            overlay.style.transformOrigin = maskHost.style.transformOrigin || "50% 50%";
-          }
-        }
-
         fxFrame.appendChild(overlay);
       }
 
@@ -523,6 +539,15 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
         label: "Lookup Filter",
         showIf: { k: "preset", equals: "lookup" },
         options: LOOKUP_PRESETS
+      },
+      {
+        k: "effectCoverage",
+        type: "select",
+        label: "Effect Coverage",
+        options: [
+          { value: "composition", label: "Whole composition" },
+          { value: "upstreamMask", label: "Use previous mask" }
+        ]
       },
       { k: "amount", type: "range", label: "Amount", min: 0, max: 100, step: 1 },
       { k: "texture", type: "range", label: "Texture", min: 0, max: 100, step: 1 },

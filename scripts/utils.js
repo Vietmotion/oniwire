@@ -92,6 +92,9 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 	} = deps;
 
 	const INDEX_KEY = "visual-node-app:saves:index";
+	const DB_NAME = "visual-node-app:saves";
+	const DB_VERSION = 1;
+	const DB_STORE = "projects";
 
 	function getSaveIndex(){
 		try { return JSON.parse(localStorage.getItem(INDEX_KEY) || "[]"); }
@@ -106,12 +109,79 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		return `visual-node-app:save:${name}`;
 	}
 
+	function openProjectDb(){
+		if(!("indexedDB" in window)) return Promise.reject(new Error("IndexedDB unavailable"));
+		return new Promise((resolve, reject) => {
+			const req = indexedDB.open(DB_NAME, DB_VERSION);
+			req.onupgradeneeded = () => {
+				const db = req.result;
+				if(!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+			};
+			req.onsuccess = () => resolve(req.result);
+			req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+			req.onblocked = () => reject(new Error("IndexedDB blocked"));
+		});
+	}
+
+	async function putProjectBlob(name, raw){
+		try{
+			localStorage.setItem(keyFor(name), raw);
+			return "localStorage";
+		}catch(_err){
+			const db = await openProjectDb();
+			await new Promise((resolve, reject) => {
+				const tx = db.transaction(DB_STORE, "readwrite");
+				tx.objectStore(DB_STORE).put(raw, name);
+				tx.oncomplete = () => resolve();
+				tx.onerror = () => reject(tx.error || new Error("IndexedDB write failed"));
+			});
+			try{ localStorage.removeItem(keyFor(name)); }catch{}
+			return "indexedDB";
+		}
+	}
+
+	async function getProjectBlob(name){
+		const localRaw = localStorage.getItem(keyFor(name));
+		if(localRaw) return localRaw;
+		const db = await openProjectDb();
+		return await new Promise((resolve, reject) => {
+			const tx = db.transaction(DB_STORE, "readonly");
+			const req = tx.objectStore(DB_STORE).get(name);
+			req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : "");
+			req.onerror = () => reject(req.error || new Error("IndexedDB read failed"));
+		});
+	}
+
+	async function deleteProjectBlob(name){
+		try{ localStorage.removeItem(keyFor(name)); }catch{}
+		try{
+			const db = await openProjectDb();
+			await new Promise((resolve, reject) => {
+				const tx = db.transaction(DB_STORE, "readwrite");
+				tx.objectStore(DB_STORE).delete(name);
+				tx.oncomplete = () => resolve();
+				tx.onerror = () => reject(tx.error || new Error("IndexedDB delete failed"));
+			});
+		}catch(_err){
+			// Ignore fallback cleanup failures.
+		}
+	}
+
 	function refreshProjectList(selectedName = ""){
 		const sel = document.getElementById("projectList");
 		if(!sel) return;
 
 		const list = getSaveIndex();
 		sel.innerHTML = "";
+		if(!list.length){
+			const opt = document.createElement("option");
+			opt.value = "";
+			opt.textContent = "No saved projects";
+			opt.disabled = true;
+			opt.selected = true;
+			sel.appendChild(opt);
+			return;
+		}
 		for(const name of list){
 			const opt = document.createElement("option");
 			opt.value = name;
@@ -121,7 +191,7 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		}
 	}
 
-	function saveNamed(name){
+	async function saveNamed(name){
 		name = (name || "").trim();
 		if(!name){ toast("Name your project first."); return; }
 
@@ -130,7 +200,7 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		payload.savedAt = new Date().toISOString();
 
 		try{
-			localStorage.setItem(keyFor(name), JSON.stringify(payload));
+			await putProjectBlob(name, JSON.stringify(payload));
 		}catch(e){
 			console.error(e);
 			toast("Save failed (storage error).");
@@ -147,11 +217,18 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		toast(`Saved: ${name} ✅`);
 	}
 
-	function loadNamed(name){
+	async function loadNamed(name){
 		name = (name || "").trim();
 		if(!name){ toast("Pick a project to load."); return; }
 
-		const raw = localStorage.getItem(keyFor(name));
+		let raw = "";
+		try{
+			raw = await getProjectBlob(name);
+		}catch(e){
+			console.error(e);
+			toast("Load failed.");
+			return;
+		}
 		if(!raw){ toast("Not found."); return; }
 
 		try{
@@ -166,11 +243,11 @@ window.createOniwireUtilsApi = function createOniwireUtilsApi(deps){
 		}
 	}
 
-	function deleteNamed(name){
+	async function deleteNamed(name){
 		name = (name || "").trim();
 		if(!name){ toast("Pick a project to delete."); return; }
 
-		localStorage.removeItem(keyFor(name));
+		await deleteProjectBlob(name);
 		const list = getSaveIndex().filter(n => n !== name);
 		setSaveIndex(list);
 		refreshProjectList();

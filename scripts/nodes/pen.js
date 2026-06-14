@@ -117,13 +117,15 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
   }
 
   // Auto-smooth: recompute bezier handles using Catmull-Rom tangents.
-  function smoothPathPoints(points, closed, strength = 50){
+  function smoothPathPoints(points, closed, strength = 0){
     const n = points.length;
     if(n < 2) return points;
     const pts = points.map(p => ({ ...p }));
 
     const tNorm = clamp(Number(strength), 0, 100) / 100;
-    const tension = 0.05 + (0.7 * tNorm);
+    if(tNorm <= 0) return pts;
+    const tension = 0.33;
+    const lerp = (a, b, t) => a + ((b - a) * t);
     for(let i = 0; i < n; i++){
       const prev = closed ? pts[(i - 1 + n) % n] : pts[Math.max(0, i - 1)];
       const next = closed ? pts[(i + 1) % n] : pts[Math.min(n - 1, i + 1)];
@@ -134,10 +136,14 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       const lenOut = Math.hypot(next.x - curr.x, next.y - curr.y) / 3;
       const len = Math.hypot(tx, ty) || 1;
       const nx = tx / len, ny = ty / len;
-      curr.inX  = curr.x - nx * lenIn;
-      curr.inY  = curr.y - ny * lenIn;
-      curr.outX = curr.x + nx * lenOut;
-      curr.outY = curr.y + ny * lenOut;
+      const targetInX = curr.x - nx * lenIn;
+      const targetInY = curr.y - ny * lenIn;
+      const targetOutX = curr.x + nx * lenOut;
+      const targetOutY = curr.y + ny * lenOut;
+      curr.inX = lerp(Number.isFinite(Number(curr.inX)) ? Number(curr.inX) : curr.x, targetInX, tNorm);
+      curr.inY = lerp(Number.isFinite(Number(curr.inY)) ? Number(curr.inY) : curr.y, targetInY, tNorm);
+      curr.outX = lerp(Number.isFinite(Number(curr.outX)) ? Number(curr.outX) : curr.x, targetOutX, tNorm);
+      curr.outY = lerp(Number.isFinite(Number(curr.outY)) ? Number(curr.outY) : curr.y, targetOutY, tNorm);
     }
     return pts;
   }
@@ -171,7 +177,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       ],
       closed: true,
       fillColor: "#ffffff",
-      fillOpacity: 0.8,
+      fillOpacity: 1,
       strokeColor: "#ffffff",
       strokeWidth: 2,
       strokeOpacity: 1,
@@ -179,7 +185,8 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       strokeTaper: "none",
       taperStartStrength: 70,
       taperEndStrength: 70,
-      smoothStrength: 50,
+      smoothStrength: 0,
+      smoothSourcePoints: null,
       visible: true
     };
   }
@@ -191,7 +198,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       points: normalizePoints(path.points),
       closed: Boolean(path.closed),
       fillColor: String(path.fillColor || "#ffffff"),
-      fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 0.8, 0, 1),
+      fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 1, 0, 1),
       strokeColor: String(path.strokeColor || "#ffffff"),
       strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
       strokeOpacity: clamp(Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1, 0, 1),
@@ -199,7 +206,8 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       strokeTaper: ["none", "start", "end", "both"].includes(path.strokeTaper) ? path.strokeTaper : "none",
       taperStartStrength: clamp(Number.isFinite(Number(path.taperStartStrength)) ? Number(path.taperStartStrength) : Number(path.taperStartLen), 0, 100),
       taperEndStrength: clamp(Number.isFinite(Number(path.taperEndStrength)) ? Number(path.taperEndStrength) : Number(path.taperEndLen), 0, 100),
-      smoothStrength: clamp(Number(path.smoothStrength), 0, 100) || 50,
+      smoothStrength: clamp(Number.isFinite(Number(path.smoothStrength)) ? Number(path.smoothStrength) : 0, 0, 100),
+      smoothSourcePoints: Array.isArray(path.smoothSourcePoints) ? normalizePoints(path.smoothSourcePoints) : null,
       visible: path.visible !== false
     }));
     return out.length ? out : [defaultPath(1)];
@@ -212,7 +220,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
         points: params.points,
         closed: Boolean(params.closed),
         fillColor: String(params.fillColor || "#ffffff"),
-        fillOpacity: clamp(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 0.8, 0, 1),
+        fillOpacity: clamp(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 1, 0, 1),
         strokeColor: String(params.strokeColor || "#ffffff"),
         strokeWidth: Math.max(0.1, Number(params.strokeWidth) || 2),
         strokeOpacity: clamp(Number.isFinite(Number(params.strokeOpacity)) ? Number(params.strokeOpacity) : 1, 0, 1),
@@ -220,7 +228,8 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
         strokeTaper: "none",
         taperStartStrength: 70,
         taperEndStrength: 70,
-        smoothStrength: 50,
+        smoothStrength: 0,
+        smoothSourcePoints: null,
         visible: true
       }];
       params.activePath = 0;
@@ -374,7 +383,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
         d: buildPathD(path.points, path.closed),
         closed: Boolean(path.closed),
         strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
-        fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 0.8, 0, 1),
+        fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 1, 0, 1),
         strokeOpacity: clamp(Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1, 0, 1)
       }))
       .filter(path => path.d);
@@ -436,7 +445,8 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
-      wrap.style.overflow = "visible";
+      wrap.style.overflow = "hidden";
+      wrap.dataset.penWrapNodeId = node.id;
       wrap.dataset.maskShape = "path";
       wrap.dataset.maskPathData = JSON.stringify(maskPaths);
       wrap.dataset.maskX = "0";

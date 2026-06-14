@@ -3,12 +3,24 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
     return a + (b - a) * t;
   }
 
-  function buildChannelTable(shadows, midtones, highlights){
+  function normalizeCurveKnotPositions(shadowsX, midtonesX, highlightsX){
+    const eps = 0.01;
+    const s = clamp(Number(shadowsX) / 100, 0, 1);
+    const m = clamp(Number(midtonesX) / 100, 0, 1);
+    const h = clamp(Number(highlightsX) / 100, 0, 1);
+    const s2 = clamp(s, 0, 1 - (2 * eps));
+    const m2 = clamp(m, s2 + eps, 1 - eps);
+    const h2 = clamp(h, m2 + eps, 1);
+    return { s: s2, m: m2, h: h2 };
+  }
+
+  function buildChannelTable(shadows, midtones, highlights, shadowsX, midtonesX, highlightsX){
+    const knots = normalizeCurveKnotPositions(shadowsX, midtonesX, highlightsX);
     const pts = [
       [0, 0],
-      [0.25, clamp(0.25 + (shadows / 100), 0, 1)],
-      [0.5, clamp(0.5 + (midtones / 100), 0, 1)],
-      [0.75, clamp(0.75 + (highlights / 100), 0, 1)],
+      [knots.s, clamp(0.25 + (shadows / 100), 0, 1)],
+      [knots.m, clamp(0.5 + (midtones / 100), 0, 1)],
+      [knots.h, clamp(0.75 + (highlights / 100), 0, 1)],
       [1, 1]
     ];
 
@@ -95,6 +107,9 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
       rgbShadows: 0,
       rgbMidtones: 0,
       rgbHighlights: 0,
+      curveShadowsX: 25,
+      curveMidtonesX: 50,
+      curveHighlightsX: 75,
       rShadows: 0,
       rMidtones: 0,
       rHighlights: 0,
@@ -136,9 +151,13 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
       const blueMidtones = clamp(rgbMidtones + (Number(node.params.bMidtones) || 0), -100, 100);
       const blueHighlights = clamp(rgbHighlights + (Number(node.params.bHighlights) || 0), -100, 100);
 
-      const rTable = buildChannelTable(redShadows, redMidtones, redHighlights);
-      const gTable = buildChannelTable(greenShadows, greenMidtones, greenHighlights);
-      const bTable = buildChannelTable(blueShadows, blueMidtones, blueHighlights);
+      const xShadows = Number.isFinite(Number(node.params.curveShadowsX)) ? Number(node.params.curveShadowsX) : 25;
+      const xMidtones = Number.isFinite(Number(node.params.curveMidtonesX)) ? Number(node.params.curveMidtonesX) : 50;
+      const xHighlights = Number.isFinite(Number(node.params.curveHighlightsX)) ? Number(node.params.curveHighlightsX) : 75;
+
+      const rTable = buildChannelTable(redShadows, redMidtones, redHighlights, xShadows, xMidtones, xHighlights);
+      const gTable = buildChannelTable(greenShadows, greenMidtones, greenHighlights, xShadows, xMidtones, xHighlights);
+      const bTable = buildChannelTable(blueShadows, blueMidtones, blueHighlights, xShadows, xMidtones, xHighlights);
 
       const filterId = `oniwireCurves-${node.id}`;
       ensureCurvesFilter(filterId, rTable, gTable, bTable);
