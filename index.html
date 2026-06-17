@@ -27,7 +27,7 @@
   </style>
   <script src="vendor/html2canvas.min.js"></script>
   <script src="scripts/export.js?v=20260606e"></script>
-  <script src="scripts/node-menu.js"></script>
+  <script src="scripts/node-menu.js?v=20260617a"></script>
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
   <script src="scripts/nodes/gradient.js"></script>
@@ -38,6 +38,9 @@
   <script src="scripts/nodes/pen.js"></script>
   <script src="scripts/nodes/transform.js"></script>
   <script src="scripts/nodes/motion.js?v=20260327a"></script>
+  <script src="scripts/nodes/blur.js"></script>
+  <script src="scripts/nodes/erode.js?v=20260617a"></script>
+  <script src="scripts/nodes/kalei.js?v=20260617a"></script>
   <script src="scripts/nodes/glow.js"></script>
   <script src="scripts/nodes/color_correct.js"></script>
   <script src="scripts/nodes/curves.js"></script>
@@ -5120,6 +5123,11 @@ const NODE_TIPS = {
     "<em>Outer</em>: color-tinted drop-shadow glow. <em>Luminance</em>: brightens highlights and blooms them.",
     "<em>in</em> -> the layer to glow."
   ],
+  Erode: [
+    "<strong>Erode</strong> - Shrinks or expands alpha edges.",
+    "Negative Amount erodes (shrinks). Positive Amount dilates (expands).",
+    "<em>in</em> -> any layer with alpha, including Pen paths and PNG images."
+  ],
   ColorCorrect: [
     "<strong>Color Correct</strong> - Adjusts color grading on any layer.",
     "Controls: Brightness | Contrast | Saturation | Hue Rotate | Temperature (warm/cool).",
@@ -5366,6 +5374,7 @@ const NODE_CATEGORIES = {
   MotionIn: "Motion",
   Motion: "Motion",
   MotionOut: "Motion",
+  Erode: "Operations",
   Glow: "Operations",
   Composite: "Operations",
   ColorCorrect: "Operations",

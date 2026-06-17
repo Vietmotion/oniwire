@@ -176,6 +176,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
         { x: 180, y: 320, inX: 150, inY: 300, outX: 220, outY: 340 }
       ],
       closed: true,
+      isHole: false,
       fillColor: "#ffffff",
       fillOpacity: 1,
       strokeColor: "#ffffff",
@@ -197,6 +198,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       name: String(path.name || ("Path " + String(i + 1).padStart(2, "0"))),
       points: normalizePoints(path.points),
       closed: Boolean(path.closed),
+      isHole: Boolean(path.isHole),
       fillColor: String(path.fillColor || "#ffffff"),
       fillOpacity: clamp(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 1, 0, 1),
       strokeColor: String(path.strokeColor || "#ffffff"),
@@ -219,6 +221,7 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
         name: "Path 01",
         points: params.points,
         closed: Boolean(params.closed),
+        isHole: false,
         fillColor: String(params.fillColor || "#ffffff"),
         fillOpacity: clamp(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 1, 0, 1),
         strokeColor: String(params.strokeColor || "#ffffff"),
@@ -475,9 +478,39 @@ window.createOniwirePenNodeDef = function createOniwirePenNodeDef(){
       const strokePaint = extractSvgPaint(inputs?.stroke, `pen-stroke-${node.id}`, defs);
 
       const g = document.createElementNS(NS, "g");
+      const activePaths = paths.filter(path => path && path.visible);
+      const holePaths = activePaths.filter(path => path.isHole && path.closed);
+      const drawPaths = activePaths.filter(path => !(path.isHole && path.closed));
 
-      paths.forEach((path, pathIdx) => {
-        if(!path.visible) return;
+      if(holePaths.length){
+        const holeMaskId = `pen-hole-mask-${node.id}`;
+        const holeMask = document.createElementNS(NS, "mask");
+        holeMask.id = holeMaskId;
+        holeMask.setAttribute("maskUnits", "userSpaceOnUse");
+
+        const fullRect = document.createElementNS(NS, "rect");
+        fullRect.setAttribute("x", "0");
+        fullRect.setAttribute("y", "0");
+        fullRect.setAttribute("width", "1280");
+        fullRect.setAttribute("height", "720");
+        fullRect.setAttribute("fill", "white");
+        holeMask.appendChild(fullRect);
+
+        for(const path of holePaths){
+          const holeD = buildPathD(path.points, true);
+          if(!holeD) continue;
+          const holeEl = document.createElementNS(NS, "path");
+          holeEl.setAttribute("d", holeD);
+          holeEl.setAttribute("fill", "black");
+          holeEl.setAttribute("stroke", "none");
+          holeMask.appendChild(holeEl);
+        }
+
+        defs.appendChild(holeMask);
+        g.setAttribute("mask", `url(#${holeMaskId})`);
+      }
+
+      drawPaths.forEach((path, pathIdx) => {
         const d = buildPathD(path.points, path.closed);
         if(!d) return;
 

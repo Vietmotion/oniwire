@@ -28,12 +28,14 @@ window.createOniwireNodeSearchApi = function createOniwireNodeSearchApi(deps){
     MotionOut: "Motion - Out"
   };
 
+  const HIDDEN_NODE_TYPES = new Set(["Kalei"]);
+
   function getNodeDisplayName(type){
     return NODE_LABELS[type] || type;
   }
 
   function getAllNodesForSearch(){
-    return Object.keys(NODE_DEFS).map(type => {
+    return Object.keys(NODE_DEFS).filter(type => !HIDDEN_NODE_TYPES.has(type)).map(type => {
       const def = NODE_DEFS[type];
       const displayName = getNodeDisplayName(type);
       return {
