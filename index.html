@@ -1222,6 +1222,80 @@
     point.broken = false;
   }
 
+  function hasCollapsedPenHandles(point){
+    if(!point) return false;
+    const epsilon = 0.01;
+    return Math.abs(point.inX - point.x) <= epsilon
+      && Math.abs(point.inY - point.y) <= epsilon
+      && Math.abs(point.outX - point.x) <= epsilon
+      && Math.abs(point.outY - point.y) <= epsilon;
+  }
+
+  function collapsePenHandles(point){
+    if(!point) return;
+    point.inX = point.x;
+    point.inY = point.y;
+    point.outX = point.x;
+    point.outY = point.y;
+    point.broken = false;
+  }
+
+  function seedPenHandlesForAnchor(points, index, closed){
+    const p = Array.isArray(points) ? points[index] : null;
+    if(!p) return;
+    const count = points.length;
+    const prevIndex = closed ? ((index - 1 + count) % count) : (index > 0 ? index - 1 : -1);
+    const nextIndex = closed ? ((index + 1) % count) : (index < count - 1 ? index + 1 : -1);
+    const prev = prevIndex >= 0 ? points[prevIndex] : null;
+    const next = nextIndex >= 0 ? points[nextIndex] : null;
+
+    let dirX = 0;
+    let dirY = 0;
+    let distSum = 0;
+    let distCount = 0;
+
+    if(prev){
+      const vx = p.x - prev.x;
+      const vy = p.y - prev.y;
+      const d = Math.hypot(vx, vy);
+      if(d > 0.0001){
+        dirX += vx / d;
+        dirY += vy / d;
+        distSum += d;
+        distCount += 1;
+      }
+    }
+    if(next){
+      const vx = next.x - p.x;
+      const vy = next.y - p.y;
+      const d = Math.hypot(vx, vy);
+      if(d > 0.0001){
+        dirX += vx / d;
+        dirY += vy / d;
+        distSum += d;
+        distCount += 1;
+      }
+    }
+
+    const dirLen = Math.hypot(dirX, dirY);
+    if(dirLen <= 0.0001){
+      dirX = 1;
+      dirY = 0;
+    }else{
+      dirX /= dirLen;
+      dirY /= dirLen;
+    }
+
+    const avgNeighborDist = distCount ? (distSum / distCount) : 36;
+    const handleLen = Math.max(12, Math.min(56, avgNeighborDist * 0.35));
+
+    p.inX = p.x - (dirX * handleLen);
+    p.inY = p.y - (dirY * handleLen);
+    p.outX = p.x + (dirX * handleLen);
+    p.outY = p.y + (dirY * handleLen);
+    p.broken = false;
+  }
+
   function normalizePenPoints(raw){
     const defaults = [
       { x: 220, y: 160, inX: 180, inY: 130, outX: 260, outY: 130 },
@@ -1662,6 +1736,7 @@
         name: "Path 01",
         points: clonePenPoints(normalizePenPoints(node.params.points)),
         closed: Boolean(node.params.closed),
+        isHole: false,
         fillColor: String(node.params.fillColor || "#ffffff"),
         fillOpacity: Math.max(0, Math.min(1, Number.isFinite(Number(node.params.fillOpacity)) ? Number(node.params.fillOpacity) : 1)),
         strokeColor: String(node.params.strokeColor || "#ffffff"),
@@ -1696,6 +1771,7 @@
       name: String(path.name || ("Path " + String(i + 1).padStart(2, "0"))),
       points: normalizePenPoints(path.points || []),
       closed: Boolean(path.closed),
+      isHole: Boolean(path.isHole),
       fillColor: String(path.fillColor || "#ffffff"),
       fillOpacity: Math.max(0, Math.min(1, Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 1)),
       strokeColor: String(path.strokeColor || "#ffffff"),
@@ -1717,6 +1793,7 @@
     if(!Array.isArray(paths) || !paths.length){
       node.params.paths = [{
         name: "Path 01", points: [], closed: false,
+        isHole: false,
         fillColor: "#ffffff", fillOpacity: 1,
         strokeColor: "#ffffff", strokeWidth: 2, strokeOpacity: 1,
         strokeLinecap: "round", strokeTaper: "none",
@@ -2146,9 +2223,9 @@
           const sel = selectedIndexSet.has(i);
           lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.inX}" y2="${p.inY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2" stroke-linecap="round"/>`);
           lines.push(`<line x1="${p.x}" y1="${p.y}" x2="${p.outX}" y2="${p.outY}" stroke="${sel?"rgba(191,214,255,.92)":"rgba(150,180,255,.58)"}" stroke-width="1.2" stroke-linecap="round"/>`);
-          dots.push(`<circle cx="${p.inX}" cy="${p.inY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.outX}" cy="${p.outY}" r="4.2" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="1.2"/>`);
-          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?6.6:5.4}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.5"/>`);
+          dots.push(`<circle cx="${p.inX}" cy="${p.inY}" r="3.15" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="0.9"/>`);
+          dots.push(`<circle cx="${p.outX}" cy="${p.outY}" r="3.15" fill="${sel?"#c5dbff":"#7ea9ef"}" stroke="#0b1220" stroke-width="0.9"/>`);
+          dots.push(`<circle cx="${p.x}" cy="${p.y}" r="${sel?4.95:4.05}" fill="${sel?"#ffb347":"#f7d39b"}" stroke="#0b1220" stroke-width="1.125"/>`);
         }
 
         const selectionBounds = !multiPathSelection ? getPenSelectionBounds(penNode, path.points, selectedIndices) : null;
@@ -2160,18 +2237,18 @@
           const boxHeight = selectionBounds.height * scale;
           gizmos.push(`<rect x="${min.x}" y="${min.y}" width="${boxWidth}" height="${boxHeight}" fill="rgba(122, 162, 255, .06)" stroke="rgba(151, 189, 255, .92)" stroke-width="1.3" stroke-dasharray="6 4" rx="6"/>`);
           gizmos.push(`<line x1="${topCenter.x}" y1="${topCenter.y}" x2="${rotate.x}" y2="${rotate.y}" stroke="rgba(151, 189, 255, .92)" stroke-width="1.2" stroke-linecap="round"/>`);
-          gizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="5.4" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.2"/>`);
+          gizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="4.05" fill="#9dc2ff" stroke="#0b1220" stroke-width="0.9"/>`);
           for(const corner of Object.values(selectionBounds.corners)){
             const c = toScreenCoord(corner.x, corner.y);
-            gizmos.push(`<rect x="${c.x - 4.5}" y="${c.y - 4.5}" width="9" height="9" rx="2.2" fill="#fef3c7" stroke="#0b1220" stroke-width="1.2"/>`);
+            gizmos.push(`<rect x="${c.x - 3.375}" y="${c.y - 3.375}" width="6.75" height="6.75" rx="1.65" fill="#fef3c7" stroke="#0b1220" stroke-width="0.9"/>`);
           }
         }
 
         const closeHint = shouldShowPenCloseHint(penNode, path, penCanvasState.hoverCanvas);
         if(closeHint){
           const first = toScreenCoord(closeHint.first.x, closeHint.first.y);
-          dots.push(`<circle cx="${first.x}" cy="${first.y}" r="9.5" fill="none" stroke="rgba(255,226,138,.95)" stroke-width="1.8" stroke-dasharray="2 2"/>`);
-          dots.push(`<circle cx="${first.x + 11}" cy="${first.y - 11}" r="3.1" fill="#ffe28a" stroke="#0b1220" stroke-width="1"/>`);
+          dots.push(`<circle cx="${first.x}" cy="${first.y}" r="7.125" fill="none" stroke="rgba(255,226,138,.95)" stroke-width="1.35" stroke-dasharray="2 2"/>`);
+          dots.push(`<circle cx="${first.x + 8.25}" cy="${first.y - 8.25}" r="2.325" fill="#ffe28a" stroke="#0b1220" stroke-width="0.75"/>`);
         }
       }
     }
@@ -2184,10 +2261,10 @@
       const boxHeight = selectedPathBounds.height * scale;
       pathSelectionGizmos.push(`<rect x="${min.x}" y="${min.y}" width="${boxWidth}" height="${boxHeight}" fill="rgba(122, 162, 255, .05)" stroke="rgba(151, 189, 255, .98)" stroke-width="1.6" stroke-dasharray="7 5" rx="7"/>`);
       pathSelectionGizmos.push(`<line x1="${topCenter.x}" y1="${topCenter.y}" x2="${rotate.x}" y2="${rotate.y}" stroke="rgba(151, 189, 255, .98)" stroke-width="1.5" stroke-linecap="round"/>`);
-      pathSelectionGizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="6.2" fill="#9dc2ff" stroke="#0b1220" stroke-width="1.3"/>`);
+      pathSelectionGizmos.push(`<circle cx="${rotate.x}" cy="${rotate.y}" r="4.65" fill="#9dc2ff" stroke="#0b1220" stroke-width="0.975"/>`);
       for(const corner of Object.values(selectedPathBounds.corners || {})){
         const c = toScreenCoord(corner.x, corner.y);
-        pathSelectionGizmos.push(`<rect x="${c.x - 5.5}" y="${c.y - 5.5}" width="11" height="11" rx="2.6" fill="#fef3c7" stroke="#0b1220" stroke-width="1.3"/>`);
+        pathSelectionGizmos.push(`<rect x="${c.x - 4.125}" y="${c.y - 4.125}" width="8.25" height="8.25" rx="1.95" fill="#fef3c7" stroke="#0b1220" stroke-width="0.975"/>`);
       }
     }
 
@@ -2547,6 +2624,27 @@
           e.preventDefault();
           return;
         }
+      }
+
+      if(hit.kind === "anchor" && e.altKey && points[hit.index] && hasCollapsedPenHandles(points[hit.index])){
+        pushHistory();
+        seedPenHandlesForAnchor(points, hit.index, !!activePath.closed);
+        activePath.points = points;
+        setPenSelectedIndices(selectedNode, [hit.index], activePathIndex);
+        evaluateAndRender();
+        beginPenCanvasInteraction(e.pointerId, selectedNode.id, activePathIndex, "newPointHandle", hit.index, canvasPt, points, [hit.index], null);
+        drawPenCanvasOverlay();
+        return;
+      }
+
+      if(hit.kind === "anchor" && e.altKey && points[hit.index] && !hasCollapsedPenHandles(points[hit.index])){
+        pushHistory();
+        collapsePenHandles(points[hit.index]);
+        activePath.points = points;
+        setPenSelectedIndices(selectedNode, [hit.index], activePathIndex);
+        evaluateAndRender();
+        drawPenCanvasOverlay();
+        return;
       }
 
       if(hit.kind === "anchor" && selectedIndices.length >= 2 && selectedIndexSet.has(hit.index)){
@@ -5099,7 +5197,7 @@ const NODE_TIPS = {
   Pen: [
     "<strong>Pen</strong> - Draw and edit custom bezier shapes directly on the preview.",
     "<strong>Shortcuts:</strong><br>Left-click add/select point<br>Shift-click/drag add to selection<br>Ctrl-click selected point deselects<br>Right-click point deletes",
-    "<strong>More:</strong><br>Alt-drag inside bounds moves full shape<br>Alt-click handle toggles straight/custom<br>Esc clears group selection"
+    "<strong>More:</strong><br>Alt-drag a dot with collapsed handles to create bezier handles<br>Alt-click a dot with handles to collapse them<br>Alt-click handle toggles straight/custom<br>Alt-drag inside bounds moves full shape<br>Esc clears group selection"
   ],
   Transform: [
     "<strong>Transform</strong> - Moves, scales, and rotates a layer.",
@@ -5123,10 +5221,20 @@ const NODE_TIPS = {
     "<em>Outer</em>: color-tinted drop-shadow glow. <em>Luminance</em>: brightens highlights and blooms them.",
     "<em>in</em> -> the layer to glow."
   ],
+  Blur: [
+    "<strong>Blur</strong> - Applies a blur effect to any layer.",
+    "Use Radius to control softness. Higher values create stronger blur.",
+    "<em>in</em> -> the layer to blur (image, pen, text, composite, etc.)."
+  ],
   Erode: [
     "<strong>Erode</strong> - Shrinks or expands alpha edges.",
     "Negative Amount erodes (shrinks). Positive Amount dilates (expands).",
     "<em>in</em> -> any layer with alpha, including Pen paths and PNG images."
+  ],
+  Mirror: [
+    "<strong>Mirror</strong> - Mirrors a layer around the canvas center line.",
+    "Set Mirror Axis to X or Y.",
+    "<em>in</em> -> the layer to mirror."
   ],
   ColorCorrect: [
     "<strong>Color Correct</strong> - Adjusts color grading on any layer.",
@@ -5210,6 +5318,7 @@ const HELP_GENERAL_PAGES = {
           <li><kbd>Ctrl/Cmd + V</kbd> paste copied node(s).</li>
           <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> delete selected node(s) or selected Pen points.</li>
           <li><kbd>B</kbd> toggle bypass on selected node(s).</li>
+          <li><kbd>I</kbd> open the color picker (eyedropper).</li>
           <li><kbd>Esc</kbd> close Help, or clear Pen multi-point selection.</li>
           <li><kbd>Ctrl/Cmd + R</kbd> is disabled to protect your project from accidental reload.</li>
         </ul>
@@ -5221,6 +5330,7 @@ const HELP_GENERAL_PAGES = {
           <li><kbd>Tab</kbd> open node search to add a node.</li>
           <li><kbd>O</kbd> center the editor view on the Output node.</li>
           <li><kbd>Shift + O</kbd> quick-connect the selected node to Output.</li>
+          <li><kbd>U</kbd> center the editor view on the selected node.</li>
           <li><kbd>Space</kbd> + drag pan the node editor (only when zoomed in).</li>
           <li>Mouse wheel zoom in / out.</li>
           <li>Right-click a wire removes it.</li>
@@ -5262,8 +5372,10 @@ const HELP_GENERAL_PAGES = {
           <li><kbd>Ctrl/Cmd</kbd>-click a selected anchor deselects it.</li>
           <li>Right-click a point deletes it.</li>
           <li>Double-click the first point of an open path closes it.</li>
-          <li><kbd>Alt</kbd>-drag inside path bounds moves the whole path.</li>
+          <li><kbd>Alt</kbd>-drag an anchor with collapsed handles to create bezier handles.</li>
+          <li><kbd>Alt</kbd>-click an anchor with handles to collapse them.</li>
           <li><kbd>Alt</kbd>-click a bezier handle breaks / rejoins smooth handles.</li>
+          <li><kbd>Alt</kbd>-drag inside path bounds moves the whole path.</li>
           <li><kbd>Esc</kbd> clears the current multi-point selection.</li>
           <li>With 2+ points selected: rotate handle, scale corner handles, or drag inside box to move the group.</li>
           <li>Pen paths can be drawn and positioned outside the canvas — they will be clipped in output.</li>
@@ -5374,7 +5486,9 @@ const NODE_CATEGORIES = {
   MotionIn: "Motion",
   Motion: "Motion",
   MotionOut: "Motion",
+  Blur: "Operations",
   Erode: "Operations",
+  Mirror: "Operations",
   Glow: "Operations",
   Composite: "Operations",
   ColorCorrect: "Operations",
@@ -7232,6 +7346,19 @@ async function evaluate(){
       .trim();
   }
 
+  function isFontFamilyRegistered(fontFamily){
+    const target = sanitizeFontFamilyName(fontFamily).toLowerCase();
+    if(!target || !document.fonts || typeof document.fonts.values !== "function") return false;
+    try{
+      for(const face of document.fonts.values()){
+        if(!face) continue;
+        const family = sanitizeFontFamilyName(face.family || "").toLowerCase();
+        if(family === target) return true;
+      }
+    }catch(_){ }
+    return false;
+  }
+
   async function ensureCustomFontLoaded(fontFamily, dataUrl){
     const family = sanitizeFontFamilyName(fontFamily);
     const src = String(dataUrl || "").trim();
@@ -7241,9 +7368,11 @@ async function evaluate(){
     const key = `${family}::${src.slice(0, 96)}`;
     if(customFontReadySet.has(key)) return true;
 
+    // document.fonts.check alone can return true while fallback fonts are used.
+    // Only short-circuit when we can confirm this family is already registered.
     try{
       const checkFamily = family.replace(/"/g, '\\"');
-      if(document.fonts.check(`12px "${checkFamily}"`)){
+      if(isFontFamilyRegistered(family) && document.fonts.check(`12px "${checkFamily}"`)){
         customFontReadySet.add(key);
         return true;
       }
@@ -7610,7 +7739,7 @@ async function evaluate(){
         <div class="smProps">
           <div class="smPropsTitle">&#x25B8; ${escapeAttr(ap.name || "")}</div>
           <div class="row"><label>Name</label><input type="text" data-sm-prop="name" value="${escapeAttr(ap.name || "")}" placeholder="Path name" /></div>
-          <div class="row"><label>Closed</label><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /></div>
+          <div class="row"><label>Flags</label><div style="display:flex; align-items:center; gap:12px; justify-self:start; justify-content:flex-start;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" data-sm-prop="closed" ${ap.closed ? "checked" : ""} /><span style="font-size:11px;color:#a9b8d4;">Closed</span></label><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" data-sm-prop="isHole" ${ap.isHole ? "checked" : ""} /><span style="font-size:11px;color:#a9b8d4;">Boolean</span></label></div></div>
           <div class="row"><label>Fill Color</label><input type="color" data-sm-prop="fillColor" value="${escapeAttr(ap.fillColor || "#ffffff")}" /></div>
           <div class="row"><label>Fill Opacity</label><div class="smRangePair"><input type="number" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 1}" /><input type="range" data-sm-prop="fillOpacity" min="0" max="1" step="0.01" value="${ap.fillOpacity ?? 1}" /></div></div>
           <div class="row"><label>Stroke Color</label><input type="color" data-sm-prop="strokeColor" value="${escapeAttr(ap.strokeColor || "#ffffff")}" /></div>
@@ -7632,8 +7761,11 @@ async function evaluate(){
           <div class="smActions">
             <button type="button" data-sm-new class="smActionBtn">+ New Path</button>
             <button type="button" data-sm-dupe class="smActionBtn">Duplicate</button>
-            <button type="button" data-sm-move-up class="smActionBtn" title="Move selected path(s) up">Up</button>
-            <button type="button" data-sm-move-down class="smActionBtn" title="Move selected path(s) down">Down</button>
+            <div class="smMiniActions">
+              <button type="button" data-sm-pick-color class="smActionBtn" title="Pick fill color (I)" aria-label="Pick fill color">🧪</button>
+              <button type="button" data-sm-move-up class="smActionBtn" title="Move selected path(s) up">Up</button>
+              <button type="button" data-sm-move-down class="smActionBtn" title="Move selected path(s) down">Down</button>
+            </div>
           </div>
           ${propsHtml}
         </div>
@@ -8044,12 +8176,47 @@ async function evaluate(){
 
     inspectorBody.querySelectorAll('[data-comp-input-order-box]').forEach(box => {
       let draggingPort = null;
+      let dragInsertIndex = -1;
 
       const clearDragVisuals = () => {
         box.querySelectorAll('.compInputItem').forEach(item => {
           item.classList.remove('isDragging');
           item.classList.remove('isDragOver');
+          item.classList.remove('isDragInsertBefore');
+          item.classList.remove('isDragInsertAfter');
         });
+        dragInsertIndex = -1;
+      };
+
+      const updateDragInsertVisual = (clientY) => {
+        const items = [...box.querySelectorAll('.compInputItem')];
+        if(!items.length) return;
+
+        let insertIndex = items.length;
+        for(let i = 0; i < items.length; i++){
+          const rect = items[i].getBoundingClientRect();
+          const midY = rect.top + (rect.height / 2);
+          if(clientY < midY){
+            insertIndex = i;
+            break;
+          }
+        }
+
+        dragInsertIndex = insertIndex;
+
+        items.forEach(item => {
+          item.classList.remove('isDragOver');
+          item.classList.remove('isDragInsertBefore');
+          item.classList.remove('isDragInsertAfter');
+        });
+
+        if(insertIndex <= 0){
+          items[0].classList.add('isDragOver', 'isDragInsertBefore');
+        }else if(insertIndex >= items.length){
+          items[items.length - 1].classList.add('isDragOver', 'isDragInsertAfter');
+        }else{
+          items[insertIndex].classList.add('isDragOver', 'isDragInsertBefore');
+        }
       };
 
       box.querySelectorAll('[data-comp-input-port]').forEach(item => {
@@ -8066,41 +8233,51 @@ async function evaluate(){
           draggingPort = null;
           clearDragVisuals();
         });
+      });
 
-        item.addEventListener('dragover', (ev) => {
-          if(!draggingPort) return;
-          ev.preventDefault();
-          item.classList.add('isDragOver');
-          if(ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-        });
+      box.addEventListener('dragover', (ev) => {
+        if(!draggingPort) return;
+        ev.preventDefault();
+        updateDragInsertVisual(ev.clientY);
+        if(ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+      });
 
-        item.addEventListener('dragleave', () => {
-          item.classList.remove('isDragOver');
-        });
+      box.addEventListener('dragleave', (ev) => {
+        if(box.contains(ev.relatedTarget)) return;
+        clearDragVisuals();
+      });
 
-        item.addEventListener('drop', (ev) => {
-          ev.preventDefault();
-          item.classList.remove('isDragOver');
-          const targetPort = item.getAttribute('data-comp-input-port');
-          if(!draggingPort || !targetPort || draggingPort === targetPort) return;
+      box.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        if(!draggingPort) return;
 
-          const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
-            ? [...node.params.inputPorts]
-            : ["a", "b"];
+        const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
+          ? [...node.params.inputPorts]
+          : ["a", "b"];
 
-          const fromIdx = currentPorts.indexOf(draggingPort);
-          const toIdx = currentPorts.indexOf(targetPort);
-          if(fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+        const fromIdx = currentPorts.indexOf(draggingPort);
+        let insertIdx = dragInsertIndex;
+        if(fromIdx < 0 || insertIdx < 0) {
+          clearDragVisuals();
+          return;
+        }
 
-          pushHistory();
-          const [moved] = currentPorts.splice(fromIdx, 1);
-          currentPorts.splice(toIdx, 0, moved);
-          node.params.inputPorts = currentPorts;
+        insertIdx = clamp(insertIdx, 0, currentPorts.length);
+        if(fromIdx < insertIdx) insertIdx -= 1;
+        if(fromIdx === insertIdx) {
+          clearDragVisuals();
+          return;
+        }
 
-          render();
-          evaluateAndRender();
-          renderInspector();
-        });
+        pushHistory();
+        const [moved] = currentPorts.splice(fromIdx, 1);
+        currentPorts.splice(insertIdx, 0, moved);
+        node.params.inputPorts = currentPorts;
+
+        clearDragVisuals();
+        render();
+        evaluateAndRender();
+        renderInspector();
       });
     });
 
@@ -8207,7 +8384,7 @@ async function evaluate(){
             const ch = Math.max(1, Math.round(Number(node.params.customHeight) || 0));
             if(!cw || !ch){
               if(opts.commit) toast("Custom size must be greater than 0 px.");
-              renderInspector();
+              if(opts.commit) renderInspector();
               return;
             }
             node.params.customWidth = cw;
@@ -8216,7 +8393,8 @@ async function evaluate(){
 
           const effectiveRatio = syncOutputRatio(node);
           applyOutputRatio(effectiveRatio);
-          renderInspector();
+          // Only re-render inspector when edit is committed (on blur/change), not during typing
+          if(opts.commit) renderInspector();
         }
 
         if(node.type === "Gradient" && k === "type"){
@@ -8932,6 +9110,7 @@ async function evaluate(){
           name: nextPathName(),
           points: [],
           closed: false,
+          isHole: false,
           fillColor: "#ffffff",
           fillOpacity: 1,
           strokeColor: "#ffffff",
@@ -8976,6 +9155,16 @@ async function evaluate(){
       sm.querySelector('[data-sm-move-down]')?.addEventListener('click', () => {
         if(!moveSelectedPaths(-1)) return;
         syncAndRefresh();
+      });
+
+      sm.querySelector('[data-sm-pick-color]')?.addEventListener('click', async () => {
+        const ap = getActivePath();
+        if(!ap) return;
+        const picked = await pickColorWithEyedropper();
+        if(!picked) return;
+        ap.fillColor = picked;
+        syncAndRefresh();
+        toast(`Fill color: ${picked}`);
       });
 
       sm.querySelectorAll('[data-sm-scrub]').forEach(btn => {
@@ -10985,6 +11174,35 @@ function centerEditorOnOutputNode(){
   toast("Centered on Output node (zoom reset).");
 }
 
+async function pickColorWithEyedropper(){
+  if(typeof window.EyeDropper !== "function"){
+    toast("Color picker is not supported in this browser.");
+    return null;
+  }
+  try{
+    const result = await (new window.EyeDropper()).open();
+    const hex = String(result?.sRGBHex || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : null;
+  }catch(err){
+    if(err?.name !== "AbortError"){
+      toast("Color picker failed.");
+    }
+    return null;
+  }
+}
+
+function applyPickedColorToSelectedPenPath(hex, commit = true){
+  const selectedNode = getSelectedPenNode();
+  const activePath = selectedNode ? getPenActivePath(selectedNode) : null;
+  if(!selectedNode || !activePath) return false;
+  if(commit) pushHistory();
+  activePath.fillColor = hex;
+  evaluateAndRender();
+  renderInspector();
+  drawPenCanvasOverlay();
+  return true;
+}
+
 // Delete / Backspace key handler
 window.addEventListener("keydown", (e) => {
   if(helpVisible) return;
@@ -11067,13 +11285,40 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-// I — jump editor view to the selected node
+// I — color picker (eyedropper)
 window.addEventListener("keydown", (e) => {
   if(helpVisible) return;
   if(isTypingTarget(e.target)) return;
   if(isNodeSearchOpen()) return;
   if(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
   if(e.key.toLowerCase() !== "i") return;
+
+  e.preventDefault();
+  if(e.repeat) return;
+
+  (async () => {
+    const picked = await pickColorWithEyedropper();
+    if(!picked) return;
+    if(applyPickedColorToSelectedPenPath(picked, true)){
+      toast(`Fill color: ${picked}`);
+      return;
+    }
+    try{
+      await navigator.clipboard.writeText(picked);
+      toast(`Picked color copied: ${picked}`);
+    }catch(_){
+      toast(`Picked color: ${picked}`);
+    }
+  })();
+});
+
+// U — jump editor view to the selected node
+window.addEventListener("keydown", (e) => {
+  if(helpVisible) return;
+  if(isTypingTarget(e.target)) return;
+  if(isNodeSearchOpen()) return;
+  if(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if(e.key.toLowerCase() !== "u") return;
 
   const node = getSelectedNode();
   if(!node){
