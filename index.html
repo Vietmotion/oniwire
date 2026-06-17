@@ -7199,6 +7199,29 @@ async function evaluate(){
     });
   }
 
+  function dataUrlToArrayBuffer(dataUrl){
+    const src = String(dataUrl || "").trim();
+    if(!src.startsWith("data:")) return null;
+    const comma = src.indexOf(",");
+    if(comma < 0) return null;
+    const meta = src.slice(0, comma).toLowerCase();
+    const payload = src.slice(comma + 1);
+    if(!payload) return null;
+    try{
+      if(meta.includes(";base64")){
+        const bin = atob(payload);
+        const bytes = new Uint8Array(bin.length);
+        for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+      }
+      const decoded = decodeURIComponent(payload);
+      const bytes = new TextEncoder().encode(decoded);
+      return bytes.buffer;
+    }catch(_){
+      return null;
+    }
+  }
+
   const customFontReadySet = new Set();
   const customFontPendingMap = new Map();
 
@@ -7231,7 +7254,10 @@ async function evaluate(){
 
     const loadPromise = (async () => {
       try{
-        const face = new FontFace(family, `url(${src})`);
+        const buffer = dataUrlToArrayBuffer(src);
+        const face = buffer
+          ? new FontFace(family, buffer)
+          : new FontFace(family, `url("${src}")`);
         const loadedFace = await face.load();
         document.fonts.add(loadedFace);
         customFontReadySet.add(key);
