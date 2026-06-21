@@ -80,6 +80,12 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
     const amt = clamp(amount / 100, 0, 1);
     const tex = clamp(texture / 100, 0, 1);
 
+    if(preset === "halftone"){
+      const con = 1.1 + 1.9 * amt + 0.35 * tex;
+      const bri = 1.02 + 0.12 * amt;
+      return `grayscale(1) contrast(${con.toFixed(3)}) brightness(${bri.toFixed(3)})`;
+    }
+
     if(preset === "dreamy"){
       const sat = 1 + 0.45 * amt;
       const con = 1 - 0.2 * amt;
@@ -322,6 +328,7 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       effectCoverage: "composition",
       amount: 70,
       texture: 45,
+      halfToneSize: 10,
       glitchShift: 8,
       vignette: 20,
       bruteShadow: "#162447",
@@ -364,7 +371,7 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       const normalizedRawPreset = rawPreset === "brutalism" ? "brutal" : rawPreset;
       const mode = rawLookupPreset === "brutalism"
         ? "brutal"
-        : ((normalizedRawPreset === "lookup" || normalizedRawPreset === "brutal" || normalizedRawPreset === "glitch")
+        : ((normalizedRawPreset === "lookup" || normalizedRawPreset === "brutal" || normalizedRawPreset === "glitch" || normalizedRawPreset === "halftone")
           ? normalizedRawPreset
           : "lookup");
       const lookupPreset = rawLookupPreset === "brutalism"
@@ -374,7 +381,7 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
           : (LOOKUP_PRESET_SET.has(normalizedRawPreset) ? normalizedRawPreset : "comic"));
       const activePreset = mode === "lookup"
         ? lookupPreset
-        : (mode === "glitch" ? "glitch" : "brutal");
+        : (mode === "glitch" ? "glitch" : (mode === "halftone" ? "halftone" : "brutal"));
 
       // Migrate older Stylize nodes where preset was directly "noir", "retro", etc.
       if(node.params.preset !== mode) node.params.preset = mode;
@@ -416,6 +423,28 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
 
       wrap.appendChild(base);
       fxFrame.appendChild(stylized);
+
+      if(mode === "halftone"){
+        const dotSize = clamp(Number(node.params.halfToneSize) || 10, 2, 64);
+        const tex = clamp(texture / 100, 0, 1);
+        const dotCore = (26 + tex * 20).toFixed(2);
+        const dotFade = Math.min(96, Number(dotCore) + 18).toFixed(2);
+
+        const halfToneOverlay = document.createElement("div");
+        halfToneOverlay.style.position = "absolute";
+        halfToneOverlay.style.left = `${-bx}px`;
+        halfToneOverlay.style.top = `${-by}px`;
+        halfToneOverlay.style.width = `${canvasWidth}px`;
+        halfToneOverlay.style.height = `${canvasHeight}px`;
+        halfToneOverlay.style.pointerEvents = "none";
+        halfToneOverlay.style.mixBlendMode = "multiply";
+        halfToneOverlay.style.opacity = String((0.25 + mix * 0.55).toFixed(3));
+        halfToneOverlay.style.backgroundImage = `radial-gradient(circle, rgba(0,0,0,1) 0 ${dotCore}%, rgba(0,0,0,0) ${dotFade}%)`;
+        halfToneOverlay.style.backgroundSize = `${dotSize}px ${dotSize}px`;
+        halfToneOverlay.style.backgroundPosition = "0 0";
+
+        fxFrame.appendChild(halfToneOverlay);
+      }
 
       if(mode === "glitch"){
         const shift = clamp(Number(node.params.glitchShift) || 0, 0, 30);
@@ -530,7 +559,8 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
         options: [
           { value: "lookup", label: "Lookup filter" },
           { value: "brutal", label: "Brutal" },
-          { value: "glitch", label: "Glitch" }
+          { value: "glitch", label: "Glitch" },
+          { value: "halftone", label: "Half-tone" }
         ]
       },
       {
@@ -551,6 +581,7 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       },
       { k: "amount", type: "range", label: "Amount", min: 0, max: 100, step: 1 },
       { k: "texture", type: "range", label: "Texture", min: 0, max: 100, step: 1 },
+      { k: "halfToneSize", type: "range", label: "Half-tone Size", min: 2, max: 64, step: 1, showIf: { k: "preset", equals: "halftone" } },
       { k: "glitchShift", type: "range", label: "Glitch Shift", min: 0, max: 30, step: 1, showIf: { k: "preset", equals: "glitch" } },
       { k: "bruteStops", type: "gradientMap3", label: "Gradient Map", showIf: (n) => String(n?.params?.preset || "") === "brutal", stops: [
         { pos: 0, color: "#162447" },

@@ -87,6 +87,97 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
     return keyframes;
   }
 
+  function buildBackAndForthCss(distance, axis, nodeId){
+    const startX = axis === "horizontal" ? -distance : 0;
+    const startY = axis === "vertical" ? -distance : 0;
+    const endX = axis === "horizontal" ? distance : 0;
+    const endY = axis === "vertical" ? distance : 0;
+    return injectKeyframes(nodeId, "back-and-forth",
+      `@keyframes oniwire-motion-back-and-forth-${nodeId}{` +
+      `0%{transform:translate(${startX.toFixed(2)}px,${startY.toFixed(2)}px)}` +
+      `50%{transform:translate(${endX.toFixed(2)}px,${endY.toFixed(2)}px)}` +
+      `100%{transform:translate(${startX.toFixed(2)}px,${startY.toFixed(2)}px)}}`
+    );
+  }
+
+  function createSwayPivotMarker(pivotXPct, pivotYPct){
+    const marker = document.createElement("div");
+    marker.style.position = "absolute";
+    marker.style.left = `${pivotXPct}%`;
+    marker.style.top = `${pivotYPct}%`;
+    marker.style.width = "12px";
+    marker.style.height = "12px";
+    marker.style.marginLeft = "-6px";
+    marker.style.marginTop = "-6px";
+    marker.style.border = "2px solid rgba(255,255,255,0.95)";
+    marker.style.borderRadius = "999px";
+    marker.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.55), 0 0 10px rgba(0,210,255,0.75)";
+    marker.style.background = "rgba(0,210,255,0.22)";
+    marker.style.pointerEvents = "none";
+    marker.style.zIndex = "12";
+
+    const hLine = document.createElement("div");
+    hLine.style.position = "absolute";
+    hLine.style.left = "-8px";
+    hLine.style.top = "4px";
+    hLine.style.width = "24px";
+    hLine.style.height = "2px";
+    hLine.style.background = "rgba(255,255,255,0.95)";
+    hLine.style.pointerEvents = "none";
+
+    const vLine = document.createElement("div");
+    vLine.style.position = "absolute";
+    vLine.style.left = "4px";
+    vLine.style.top = "-8px";
+    vLine.style.width = "2px";
+    vLine.style.height = "24px";
+    vLine.style.background = "rgba(255,255,255,0.95)";
+    vLine.style.pointerEvents = "none";
+
+    marker.appendChild(hLine);
+    marker.appendChild(vLine);
+    return marker;
+  }
+
+  function normalizeSwayEase(value){
+    const raw = String(value || "ease-in-out").toLowerCase();
+    if(raw === "linear" || raw === "ease-in" || raw === "ease-out" || raw === "soft") return raw;
+    return "ease-in-out";
+  }
+
+  function resolveSwayTimingFunction(ease){
+    if(ease === "linear") return "linear";
+    if(ease === "ease-in") return "cubic-bezier(0.42, 0, 1, 1)";
+    if(ease === "ease-out") return "cubic-bezier(0, 0, 0.58, 1)";
+    if(ease === "soft") return "cubic-bezier(0.35, 0.05, 0.2, 1)";
+    return "ease-in-out";
+  }
+
+  function easeScalar(t, ease){
+    const x = clamp(Number(t) || 0, 0, 1);
+    if(ease === "linear") return x;
+    if(ease === "ease-in") return x * x * x;
+    if(ease === "ease-out"){
+      const inv = 1 - x;
+      return 1 - (inv * inv * inv);
+    }
+    if(ease === "soft") return 0.5 - (0.5 * Math.cos(Math.PI * x));
+    // ease-in-out
+    return x < 0.5
+      ? (4 * x * x * x)
+      : (1 - Math.pow(-2 * x + 2, 3) / 2);
+  }
+
+  function computeSwayAngle(localSec, cycleSeconds, maxAngle, ease){
+    const cyclePos = ((localSec / cycleSeconds) % 1 + 1) % 1;
+    const legPos = cyclePos < 0.5 ? (cyclePos * 2) : ((cyclePos - 0.5) * 2);
+    const eased = easeScalar(legPos, ease);
+    if(cyclePos < 0.5){
+      return (-maxAngle) + ((maxAngle * 2) * eased);
+    }
+    return maxAngle - ((maxAngle * 2) * eased);
+  }
+
   function resolveDuration(){
     const seconds = Number(typeof getOutputDuration === "function" ? getOutputDuration() : 5) || 5;
     return Math.max(0.5, seconds);
@@ -117,6 +208,12 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
     const direction = String(node.params.direction || "clockwise").toLowerCase() === "counter-clockwise"
       ? "counter-clockwise"
       : "clockwise";
+    const axis = String(node.params.axis || "horizontal").toLowerCase() === "vertical"
+      ? "vertical"
+      : "horizontal";
+    const swayEase = normalizeSwayEase(node.params.ease);
+    const swayPivotX = clamp(Number(node.params.pivotX) || 0, -100, 100);
+    const swayPivotY = clamp(Number(node.params.pivotY) || 0, -100, 100);
     const outputDuration = resolveDuration();
     const actDelaySec = clamp(Number(upstreamTimeline.intro) || 0, 0, Math.max(0, outputDuration - 0.05));
     const useDelayedAct = actDelaySec > 0;
@@ -206,6 +303,63 @@ function createOniwireMotionHelpers({ ensureMotionStyles, measureLayerBounds, cl
           frames += `${pct.toFixed(2)}%{transform:translate(${x.toFixed(2)}px,${y.toFixed(2)}px)}`;
         }
         frames += `100%{transform:translate(0px,0px)}`;
+        const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
+        motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
+      }
+    }else if(mode === "back-and-forth"){
+      const axisSize = bounds
+        ? (axis === "vertical" ? Math.max(1, bounds.height) : Math.max(1, bounds.width))
+        : 100;
+      const distance = Math.max(0, axisSize * amount);
+      if(!useDelayedAct){
+        const kfName = buildBackAndForthCss(distance, axis, node.id);
+        motionLayer.style.animation = `${kfName} ${cycleSeconds}s ease-in-out infinite`;
+      }else{
+        const cycleDur = outputDuration;
+        const holdPct = (actDelaySec / cycleDur) * 100;
+        const activeDur = Math.max(0.05, cycleDur - actDelaySec);
+        const steps = Math.max(24, Math.ceil(activeDur * 60));
+        let frames = `0%{transform:translate(0px,0px)}${holdPct.toFixed(2)}%{transform:translate(0px,0px)}`;
+        for(let i = 0; i <= steps; i++){
+          const localSec = (i / steps) * activeDur;
+          const wave = Math.sin((2 * Math.PI * localSec) / cycleSeconds);
+          const x = axis === "horizontal" ? distance * wave : 0;
+          const y = axis === "vertical" ? distance * wave : 0;
+          const pct = holdPct + ((100 - holdPct) * (i / steps));
+          frames += `${pct.toFixed(2)}%{transform:translate(${x.toFixed(2)}px,${y.toFixed(2)}px)}`;
+        }
+        frames += `100%{transform:translate(0px,0px)}`;
+        const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
+        motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
+      }
+    }else if(mode === "sway"){
+      const maxAngle = clamp(amount * 40, 0.5, 35);
+      const pivotXPct = ((swayPivotX + 100) / 2).toFixed(2);
+      const pivotYPct = ((swayPivotY + 100) / 2).toFixed(2);
+      motionLayer.style.transformOrigin = `${pivotXPct}% ${pivotYPct}%`;
+      wrap.appendChild(createSwayPivotMarker(pivotXPct, pivotYPct));
+      if(!useDelayedAct){
+        const timing = resolveSwayTimingFunction(swayEase);
+        const kfName = injectKeyframes(node.id, "sway",
+          `@keyframes oniwire-motion-sway-${node.id}{` +
+          `0%{transform:rotate(${-maxAngle.toFixed(3)}deg)}` +
+          `50%{transform:rotate(${maxAngle.toFixed(3)}deg)}` +
+          `100%{transform:rotate(${-maxAngle.toFixed(3)}deg)}}`
+        );
+        motionLayer.style.animation = `${kfName} ${cycleSeconds}s ${timing} infinite`;
+      }else{
+        const cycleDur = outputDuration;
+        const holdPct = (actDelaySec / cycleDur) * 100;
+        const activeDur = Math.max(0.05, cycleDur - actDelaySec);
+        const steps = Math.max(24, Math.ceil(activeDur * 60));
+        let frames = `0%{transform:rotate(0deg)}${holdPct.toFixed(2)}%{transform:rotate(0deg)}`;
+        for(let i = 0; i <= steps; i++){
+          const localSec = (i / steps) * activeDur;
+          const angle = computeSwayAngle(localSec, cycleSeconds, maxAngle, swayEase);
+          const pct = holdPct + ((100 - holdPct) * (i / steps));
+          frames += `${pct.toFixed(2)}%{transform:rotate(${angle.toFixed(3)}deg)}`;
+        }
+        frames += `100%{transform:rotate(0deg)}`;
         const kfName = injectKeyframes(node.id, "act", `@keyframes oniwire-motion-act-${node.id}{${frames}}`);
         motionLayer.style.animation = `${kfName} ${cycleDur}s linear infinite`;
       }
@@ -415,15 +569,19 @@ window.createOniwireMotionNodeDef = function createOniwireMotionNodeDef(deps){
   return {
     inputs: ["in"],
     outputs: ["layer"],
-    defaults: { mode: "breath", amount: 0.08, speed: 1, random: 0, direction: "clockwise" },
+    defaults: { mode: "breath", amount: 0.08, speed: 1, random: 0, direction: "clockwise", axis: "horizontal", pivotX: 0, pivotY: -100, ease: "ease-in-out" },
     icon: "🫁",
     run: runMotionAct,
     inspector: () => ([
-      { k: "mode", type: "select", label: "Mode", options: ["breath", "circle", "wiggle"] },
+      { k: "mode", type: "select", label: "Mode", options: ["breath", "circle", "wiggle", { value: "back-and-forth", label: "back and forth" }, "sway"] },
+      { k: "axis", type: "select", label: "Axis", options: ["horizontal", "vertical"], showIf: { k: "mode", equals: "back-and-forth" } },
+      { k: "pivotX", type: "range", label: "Pivot X", min: -100, max: 100, step: 1, showIf: { k: "mode", equals: "sway" } },
+      { k: "pivotY", type: "range", label: "Pivot Y", min: -100, max: 100, step: 1, showIf: { k: "mode", equals: "sway" } },
       { k: "direction", type: "select", label: "Direction", options: ["clockwise", "counter-clockwise"], showIf: { k: "mode", equals: "circle" } },
       { k: "amount", type: "range", label: "Amount", min: 0, max: 0.5, step: 0.01, showIf: node => (node.params?.mode || "breath") !== "circle" },
       { k: "random", type: "range", label: "Random", min: 0, max: 1, step: 0.01, showIf: { k: "mode", equals: "wiggle" } },
-      { k: "speed", type: "range", label: "Speed", min: 0.1, max: 10, step: 0.1 }
+      { k: "speed", type: "range", label: "Speed", min: 0.1, max: 10, step: 0.1 },
+      { k: "ease", type: "select", label: "Ease", options: ["ease-in-out", "linear", "ease-in", "ease-out", "soft"], showIf: { k: "mode", equals: "sway" } }
     ])
   };
 };

@@ -4905,7 +4905,7 @@ utilsApi.initProjectUtils();
     }
 
     await waitForRenderableImages(tempDiv, timeoutMs);
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await waitForRenderFlush();
 
     let dataUrl = null;
     let simpleRenderSuccess = false;
@@ -5006,6 +5006,26 @@ utilsApi.initProjectUtils();
 
     document.body.removeChild(tempDiv);
     return dataUrl;
+  }
+
+  async function waitForRenderFlush(frames = 2){
+    const frameCount = Math.max(1, Number(frames) || 1);
+    for(let i = 0; i < frameCount; i++){
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if(settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        };
+        // requestAnimationFrame pauses in background tabs, so keep a timer fallback.
+        const timer = setTimeout(finish, 48);
+        if(document.visibilityState === "visible" && typeof requestAnimationFrame === "function"){
+          requestAnimationFrame(finish);
+        }
+      });
+    }
   }
 
   const nodeDefsApi = window.createOniwireNodeDefsApi({
@@ -9591,7 +9611,7 @@ async function evaluate(){
         }
       };
 
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await waitForRenderFlush();
 
       let capturedCanvas = null;
       const hasCssMaskInScene = sceneHasCssMask(renderRoot);
@@ -9734,7 +9754,7 @@ async function evaluate(){
       let finalBlob = await toBlobOnce(5000);
       if(!finalBlob){
         // Give browser a frame to breathe before one retry.
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await waitForRenderFlush();
         finalBlob = await toBlobOnce(5000);
       }
 
@@ -10068,7 +10088,7 @@ async function evaluate(){
     const bakedMaskedEls = disableBakeMaskedElements
       ? false
       : await bakeMaskedElementsForHtml2canvas(tmpWrap, html2canvasFn);
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await waitForRenderFlush();
 
     try{
       const capturedCanvas = await html2canvasFn(tmpWrap, {
@@ -10116,7 +10136,7 @@ async function evaluate(){
       });
     }
 
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await waitForRenderFlush();
 
     try{
       const capturedCanvas = await html2canvasFn(renderRoot, {
@@ -10181,7 +10201,7 @@ async function evaluate(){
       ]);
 
       await evaluateAndRender();
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await waitForRenderFlush();
 
       updateMp4Progress(overlay, 0, totalFrames, "Loading encoder");
       const encoderConfig = await getSupportedMp4EncoderConfig(w, h, fps);

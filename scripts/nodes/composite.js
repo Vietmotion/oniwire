@@ -16,6 +16,16 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
     return ["a", "b"];
   }
 
+  function hasStylizedMaskFilter(maskEl){
+    if(!maskEl) return false;
+    const nodes = [maskEl, ...(maskEl.querySelectorAll ? Array.from(maskEl.querySelectorAll("*")) : [])];
+    for(const el of nodes){
+      const filter = String(el?.style?.filter || "").trim().toLowerCase();
+      if(filter && filter !== "none") return true;
+    }
+    return false;
+  }
+
   return {
     inputs: (node) => [...getCompositeLayerPorts(node), "mask"],
     outputs: ["layer"],
@@ -29,7 +39,9 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
       const liveMaskEl = inputs.mask?.el || null;
       const hasAnimatedMask = hasMotionFlag(liveMaskEl);
-      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask;
+      const hasFilteredMask = hasStylizedMaskFilter(liveMaskEl);
+      // Blur/stylized masks must be captured as live matte to preserve feathered edges.
+      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask || hasFilteredMask;
       let liveMaskSourceEl = liveMaskEl;
 
       const frozenUrl = inputs.mask?.dataUrl || inputs.mask?.el?.dataset?.frozenUrl;
@@ -65,12 +77,12 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.dataset.hasMotion = "true";
       }
 
-      if(hasAnimatedMask && liveMaskEl){
+      if(isLiveMask && liveMaskEl){
         const liveMaskDriver = liveMaskEl.cloneNode(true);
         liveMaskDriver.style.position = "absolute";
         liveMaskDriver.style.inset = "0";
         liveMaskDriver.style.pointerEvents = "none";
-        liveMaskDriver.style.transform = "translate(-200vw, -200vh)";
+        liveMaskDriver.style.zIndex = "0";
         liveMaskDriver.setAttribute("aria-hidden", "true");
         wrap.appendChild(liveMaskDriver);
         liveMaskSourceEl = liveMaskDriver;
@@ -115,7 +127,10 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.style.webkitMaskPosition = "0 0";
         wrap.style.maskSize = "100% 100%";
         wrap.style.webkitMaskSize = "100% 100%";
-        if(isLiveMask) startLiveMaskUpdate(wrap, liveMaskSourceEl, 15);
+        if(isLiveMask){
+          const liveMaskFps = hasAnimatedMask ? 15 : 5;
+          startLiveMaskUpdate(wrap, liveMaskSourceEl, liveMaskFps);
+        }
       } else if(M){
         setTimeout(() => {
           try {

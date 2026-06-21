@@ -291,6 +291,36 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		};
 	}
 
+	function normalizeSwayEase(value){
+		const raw = String(value || "ease-in-out").toLowerCase();
+		if(raw === "linear" || raw === "ease-in" || raw === "ease-out" || raw === "soft") return raw;
+		return "ease-in-out";
+	}
+
+	function applySwayEase(t, ease){
+		const x = Math.max(0, Math.min(1, Number(t) || 0));
+		if(ease === "linear") return x;
+		if(ease === "ease-in") return x * x * x;
+		if(ease === "ease-out"){
+			const inv = 1 - x;
+			return 1 - (inv * inv * inv);
+		}
+		if(ease === "soft") return 0.5 - (0.5 * Math.cos(Math.PI * x));
+		return x < 0.5
+			? (4 * x * x * x)
+			: (1 - Math.pow(-2 * x + 2, 3) / 2);
+	}
+
+	function evaluateSwayAngle(localSec, cycleSeconds, maxAngle, easeMode){
+		const cyclePos = ((localSec / cycleSeconds) % 1 + 1) % 1;
+		const legPos = cyclePos < 0.5 ? (cyclePos * 2) : ((cyclePos - 0.5) * 2);
+		const eased = applySwayEase(legPos, easeMode);
+		if(cyclePos < 0.5){
+			return (-maxAngle) + ((maxAngle * 2) * eased);
+		}
+		return maxAngle - ((maxAngle * 2) * eased);
+	}
+
 	function createStaticSpatialTransform(anchorX, anchorY, positionX, positionY, rotation, scaleValue){
 		const rotationValue = (rotation && typeof rotation === "object" && Object.prototype.hasOwnProperty.call(rotation, "k"))
 			? rotation
@@ -448,8 +478,8 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		const randomness = Math.max(0, Math.min(1, Number(randomAmount) || 0));
 		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
 		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
-		const hint = Math.max(1, Number(radiusHint) || Math.min(w, h));
-		const radius = Math.max(0, Math.min(Math.min(w, h) / 2, hint * amt));
+		const hint = Math.max(1, Number(radiusHint) || 100);
+		const radius = Math.max(0, hint * amt);
 		if(radius <= 0.001) return { a: 0, k: [Number(baseX || 0), Number(baseY || 0), 0] };
 		const jitter = radius * randomness;
 
@@ -496,6 +526,77 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		keyframes.push({
 			t: totalFrames,
 			s: [Number(baseX || 0) + finalPoint[0], Number(baseY || 0) + finalPoint[1], 0]
+		});
+		return { a: 1, k: keyframes };
+	}
+
+	function buildBackAndForthPosition(baseX, baseY, amount, speed, axis, distanceHint, duration, fps){
+		const amt = Math.max(0, Math.min(0.5, Number(amount) || 0));
+		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
+		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
+		const normalizedAxis = String(axis || "horizontal").toLowerCase() === "vertical" ? "vertical" : "horizontal";
+		const hint = Math.max(1, Number(distanceHint) || 100);
+		const travel = Math.max(0, hint * amt);
+		if(travel <= 0.001) return { a: 0, k: [Number(baseX || 0), Number(baseY || 0), 0] };
+		const halfCycleFrames = Math.max(1, Math.round((speedSec * fps) / 2));
+		const keyframes = [];
+		let frame = 0;
+		let direction = -1;
+		const ease = createLottieEase();
+
+		while(frame < totalFrames){
+			const fromOffset = direction * travel;
+			const toOffset = -direction * travel;
+			const fromX = Number(baseX || 0) + (normalizedAxis === "horizontal" ? fromOffset : 0);
+			const fromY = Number(baseY || 0) + (normalizedAxis === "vertical" ? fromOffset : 0);
+			const toX = Number(baseX || 0) + (normalizedAxis === "horizontal" ? toOffset : 0);
+			const toY = Number(baseY || 0) + (normalizedAxis === "vertical" ? toOffset : 0);
+			keyframes.push({
+				...ease,
+				t: frame,
+				s: [fromX, fromY, 0],
+				e: [toX, toY, 0]
+			});
+			frame += halfCycleFrames;
+			direction *= -1;
+		}
+
+		const finalOffset = direction * travel;
+		keyframes.push({
+			t: totalFrames,
+			s: [
+				Number(baseX || 0) + (normalizedAxis === "horizontal" ? finalOffset : 0),
+				Number(baseY || 0) + (normalizedAxis === "vertical" ? finalOffset : 0),
+				0
+			]
+		});
+		return { a: 1, k: keyframes };
+	}
+
+	function buildSwayRotation(baseRotation, amount, speed, easeMode, duration, fps){
+		const startRotation = Number(baseRotation || 0);
+		const speedSec = 1 / Math.min(10, Math.max(0.1, Number(speed) || 1));
+		const totalFrames = Math.max(1, Math.round(Math.max(0.5, Number(duration) || 5) * Math.max(1, Number(fps) || 30)));
+		const maxAngle = Math.max(0.5, Math.min(35, Math.max(0, Math.min(0.5, Number(amount) || 0)) * 40));
+		const mode = normalizeSwayEase(easeMode);
+		const keyframes = [];
+		const ease = createLottieEase();
+
+		for(let frame = 0; frame < totalFrames; frame++){
+			const tA = frame / fps;
+			const tB = (frame + 1) / fps;
+			const a = startRotation + evaluateSwayAngle(tA, speedSec, maxAngle, mode);
+			const b = startRotation + evaluateSwayAngle(tB, speedSec, maxAngle, mode);
+			keyframes.push({
+				...ease,
+				t: frame,
+				s: [a],
+				e: [b]
+			});
+		}
+		keyframes.push({
+			t: totalFrames,
+			s: [startRotation + evaluateSwayAngle(totalFrames / fps, speedSec, maxAngle, mode)]
 		});
 		return { a: 1, k: keyframes };
 	}
@@ -924,6 +1025,10 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						mode: String(p.mode || "breath"),
 						amount: Math.max(0, Math.min(0.5, Number(p.amount) || 0)),
 						random: Math.max(0, Math.min(1, Number(p.random) || 0)),
+						axis: String(p.axis || "horizontal"),
+						pivotX: Math.max(-100, Math.min(100, Number(p.pivotX) || 0)),
+						pivotY: Math.max(-100, Math.min(100, Number(p.pivotY) || 0)),
+						ease: normalizeSwayEase(p.ease),
 						direction: String(p.direction || "clockwise"),
 						speed: Math.min(10, Math.max(0.1, Number(p.speed) || 1))
 					}
@@ -1209,15 +1314,27 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				: { a: 0, k: [baseScalePct, baseScalePct, 100] };
 			const lottieRotation = motion && motion.mode === "circle"
 				? buildCircleRotation(Number(item.transform?.rot || 0), motion.speed, motion.direction, duration, fps)
+				: motion && motion.mode === "sway"
+				? buildSwayRotation(Number(item.transform?.rot || 0), motion.amount, motion.speed, motion.ease, duration, fps)
 				: { a: 0, k: Number(item.transform?.rot || 0) };
-			const itemBounds = motion && motion.mode === "wiggle" ? computeItemBounds(item) : null;
+			const itemBounds = motion && (motion.mode === "wiggle" || motion.mode === "back-and-forth") ? computeItemBounds(item) : null;
 			const radiusHint = itemBounds
 				? Math.max(1, Math.min(itemBounds.maxX - itemBounds.minX, itemBounds.maxY - itemBounds.minY))
+				: Math.min(w, h);
+			const axisHint = itemBounds
+				? (String(motion?.axis || "horizontal").toLowerCase() === "vertical"
+					? Math.max(1, itemBounds.maxY - itemBounds.minY)
+					: Math.max(1, itemBounds.maxX - itemBounds.minX))
 				: Math.min(w, h);
 
 			function applyWiggleMotionPosition(layer, baseX, baseY){
 				if(!(motion && motion.mode === "wiggle" && layer?.ks)) return;
 				layer.ks.p = buildWigglePosition(baseX, baseY, motion.amount, motion.speed, motion.random, radiusHint, duration, fps);
+			}
+
+			function applyBackAndForthMotionPosition(layer, baseX, baseY){
+				if(!(motion && motion.mode === "back-and-forth" && layer?.ks)) return;
+				layer.ks.p = buildBackAndForthPosition(baseX, baseY, motion.amount, motion.speed, motion.axis, axisHint, duration, fps);
 			}
 
 			if(item.type === "solid"){
@@ -1248,6 +1365,11 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					bm: 0
 				};
 				applyWiggleMotionPosition(
+					layer,
+					solidAnchorX + Number(item.transform?.tx || 0),
+					solidAnchorY + Number(item.transform?.ty || 0)
+				);
+				applyBackAndForthMotionPosition(
 					layer,
 					solidAnchorX + Number(item.transform?.tx || 0),
 					solidAnchorY + Number(item.transform?.ty || 0)
@@ -1301,6 +1423,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						bm: 0
 					};
 					applyWiggleMotionPosition(layer, shapePosX, shapePosY);
+					applyBackAndForthMotionPosition(layer, shapePosX, shapePosY);
 					return layer;
 				}
 
@@ -1350,6 +1473,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					bm: 0
 				};
 				applyWiggleMotionPosition(layer, shapePosX, shapePosY);
+				applyBackAndForthMotionPosition(layer, shapePosX, shapePosY);
 				return layer;
 			}
 
@@ -1398,6 +1522,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					bm: 0
 				};
 				applyWiggleMotionPosition(layer, gradientPosX, gradientPosY);
+				applyBackAndForthMotionPosition(layer, gradientPosX, gradientPosY);
 				return layer;
 			}
 
@@ -1445,6 +1570,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					bm: 0
 				};
 				applyWiggleMotionPosition(layer, textPosX, textPosY);
+				applyBackAndForthMotionPosition(layer, textPosX, textPosY);
 				return layer;
 			}
 
@@ -1492,6 +1618,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 					bm: 0
 				};
 				applyWiggleMotionPosition(layer, penPosX, penPosY);
+				applyBackAndForthMotionPosition(layer, penPosX, penPosY);
 				return layer;
 			}
 
@@ -1537,8 +1664,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 								: { a: 0, k: [100, 100, 100] };
 							const controllerRotation = item.transform.motion.mode === "circle"
 								? buildCircleRotation(0, item.transform.motion.speed, item.transform.motion.direction, duration, fps)
+								: item.transform.motion.mode === "sway"
+								? buildSwayRotation(0, item.transform.motion.amount, item.transform.motion.speed, item.transform.motion.ease, duration, fps)
 								: { a: 0, k: 0 };
 							const controllerRadiusHint = Math.max(1, Math.min(groupBounds.maxX - groupBounds.minX, groupBounds.maxY - groupBounds.minY));
+							const controllerAxisHint = String(item.transform.motion.axis || "horizontal").toLowerCase() === "vertical"
+								? Math.max(1, groupBounds.maxY - groupBounds.minY)
+								: Math.max(1, groupBounds.maxX - groupBounds.minX);
 							const controllerLayer = {
 								ddd: 0,
 								ind: contentStartInd,
@@ -1567,6 +1699,17 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 									item.transform.motion.speed,
 									item.transform.motion.random,
 									controllerRadiusHint,
+									duration,
+									fps
+								);
+							}else if(item.transform.motion.mode === "back-and-forth"){
+								controllerLayer.ks.p = buildBackAndForthPosition(
+									pivotX,
+									pivotY,
+									item.transform.motion.amount,
+									item.transform.motion.speed,
+									item.transform.motion.axis,
+									controllerAxisHint,
 									duration,
 									fps
 								);
@@ -2283,6 +2426,10 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				var amount = clamp(toNumber(params.amount, 0.08), 0, 0.5);
 				var speed = Math.max(0.1, toNumber(params.speed, 1));
 				var random = clamp(toNumber(params.random, 0), 0, 1);
+				var axis = String(params.axis || 'horizontal').toLowerCase() === 'vertical' ? 'vertical' : 'horizontal';
+				var pivotXNorm = clamp(toNumber(params.pivotX, 0), -100, 100);
+				var pivotYNorm = clamp(toNumber(params.pivotY, -100), -100, 100);
+				var swayEase = normalizeSwayEase(params.ease);
 				var direction = String(params.direction || 'clockwise').toLowerCase() === 'counter-clockwise' ? -1 : 1;
 				var totalDur = Math.max(0.5, toNumber(this.duration, 5));
 				var activeTime = Math.max(0, timeSec - srcMMeta.intro);
@@ -2298,9 +2445,22 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				var scale = minScale + (maxScale - minScale) * wave;
 				var cxm = bounds ? bounds.cx : (c5.canvas.width / 2);
 				var cym = bounds ? bounds.cy : (c5.canvas.height / 2);
+				var pivotX = bounds
+					? bounds.minX + (((pivotXNorm + 100) / 200) * (bounds.maxX - bounds.minX))
+					: (((pivotXNorm + 100) / 200) * c5.canvas.width);
+				var pivotY = bounds
+					? bounds.minY + (((pivotYNorm + 100) / 200) * (bounds.maxY - bounds.minY))
+					: (((pivotYNorm + 100) / 200) * c5.canvas.height);
+				var swayAngle = evaluateSwayAngle(activeTime, speed, Math.max(0.5, amount * 40), swayEase) * (Math.PI / 180);
 				var actVisible = timeSec >= srcMMeta.intro && timeSec <= Math.max(srcMMeta.intro, totalDur - srcMMeta.outro);
 				c5.ctx.save();
-				c5.ctx.translate(cxm, cym);
+				if(actVisible && motionMode === 'sway'){
+					c5.ctx.translate(pivotX, pivotY);
+					c5.ctx.rotate(swayAngle);
+					c5.ctx.translate(-pivotX, -pivotY);
+				}else{
+					c5.ctx.translate(cxm, cym);
+				}
 				if(actVisible && motionMode === 'circle'){
 					c5.ctx.rotate(direction * ((activeTime / speed) * Math.PI * 2));
 				}else if(actVisible && motionMode === 'wiggle'){
@@ -2314,10 +2474,21 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 						ty += Math.cos((activeTime / speed) * Math.PI * 7) * jitter;
 					}
 					c5.ctx.translate(tx, ty);
+				}else if(actVisible && motionMode === 'back-and-forth'){
+					var axisSize = bounds
+						? (axis === 'vertical' ? Math.max(1, bounds.maxY - bounds.minY) : Math.max(1, bounds.maxX - bounds.minX))
+						: 100;
+					var travel = Math.max(0, axisSize * amount);
+					var offset = Math.sin((activeTime / speed) * Math.PI * 2) * travel;
+					c5.ctx.translate(axis === 'horizontal' ? offset : 0, axis === 'vertical' ? offset : 0);
+				}else if(actVisible && motionMode === 'sway'){
+					// Rotation already applied around custom pivot above.
 				}else{
 					c5.ctx.scale(actVisible ? scale : 1, actVisible ? scale : 1);
 				}
-				c5.ctx.translate(-cxm, -cym);
+				if(!(actVisible && motionMode === 'sway')){
+					c5.ctx.translate(-cxm, -cym);
+				}
 				c5.ctx.drawImage(srcM.canvas, 0, 0);
 				c5.ctx.restore();
 				result = this.attachTimelineMeta({ canvas: c5.canvas }, srcMMeta.intro, srcMMeta.outro);
