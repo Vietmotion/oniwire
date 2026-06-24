@@ -1,4 +1,15 @@
-window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propagateMotionFlag, clamp }){
+window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({
+  propagateMotionFlag,
+  clamp,
+  normalizeRampStops,
+  resolveGradientMetaFromEl,
+  resolveMaskMetaFromEl,
+  buildRampMaskUrl,
+  buildGradientMaskUrl,
+  buildShapeMaskUrl,
+  hasMotionFlag,
+  startLiveMaskUpdate
+}){
   function lerp(a, b, t){
     return a + (b - a) * t;
   }
@@ -99,8 +110,96 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
     }
   }
 
+  function hasStylizedMaskFilter(maskEl){
+    if(!maskEl) return false;
+    const nodes = [maskEl, ...(maskEl.querySelectorAll ? Array.from(maskEl.querySelectorAll("*")) : [])];
+    for(const el of nodes){
+      const filter = String(el?.style?.filter || "").trim().toLowerCase();
+      if(filter && filter !== "none") return true;
+    }
+    return false;
+  }
+
+  function applyMaskToTarget(targetEl, wrapEl, maskInput){
+    if(!targetEl || !maskInput) return false;
+
+    const rampStops = maskInput?.stops ? normalizeRampStops(maskInput.stops) : [];
+    const liveMaskEl = maskInput?.el || null;
+    const hasAnimatedMask = typeof hasMotionFlag === "function" ? hasMotionFlag(liveMaskEl) : false;
+    const hasFilteredMask = hasStylizedMaskFilter(liveMaskEl);
+    const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask || hasFilteredMask;
+    const frozenUrl = maskInput?.dataUrl || maskInput?.el?.dataset?.frozenUrl;
+    const maskMeta = maskInput?.el ? {
+      gradient: resolveGradientMetaFromEl(maskInput.el),
+      shape: resolveMaskMetaFromEl(maskInput.el)
+    } : null;
+
+    let liveMaskSourceEl = liveMaskEl;
+    if(isLiveMask && liveMaskEl && wrapEl){
+      const liveMaskHost = document.createElement("div");
+      liveMaskHost.style.position = "fixed";
+      liveMaskHost.style.left = "-200vw";
+      liveMaskHost.style.top = "-200vh";
+      liveMaskHost.style.width = "1280px";
+      liveMaskHost.style.height = "720px";
+      liveMaskHost.style.overflow = "hidden";
+      liveMaskHost.style.pointerEvents = "none";
+      liveMaskHost.style.zIndex = "-1";
+      liveMaskHost.setAttribute("aria-hidden", "true");
+
+      const liveMaskDriver = liveMaskEl.cloneNode(true);
+      liveMaskDriver.style.position = "absolute";
+      liveMaskDriver.style.inset = "0";
+      liveMaskDriver.style.pointerEvents = "none";
+      liveMaskDriver.setAttribute("aria-hidden", "true");
+      liveMaskDriver.dataset.liveMaskSource = "true";
+      liveMaskHost.appendChild(liveMaskDriver);
+      wrapEl.appendChild(liveMaskHost);
+      liveMaskSourceEl = liveMaskDriver;
+    }
+
+    const liveCacheUrl = typeof window.oniwireGetLiveMaskCacheUrl === "function"
+      ? (window.oniwireGetLiveMaskCacheUrl(liveMaskSourceEl) || window.oniwireGetLiveMaskCacheUrl(liveMaskEl) || "")
+      : "";
+    const liveUrl = isLiveMask
+      ? (liveMaskSourceEl?.dataset?.frozenUrl || liveMaskEl?.dataset?.frozenUrl || liveCacheUrl || "")
+      : "";
+    const maskUrl = isLiveMask
+      ? (liveUrl ? `url(${liveUrl})` : null)
+      : ((frozenUrl && frozenUrl.length > 0)
+        ? `url(${frozenUrl})`
+        : (rampStops.length
+          ? buildRampMaskUrl(rampStops)
+          : (buildGradientMaskUrl(maskMeta?.gradient, false)
+            || buildShapeMaskUrl(maskMeta?.shape, false))));
+    const hasShapeMask = Boolean(maskMeta?.shape);
+    const resolvedMaskMode = (isLiveMask || hasShapeMask) ? "alpha" : "luminance";
+
+    if(maskUrl || isLiveMask){
+      targetEl.style.maskImage = maskUrl;
+      targetEl.style.webkitMaskImage = maskUrl;
+      targetEl.style.maskMode = resolvedMaskMode;
+      targetEl.style.webkitMaskMode = resolvedMaskMode;
+      targetEl.style.maskRepeat = "no-repeat";
+      targetEl.style.webkitMaskRepeat = "no-repeat";
+      targetEl.style.maskPosition = "0 0";
+      targetEl.style.webkitMaskPosition = "0 0";
+      targetEl.style.maskSize = "100% 100%";
+      targetEl.style.webkitMaskSize = "100% 100%";
+      if(isLiveMask && typeof startLiveMaskUpdate === "function"){
+        const liveMaskFps = hasAnimatedMask ? 15 : 5;
+        targetEl.dataset.liveMaskEnabled = "true";
+        targetEl.dataset.liveMaskFps = String(liveMaskFps);
+        startLiveMaskUpdate(targetEl, liveMaskSourceEl, liveMaskFps);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   return {
-    inputs: ["in"],
+    inputs: ["in", "mask"],
     outputs: ["layer"],
     defaults: {
       mode: "RGB",
@@ -135,6 +234,11 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
       clone.style.position = "absolute";
       clone.style.inset = "0";
 
+      const base = src.el.cloneNode(true);
+      base.style.position = "absolute";
+      base.style.inset = "0";
+      base.style.opacity = "1";
+
       const rgbShadows = clamp(Number(node.params.rgbShadows) || 0, -100, 100);
       const rgbMidtones = clamp(Number(node.params.rgbMidtones) || 0, -100, 100);
       const rgbHighlights = clamp(Number(node.params.rgbHighlights) || 0, -100, 100);
@@ -167,6 +271,10 @@ window.createOniwireCurvesNodeDef = function createOniwireCurvesNodeDef({ propag
         ? `${currentFilter} url(#${filterId})`
         : `url(#${filterId})`;
 
+      const maskApplied = applyMaskToTarget(clone, wrap, inputs.mask);
+      if(maskApplied){
+        wrap.appendChild(base);
+      }
       wrap.appendChild(clone);
       return { el: wrap };
     },

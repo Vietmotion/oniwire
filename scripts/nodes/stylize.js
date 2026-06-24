@@ -1,4 +1,16 @@
-window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ propagateMotionFlag, clamp, getCanvasSize }){
+window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({
+  propagateMotionFlag,
+  clamp,
+  getCanvasSize,
+  normalizeRampStops,
+  resolveGradientMetaFromEl,
+  resolveMaskMetaFromEl,
+  buildRampMaskUrl,
+  buildGradientMaskUrl,
+  buildShapeMaskUrl,
+  hasMotionFlag,
+  startLiveMaskUpdate
+}){
   const LOOKUP_PRESETS = ["comic", "dreamy", "noir", "retro", "neon", "sunset", "acid"];
   const LOOKUP_PRESET_SET = new Set(LOOKUP_PRESETS);
 
@@ -319,8 +331,146 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
     }
   }
 
+  function hasStylizedMaskFilter(maskEl){
+    if(!maskEl) return false;
+    const nodes = [maskEl, ...(maskEl.querySelectorAll ? Array.from(maskEl.querySelectorAll("*")) : [])];
+    for(const el of nodes){
+      const filter = String(el?.style?.filter || "").trim().toLowerCase();
+      if(filter && filter !== "none") return true;
+    }
+    return false;
+  }
+
+  function buildShapeClipPathFromMeta(shapeMeta){
+    if(!shapeMeta) return null;
+    const shapeType = String(shapeMeta.shapeType || "").toLowerCase();
+    if(shapeType === "path") return null;
+
+    const width = Math.max(1, Number(shapeMeta.width || shapeMeta.size || 120));
+    const height = Math.max(1, Number(shapeMeta.height || shapeMeta.size || width));
+    const x = Number(shapeMeta.x || 0);
+    const y = Number(shapeMeta.y || 0);
+    const left = x - (width / 2);
+    const right = x + (width / 2);
+    const top = y - (height / 2);
+    const bottom = y + (height / 2);
+
+    if(shapeType === "circle"){
+      const radius = Math.max(1, Math.min(width, height) / 2);
+      return `circle(${radius}px at ${x}px ${y}px)`;
+    }
+
+    if(shapeType === "triangle"){
+      return `polygon(${x}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+    }
+
+    if(shapeType === "diamond"){
+      return `polygon(${x}px ${top}px, ${right}px ${y}px, ${x}px ${bottom}px, ${left}px ${y}px)`;
+    }
+
+    if(shapeType === "hexagon"){
+      return `polygon(${x}px ${top}px, ${right}px ${top + (height * 0.25)}px, ${right}px ${bottom - (height * 0.25)}px, ${x}px ${bottom}px, ${left}px ${bottom - (height * 0.25)}px, ${left}px ${top + (height * 0.25)}px)`;
+    }
+
+    if(shapeType === "star"){
+      return `polygon(${x}px ${top}px, ${x + (width * 0.11)}px ${top + (height * 0.35)}px, ${right}px ${top + (height * 0.35)}px, ${x + (width * 0.18)}px ${top + (height * 0.57)}px, ${x + (width * 0.29)}px ${bottom - (height * 0.09)}px, ${x}px ${top + (height * 0.70)}px, ${x - (width * 0.29)}px ${bottom - (height * 0.09)}px, ${x - (width * 0.18)}px ${top + (height * 0.57)}px, ${left}px ${top + (height * 0.35)}px, ${x - (width * 0.11)}px ${top + (height * 0.35)}px)`;
+    }
+
+    return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+  }
+
+  function applyExplicitMaskInput(targetEl, wrapEl, maskInput){
+    if(!targetEl || !maskInput) return false;
+
+    const canvasSize = typeof getCanvasSize === "function" ? (getCanvasSize() || {}) : {};
+    const canvasWidth = Math.max(1, Number(canvasSize.width) || 1280);
+    const canvasHeight = Math.max(1, Number(canvasSize.height) || 720);
+
+    const rampStops = maskInput?.stops ? normalizeRampStops(maskInput.stops) : [];
+    const liveMaskEl = maskInput?.el || null;
+    const hasAnimatedMask = typeof hasMotionFlag === "function" ? hasMotionFlag(liveMaskEl) : false;
+    const hasFilteredMask = hasStylizedMaskFilter(liveMaskEl);
+    const frozenUrl = maskInput?.dataUrl || maskInput?.el?.dataset?.frozenUrl;
+    const canUseFrozenFilteredMask = Boolean(hasFilteredMask && !hasAnimatedMask && frozenUrl);
+    const isLiveMask = !canUseFrozenFilteredMask && (liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask || hasFilteredMask);
+    const maskMeta = maskInput?.el ? {
+      gradient: resolveGradientMetaFromEl(maskInput.el),
+      shape: resolveMaskMetaFromEl(maskInput.el)
+    } : null;
+
+    let liveMaskSourceEl = liveMaskEl;
+    if(isLiveMask && liveMaskEl && wrapEl){
+      const liveMaskHost = document.createElement("div");
+      liveMaskHost.style.position = "fixed";
+      liveMaskHost.style.left = "-200vw";
+      liveMaskHost.style.top = "-200vh";
+      liveMaskHost.style.width = `${canvasWidth}px`;
+      liveMaskHost.style.height = `${canvasHeight}px`;
+      liveMaskHost.style.overflow = "hidden";
+      liveMaskHost.style.pointerEvents = "none";
+      liveMaskHost.style.zIndex = "-1";
+      liveMaskHost.setAttribute("aria-hidden", "true");
+
+      const liveMaskDriver = liveMaskEl.cloneNode(true);
+      liveMaskDriver.style.position = "absolute";
+      liveMaskDriver.style.inset = "0";
+      liveMaskDriver.style.pointerEvents = "none";
+      liveMaskDriver.setAttribute("aria-hidden", "true");
+      liveMaskDriver.dataset.liveMaskSource = "true";
+      liveMaskHost.appendChild(liveMaskDriver);
+      wrapEl.appendChild(liveMaskHost);
+      liveMaskSourceEl = liveMaskDriver;
+    }
+
+    const liveCacheUrl = typeof window.oniwireGetLiveMaskCacheUrl === "function"
+      ? (window.oniwireGetLiveMaskCacheUrl(liveMaskSourceEl) || window.oniwireGetLiveMaskCacheUrl(liveMaskEl) || "")
+      : "";
+    const liveUrl = isLiveMask
+      ? (liveMaskSourceEl?.dataset?.frozenUrl || liveMaskEl?.dataset?.frozenUrl || liveCacheUrl || "")
+      : "";
+    const maskUrl = isLiveMask
+      ? (liveUrl ? `url(${liveUrl})` : null)
+      : ((frozenUrl && frozenUrl.length > 0)
+        ? `url(${frozenUrl})`
+        : (rampStops.length
+          ? buildRampMaskUrl(rampStops)
+          : (buildGradientMaskUrl(maskMeta?.gradient, false)
+            || buildShapeMaskUrl(maskMeta?.shape, false))));
+    const hasShapeMask = Boolean(maskMeta?.shape);
+    const resolvedMaskMode = (isLiveMask || hasShapeMask) ? "alpha" : "luminance";
+
+    const shapeClipPath = !isLiveMask ? buildShapeClipPathFromMeta(maskMeta?.shape) : null;
+    if(shapeClipPath){
+      targetEl.style.clipPath = shapeClipPath;
+      targetEl.style.webkitClipPath = shapeClipPath;
+    }
+
+    if(maskUrl || isLiveMask){
+      if(shapeClipPath) return true;
+      targetEl.style.maskImage = maskUrl;
+      targetEl.style.webkitMaskImage = maskUrl;
+      targetEl.style.maskMode = resolvedMaskMode;
+      targetEl.style.webkitMaskMode = resolvedMaskMode;
+      targetEl.style.maskRepeat = "no-repeat";
+      targetEl.style.webkitMaskRepeat = "no-repeat";
+      targetEl.style.maskPosition = "0 0";
+      targetEl.style.webkitMaskPosition = "0 0";
+      targetEl.style.maskSize = "100% 100%";
+      targetEl.style.webkitMaskSize = "100% 100%";
+      if(isLiveMask && typeof startLiveMaskUpdate === "function"){
+        const liveMaskFps = hasAnimatedMask ? 15 : 5;
+        targetEl.dataset.liveMaskEnabled = "true";
+        targetEl.dataset.liveMaskFps = String(liveMaskFps);
+        startLiveMaskUpdate(targetEl, liveMaskSourceEl, liveMaskFps);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   return {
-    inputs: ["in"],
+    inputs: ["in", "mask"],
     outputs: ["layer"],
     defaults: {
       preset: "lookup",
@@ -399,12 +549,15 @@ window.createOniwireStylizeNodeDef = function createOniwireStylizeNodeDef({ prop
       fxFrame.style.height = `${bh}px`;
       fxFrame.style.overflow = "hidden";
       fxFrame.style.pointerEvents = "none";
-      const effectCoverage = String(node.params.effectCoverage || "composition");
-      const maskHost = effectCoverage === "upstreamMask"
-        ? (findAnyMaskHost(src.el) || findMaskHost(src.el))
-        : null;
-      if(maskHost){
-        applyMaskStyles(fxFrame, maskHost, -bx, -by, canvasWidth, canvasHeight);
+      const explicitMaskApplied = applyExplicitMaskInput(fxFrame, wrap, inputs.mask);
+      if(!explicitMaskApplied){
+        const effectCoverage = String(node.params.effectCoverage || "composition");
+        const maskHost = effectCoverage === "upstreamMask"
+          ? (findAnyMaskHost(src.el) || findMaskHost(src.el))
+          : null;
+        if(maskHost){
+          applyMaskStyles(fxFrame, maskHost, -bx, -by, canvasWidth, canvasHeight);
+        }
       }
 
       const base = src.el;

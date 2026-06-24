@@ -26,6 +26,59 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
     return false;
   }
 
+  function getDirectLiveMaskSource(targetEl){
+    if(!targetEl) return null;
+    if(targetEl?.dataset?.liveMaskSource === "true") return targetEl;
+    if(!targetEl.children) return null;
+    for(const child of targetEl.children){
+      if(child?.dataset?.liveMaskSource === "true") return child;
+    }
+    if(targetEl.querySelector){
+      const nested = targetEl.querySelector("[data-live-mask-source='true']");
+      if(nested) return nested;
+    }
+
+    // Effect nodes keep the live mask driver in a sibling host under the same wrap.
+    const parent = targetEl.parentElement;
+    if(parent?.querySelector){
+      const siblingScoped = parent.querySelector("[data-live-mask-source='true']");
+      if(siblingScoped) return siblingScoped;
+    }
+
+    // Last fallback: search a couple ancestors to handle deeply wrapped clones.
+    let scope = parent?.parentElement || null;
+    let depth = 0;
+    while(scope && depth < 2){
+      if(scope.querySelector){
+        const ancestorScoped = scope.querySelector("[data-live-mask-source='true']");
+        if(ancestorScoped) return ancestorScoped;
+      }
+      scope = scope.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function rebindLiveMaskTargets(rootEl){
+    if(!rootEl || typeof startLiveMaskUpdate !== "function") return;
+    const targets = [];
+
+    if(rootEl.dataset?.liveMaskEnabled === "true") targets.push(rootEl);
+    if(rootEl.querySelectorAll){
+      rootEl.querySelectorAll("[data-live-mask-enabled='true']").forEach((el) => {
+        targets.push(el);
+      });
+    }
+
+    for(const target of targets){
+      const source = getDirectLiveMaskSource(target);
+      if(!source) continue;
+      delete target.dataset.liveMaskBound;
+      const fps = Number(target.dataset.liveMaskFps || 15);
+      startLiveMaskUpdate(target, source, fps);
+    }
+  }
+
   return {
     inputs: (node) => [...getCompositeLayerPorts(node), "mask"],
     outputs: ["layer"],
@@ -34,7 +87,13 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
     run: (node, inputs) => {
       const layerPorts = getCompositeLayerPorts(node);
       const layerClones = layerPorts
-        .map(port => inputs[port]?.el ? inputs[port].el.cloneNode(true) : null)
+        .map(port => {
+          if(!inputs[port]?.el) return null;
+          const clone = inputs[port].el.cloneNode(true);
+          // Re-bind any live mask drivers inside nested composite layers.
+          rebindLiveMaskTargets(clone);
+          return clone;
+        })
         .filter(Boolean);
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
       const liveMaskEl = inputs.mask?.el || null;
@@ -84,6 +143,7 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         liveMaskDriver.style.pointerEvents = "none";
         liveMaskDriver.style.zIndex = "0";
         liveMaskDriver.setAttribute("aria-hidden", "true");
+        liveMaskDriver.dataset.liveMaskSource = "true";
         wrap.appendChild(liveMaskDriver);
         liveMaskSourceEl = liveMaskDriver;
       }
@@ -105,7 +165,12 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.appendChild(layerClones[i]);
       }
 
-        const liveUrl = isLiveMask ? (liveMaskSourceEl?.dataset?.frozenUrl || "") : "";
+        const liveCacheUrl = typeof window.oniwireGetLiveMaskCacheUrl === "function"
+          ? (window.oniwireGetLiveMaskCacheUrl(liveMaskSourceEl) || window.oniwireGetLiveMaskCacheUrl(liveMaskEl) || "")
+          : "";
+        const liveUrl = isLiveMask
+          ? (liveMaskSourceEl?.dataset?.frozenUrl || liveMaskEl?.dataset?.frozenUrl || liveCacheUrl || "")
+          : "";
       const maskUrl = isLiveMask
           ? (liveUrl ? `url(${liveUrl})` : null)
         : ((frozenUrl && frozenUrl.length > 0)
@@ -129,6 +194,8 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.style.webkitMaskSize = "100% 100%";
         if(isLiveMask){
           const liveMaskFps = hasAnimatedMask ? 15 : 5;
+          wrap.dataset.liveMaskEnabled = "true";
+          wrap.dataset.liveMaskFps = String(liveMaskFps);
           startLiveMaskUpdate(wrap, liveMaskSourceEl, liveMaskFps);
         }
       } else if(M){

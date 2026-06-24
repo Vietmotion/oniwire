@@ -115,6 +115,7 @@
   <script src="scripts/nodes/clone.js"></script>
   <script src="scripts/nodes/composite.js?v=20260620b"></script>
   <script src="scripts/nodes/output.js"></script>
+  <script src="scripts/nodes/reroute.js"></script>
   <script src="scripts/nodes-clone-composite.js"></script>
   <script src="scripts/nodes.js"></script>
   <script src="scripts/utils.js"></script>
@@ -3343,6 +3344,7 @@
     // that elementsFromPoint would miss.
     const seen = new Set();
     const candidates = [];
+    const allowedPreviewPickerCategories = new Set(["Generators", "Operations"]);
     const cx = e.clientX, cy = e.clientY;
 
     const allBound = Array.from(renderRoot.querySelectorAll("[data-bound-id]"));
@@ -3352,6 +3354,8 @@
       const node = state.nodes.get(id);
       if(!node) continue;
       if(node.type === "Output") continue; // Output always wraps everything – not useful to surface
+      const nodeCategory = NODE_CATEGORIES[node.type] || "Other";
+      if(!allowedPreviewPickerCategories.has(nodeCategory)) continue;
       const r = el.getBoundingClientRect();
       if(cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom){
         seen.add(id);
@@ -3780,6 +3784,46 @@ utilsApi.initProjectUtils();
     return `url("data:image/svg+xml;utf8,${encodeURIComponent(svgMarkup)}")`;
   }
 
+  const liveMaskCache = new Map();
+
+  function resolveLiveMaskCacheKey(el){
+    if(!el) return "";
+    const revision = String(
+      el?.dataset?.liveMaskRevision
+      || el.querySelector?.("[data-live-mask-revision]")?.dataset?.liveMaskRevision
+      || ""
+    ).trim();
+    const direct = String(el?.dataset?.boundId || "").trim();
+    if(direct) return `bound:${direct}${revision ? `|rev:${revision}` : ""}`;
+    const nested = el.querySelector?.("[data-bound-id]")?.dataset?.boundId;
+    if(nested) return `bound:${String(nested).trim()}${revision ? `|rev:${revision}` : ""}`;
+    const shapeSig = [
+      el?.dataset?.maskShape || "",
+      el?.dataset?.maskPathData || "",
+      el?.dataset?.maskWidth || "",
+      el?.dataset?.maskHeight || "",
+      el?.dataset?.maskX || "",
+      el?.dataset?.maskY || ""
+    ].join("|");
+    if(shapeSig.replace(/\|/g, "").trim()) return `shape:${shapeSig}${revision ? `|rev:${revision}` : ""}`;
+    return "";
+  }
+
+  function setLiveMaskCacheUrl(el, url){
+    if(!url || !el) return;
+    const key = resolveLiveMaskCacheKey(el);
+    if(key) liveMaskCache.set(key, url);
+  }
+
+  function getLiveMaskCacheUrl(el){
+    if(!el) return "";
+    const key = resolveLiveMaskCacheKey(el);
+    return key ? (liveMaskCache.get(key) || "") : "";
+  }
+
+  window.oniwireSetLiveMaskCacheUrl = setLiveMaskCacheUrl;
+  window.oniwireGetLiveMaskCacheUrl = getLiveMaskCacheUrl;
+
   function startLiveMaskUpdate(targetEl, maskEl, fps = 15){
     if(!targetEl || !maskEl) return;
     if(targetEl.dataset.liveMaskBound === "true") return;
@@ -3788,9 +3832,14 @@ utilsApi.initProjectUtils();
     const interval = 1000 / Math.max(1, Number(fps) || 15);
     let lastTime = 0;
     let captureBusy = false;
+    let disconnectedSince = 0;
 
     const applyMaskUrl = (url) => {
       if(!url) return;
+      if(maskEl?.dataset) maskEl.dataset.frozenUrl = url;
+      if(targetEl?.dataset) targetEl.dataset.frozenUrl = url;
+      setLiveMaskCacheUrl(maskEl, url);
+      setLiveMaskCacheUrl(targetEl, url);
       targetEl.style.maskImage = `url(${url})`;
       targetEl.style.webkitMaskImage = `url(${url})`;
     };
@@ -3816,10 +3865,21 @@ utilsApi.initProjectUtils();
     };
 
     const tick = (t) => {
-      if(!targetEl.isConnected) return;
+      if(!targetEl.isConnected || !maskEl.isConnected){
+        // Composite/effect branches may bind masks before DOM insertion.
+        // Allow a short grace period, then stop to avoid runaway RAF loops.
+        if(!disconnectedSince) disconnectedSince = t;
+        if((t - disconnectedSince) > 1500){
+          delete targetEl.dataset.liveMaskBound;
+          return;
+        }
+        requestAnimationFrame(tick);
+        return;
+      }
+      disconnectedSince = 0;
       if(t - lastTime >= interval){
         lastTime = t;
-        const liveUrl = maskEl.dataset?.frozenUrl || "";
+        const liveUrl = maskEl.dataset?.frozenUrl || getLiveMaskCacheUrl(maskEl) || "";
         if(liveUrl){
           applyMaskUrl(liveUrl);
         }else{
@@ -5196,6 +5256,13 @@ utilsApi.initProjectUtils();
     propagateMotionFlag,
     clamp,
     parseHexColor,
+    resolveGradientMetaFromEl,
+    resolveMaskMetaFromEl,
+    buildRampMaskUrl,
+    buildGradientMaskUrl,
+    buildShapeMaskUrl,
+    hasMotionFlag,
+    startLiveMaskUpdate,
     getCanvasSize: () => ({ width: previewBase?.w || 1280, height: previewBase?.h || 720 }),
     getOutputDuration: () => {
       const outNode = findActiveOutputNode();
@@ -5286,7 +5353,8 @@ utilsApi.initProjectUtils();
     }),
     ...MOTION_GLOW_NODE_DEFS,
     ...CLONE_COMPOSITE_NODE_DEFS,
-    Output: window.createOniwireOutputNodeDef()
+    Output: window.createOniwireOutputNodeDef(),
+    Reroute: window.createOniwireRerouteNodeDef()
   };
 
   if(NODE_DEFS.Text){
@@ -5654,6 +5722,7 @@ const HELP_GENERAL_PAGES = {
 
 // Simple categories (adjust anytime)
 const NODE_CATEGORIES = {
+  Reroute: "Editor",
   Color: "Generators",
   Gradient: "Generators",
   Ramp: "Generators",
@@ -7164,6 +7233,110 @@ async function evaluate(){
     for(const node of state.nodes.values()){
       const def = NODE_DEFS[node.type];
       if(!def) continue;
+
+      // ── Reroute: render as a compact dot, not a full node card ──
+      if(def.isReroute){
+        const el = document.createElement("div");
+        const isSelected = state.selected === node.id || state.selectedNodes.has(node.id);
+        const isHiddenByCollapsedGroup = Boolean(getCollapsedGroupForNodeId(node.id));
+        el.className = "rerouteDot"
+          + (isSelected ? " selected" : "")
+          + (isHiddenByCollapsedGroup ? " groupHidden" : "");
+        el.style.left = node.pos.x + "px";
+        el.style.top  = node.pos.y + "px";
+        el.dataset.id = node.id;
+        el.title = "Reroute (drag to move, right-click to delete)";
+        // input port
+        const inDot = document.createElement("div");
+        inDot.className = "dot in rerouteDotPort";
+        inDot.setAttribute("data-io", "in");
+        inDot.setAttribute("data-port", portKey(node.id, "in", "in"));
+        inDot.setAttribute("data-node", node.id);
+        inDot.setAttribute("data-name", "in");
+        // output port
+        const outDot = document.createElement("div");
+        outDot.className = "dot out rerouteDotPort";
+        outDot.setAttribute("data-io", "out");
+        outDot.setAttribute("data-port", portKey(node.id, "out", "out"));
+        outDot.setAttribute("data-node", node.id);
+        outDot.setAttribute("data-name", "out");
+        el.appendChild(inDot);
+        el.appendChild(outDot);
+        // Drag to move
+        el.addEventListener("mousedown", (ev) => {
+          if(ev.button !== 0) return;
+          if(ev.target.classList.contains("dot")) return;
+          ev.stopPropagation();
+          selectNode(node.id, ev.ctrlKey || ev.metaKey, ev.shiftKey);
+          const m = editorMouse(ev);
+          const mw = editorToWorld(m.x, m.y);
+          state.draggingNode = { id: node.id, ox: mw.x - node.pos.x, oy: mw.y - node.pos.y };
+        });
+        // Right-click to delete
+        el.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          pushHistory();
+          state.wires = state.wires.filter(w => String(w.from.nodeId) !== String(node.id) && String(w.to.nodeId) !== String(node.id));
+          state.nodes.delete(String(node.id));
+          evaluateAndRender();
+          render();
+          requestWireDraw();
+          toast("Reroute deleted");
+        });
+        // Port wiring same as regular nodes
+        [inDot, outDot].forEach(dot => {
+          dot.addEventListener("mousedown", (ev) => {
+            ev.stopPropagation();
+            const io = dot.getAttribute("data-io");
+            const nId = dot.getAttribute("data-node");
+            const port = dot.getAttribute("data-name");
+            if(io === "out"){
+              state.connecting = { nodeId: nId, port };
+              state.rewiringFromInput = null;
+              renderActiveDots();
+              requestWireDraw();
+              ev.preventDefault();
+            } else if(io === "in"){
+              const existing = findWireToInput(nId, port);
+              if(existing){
+                state.connecting = { nodeId: String(existing.from.nodeId), port: String(existing.from.port) };
+                state.rewiringFromInput = { nodeId: String(nId), port: String(port) };
+                renderActiveDots();
+                requestWireDraw();
+                ev.preventDefault();
+              }
+            }
+          });
+          dot.addEventListener("mouseup", (ev) => {
+            if(!state.connecting) return;
+            ev.stopPropagation();
+            const io = dot.getAttribute("data-io");
+            if(io !== "in") return;
+            const nId = dot.getAttribute("data-node");
+            const port = dot.getAttribute("data-name");
+            completeConnectionToInput(nId, port);
+          });
+          dot.addEventListener("contextmenu", (ev) => {
+            const io = dot.getAttribute("data-io");
+            if(io !== "in") return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const nId = dot.getAttribute("data-node");
+            const port = dot.getAttribute("data-name");
+            const existing = findWireToInput(nId, port);
+            if(!existing) return;
+            pushHistory();
+            state.wires = state.wires.filter(w => w !== existing);
+            evaluateAndRender();
+            requestWireDraw();
+          });
+        });
+        nodesEl.appendChild(el);
+        continue;
+      }
+      // ── End Reroute ──
+
       const rawName = String(node.name || "").trim();
       const defaultName = getNodeDisplayName(node.type);
       const nodeName = (!rawName || rawName === node.type) ? defaultName : rawName;
@@ -10797,8 +10970,9 @@ async function evaluate(){
       const isDot = e.target.classList?.contains("dot");
       const isNode = e.target.closest?.(".node");
       const isNodeHeader = e.target.closest?.(".nh");
+      const isRerouteDot = e.target.closest?.(".rerouteDot");
 
-      if(isDot || isNodeHeader || isNode) return;
+      if(isDot || isNodeHeader || isNode || isRerouteDot) return;
 
       const isEditorArea = e.target === editorEl
         || e.target.id === "stage"
@@ -10823,6 +10997,34 @@ async function evaluate(){
   editorEl.addEventListener("auxclick", (e) => {
     // Prevent browser autoscroll on middle click.
     if(e.button === 1) e.preventDefault();
+  });
+
+  // Shift+double-click on empty canvas → create reroute dot (no wire drag required)
+  editorEl.addEventListener("dblclick", (e) => {
+    if(!e.shiftKey) return;
+    const isDot = e.target.classList?.contains("dot");
+    const isNode = e.target.closest?.(".node");
+    const isRerouteDot = e.target.closest?.(".rerouteDot");
+    if(isDot || isNode || isRerouteDot) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const m = editorMouse(e);
+    const world = editorToWorld(m.x, m.y);
+    const rerouteId = uid();
+    pushHistory();
+    state.nodes.set(rerouteId, {
+      id: rerouteId,
+      type: "Reroute",
+      name: "Reroute",
+      pos: { x: world.x - 8, y: world.y - 8 },
+      params: {}
+    });
+    evaluateAndRender();
+    render();
+    requestWireDraw();
+    toast("Reroute dot added — drag its ports to wire");
   });
 
   window.addEventListener("mousemove", (e) => {
@@ -10950,7 +11152,7 @@ async function evaluate(){
           n.pos.x = mw.x - state.draggingNode.ox;
           n.pos.y = mw.y - state.draggingNode.oy;
 
-          const nodeEl = document.querySelector(`.node[data-id="${n.id}"]`);
+          const nodeEl = document.querySelector(`.node[data-id="${n.id}"], .rerouteDot[data-id="${n.id}"]`);
           if(nodeEl){
             nodeEl.style.left = n.pos.x + "px";
             nodeEl.style.top  = n.pos.y + "px";
@@ -10988,6 +11190,15 @@ async function evaluate(){
     if(e.button === 0 && wasSingleDrag){
       insertedByDrop = autoInsertDraggedNodeIntoWire(dragSnapshot.id);
     }
+    // If a reroute dot was dragged, force a full node-editor re-render so the dot
+    // appears in its new position immediately (CSS moved it but DOM rebuild is needed).
+    if(wasSingleDrag && dragSnapshot){
+      const draggedNode = state.nodes.get(String(dragSnapshot.id));
+      if(draggedNode && NODE_DEFS[draggedNode.type]?.isReroute){
+        render();
+        requestWireDraw();
+      }
+    }
     state.draggingNode = null;
     document.body.style.cursor = "";
     if(!insertedByDrop && state.wireDropCandidate){
@@ -11012,25 +11223,60 @@ async function evaluate(){
 
     // Cancel connection if releasing outside of a port
     if(state.connecting){
-      const target = e.target;
-      const inputDot = target?.closest?.('.dot[data-io="in"]');
+        const target = e.target;
+        const inputDot = target?.closest?.('.dot[data-io="in"]');
 
-      if(!inputDot){
-        const dropNodeEl = target?.closest?.(".node[data-id]");
-        const dropNodeId = String(dropNodeEl?.getAttribute?.("data-id") || "");
-        const dropNode = dropNodeId ? state.nodes.get(dropNodeId) : null;
-        const fromNodeId = String(state.connecting.nodeId || "");
-        const bestPort = (dropNode && dropNodeId && dropNodeId !== fromNodeId)
-          ? chooseBestInputPortForConnection(dropNode, state.connecting.port)
-          : null;
+        if(!inputDot){
+          const dropNodeEl = target?.closest?.(".node[data-id]");
+          const dropNodeId = String(dropNodeEl?.getAttribute?.("data-id") || "");
+          const dropNode = dropNodeId ? state.nodes.get(dropNodeId) : null;
+          const fromNodeId = String(state.connecting.nodeId || "");
 
-        if(bestPort){
-          completeConnectionToInput(dropNodeId, bestPort);
-        } else {
-          cancelPendingConnection({ reason: "Cancelled connection." });
+          // Dropping onto a reroute dot body → connect to its input
+          const dropRerouteEl = target?.closest?.(".rerouteDot[data-id]");
+          const dropRerouteId = String(dropRerouteEl?.getAttribute?.("data-id") || "");
+          if(dropRerouteEl && dropRerouteId && dropRerouteId !== fromNodeId){
+            completeConnectionToInput(dropRerouteId, "in");
+          } else {
+            const bestPort = (dropNode && dropNodeId && dropNodeId !== fromNodeId)
+              ? chooseBestInputPortForConnection(dropNode, state.connecting.port)
+              : null;
+            if(bestPort){
+              completeConnectionToInput(dropNodeId, bestPort);
+            } else if(e.shiftKey && !dropNode){
+              // Shift+drop on empty canvas → create a Reroute dot and wire through it
+              const editorRect = editorEl.getBoundingClientRect();
+              const mx = e.clientX - editorRect.left;
+              const my = e.clientY - editorRect.top;
+              const world = editorToWorld(mx, my);
+              const rerouteId = uid();
+              pushHistory();
+              state.nodes.set(rerouteId, {
+                id: rerouteId, type: "Reroute", name: "Reroute",
+                pos: { x: world.x - 8, y: world.y - 8 }, params: {}
+              });
+              const from = { nodeId: String(state.connecting.nodeId), port: String(state.connecting.port) };
+              state.wires.push({ from, to: { nodeId: rerouteId, port: "in" } });
+              state.connecting = null;
+              state.rewiringFromInput = null;
+              state.rewireOriginalWire = null;
+              state.rewireSnapshotWires = null;
+              evaluateAndRender();
+              render();
+              renderActiveDots();
+              requestWireDraw();
+              toast("Reroute created — drag to continue wire");
+              setTimeout(() => {
+                state.connecting = { nodeId: rerouteId, port: "out" };
+                renderActiveDots();
+                requestWireDraw();
+              }, 30);
+            } else {
+              cancelPendingConnection({ reason: "Cancelled connection." });
+            }
+          }
         }
       }
-    }
 
     if(state.isPanning){
       state.isPanning = false;
