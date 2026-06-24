@@ -24,6 +24,73 @@
     --ny: 0px;
     --nz: 1;
     }
+
+    #btnLayoutMenu{
+      width:32px;
+      min-width:32px;
+      height:32px;
+      padding:0;
+      line-height:1;
+      font-size:15px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      margin:0;
+    }
+
+    .layoutHoldMenu{
+      position:fixed;
+      z-index:10060;
+      min-width:220px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(9,13,20,.96);
+      box-shadow: 0 18px 40px rgba(0,0,0,.5);
+      padding:8px;
+      display:grid;
+      gap:6px;
+      backdrop-filter: blur(6px);
+    }
+
+    .layoutHoldMenu.isHidden{ display:none; }
+
+    .layoutHoldOption{
+      width:100%;
+      text-align:left;
+      border-radius:7px;
+      padding:8px 10px;
+      font-size:12px;
+    }
+
+    .layoutHoldOption.active{
+      border-color: rgba(122,167,255,.55);
+      background: rgba(122,167,255,.18);
+      box-shadow: 0 0 0 1px rgba(122,167,255,.15) inset;
+    }
+
+    .app.layoutPreviewDock .preview{
+      grid-row: 1 / span 2;
+    }
+
+    .app.layoutPreviewDock .previewLayout{
+      grid-template-columns: minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .app.layoutPreviewDock .screenShell{
+      overflow: hidden;
+    }
+
+    .app.layoutPreviewDock .inspector,
+    .app.layoutPreviewDock.inspectorExpanded .inspector{
+      grid-row: 1;
+    }
+
+    .app.layoutPreviewDock .editorWrap,
+    .app.layoutPreviewDock.inspectorExpanded .editorWrap{
+      grid-column: 3;
+      grid-row: 2;
+    }
   </style>
   <script src="vendor/html2canvas.min.js"></script>
   <script src="scripts/export.js?v=20260606e"></script>
@@ -64,6 +131,12 @@
           <button id="btnToggleLeftPanel" aria-pressed="true" aria-label="Expand left panel" title="Expand left panel">></button>
         </div>
       </div>
+      <div class="leftQuickActions" aria-label="Quick actions">
+        <button id="btnLayoutMenu" class="leftQuickBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Layout options" title="Hold left-click for layout options">▦</button>
+        <button id="btnQuickUndo" class="leftQuickBtn" type="button" aria-label="Undo" title="Undo (Ctrl/Cmd + Z)">&#8630;</button>
+        <button id="btnQuickRedo" class="leftQuickBtn" type="button" aria-label="Redo" title="Redo (Ctrl/Cmd + Shift + R)">&#8631;</button>
+        <button id="btnQuickSave" class="leftQuickBtn" type="button" aria-label="Save" title="Save (Ctrl/Cmd + S)">&#128190;</button>
+      </div>
       <div class="content">
         <div class="menuGrid">
           <div class="menuTile" id="btnNew">New</div>
@@ -94,20 +167,17 @@
     <!-- PREVIEW (Center Top) -->
     <section class="panel preview">
       <div class="hdr">
-        <div class="title">Preview <span class="pill">16:9</span></div>
+        <div class="title">Preview <span class="pill" id="previewOutputBadge">16:9</span></div>
         <div class="btns" style="flex:1; justify-content:flex-start;">
           <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);">
             Screen
             <select id="previewZoom">
               <option value="0.25">25%</option>
               <option value="0.5">50%</option>
-              <option value="0.7">70%</option>
               <option value="1" selected>100%</option>
-              <option value="1.25">125%</option>
-              <option value="1.5">150%</option>
               <option value="2">200%</option>
-              <option value="3">300%</option>
               <option value="4">400%</option>
+              <option value="10">1000%</option>
             </select>
           </label>
           <button id="btnPreviewFit" title="Reset preview to 100% and center">Fit</button>
@@ -248,6 +318,11 @@
     </div>
 
   </div>
+
+<div id="layoutHoldMenu" class="layoutHoldMenu isHidden" role="menu" aria-hidden="true">
+  <button type="button" class="layoutHoldOption" data-layout-mode="default" role="menuitem">Layout 01</button>
+  <button type="button" class="layoutHoldOption" data-layout-mode="previewDock" role="menuitem">Layout 02</button>
+</div>
 
 <!-- Node Search (Tab Menu) -->
 <div id="nodeSearch" class="nodeSearch hidden" aria-hidden="true">
@@ -408,12 +483,15 @@
   const inspectorBody = document.getElementById("inspectorBody");
   const inspectorExpandBtn = document.getElementById("btnClearSel");
   const leftPanelToggleBtn = document.getElementById("btnToggleLeftPanel");
+  const layoutMenuBtn = document.getElementById("btnLayoutMenu");
+  const layoutHoldMenuEl = document.getElementById("layoutHoldMenu");
 
   const appEl = document.querySelector(".app");
   const colSplitter = document.getElementById("colSplitter");
   const rowSplitter = document.getElementById("rowSplitter");
   const previewPanelEl = document.querySelector(".panel.preview");
   const inspectorPanelEl = document.querySelector(".panel.inspector");
+  const editorPanelEl = document.querySelector(".panel.editorWrap");
   let storedLeftPanelWidth = getComputedStyle(document.documentElement).getPropertyValue("--leftW").trim() || "260px";
 
   const editorEl = document.getElementById("editor");
@@ -439,6 +517,17 @@
   let helpVisible = false;
   let lastHelpFocus = null;
   let activeHelpPage = "introduction";
+  const LAYOUT_MODE_DEFAULT = "default";
+  const LAYOUT_MODE_PREVIEW_DOCK = "previewDock";
+  let currentLayoutMode = LAYOUT_MODE_DEFAULT;
+  let layoutHoldTimerId = null;
+  let layoutHoldOpenedByTimer = false;
+  let layoutMenuIgnoreUntil = 0;
+  const layoutModeBeforeDock = {
+    rightW: null,
+    topH: null,
+    inspectorExpanded: true
+  };
 
   // Settings persistence and state
   const settings = {
@@ -493,6 +582,7 @@
   function syncLayoutSplitters(){
     if(!appEl) return;
     const appRect = appEl.getBoundingClientRect();
+    const isPreviewDock = appEl.classList.contains("layoutPreviewDock");
 
     if(colSplitter && previewPanelEl && inspectorPanelEl){
       const previewRect = previewPanelEl.getBoundingClientRect();
@@ -501,12 +591,17 @@
       colSplitter.style.left = `${gutterMidX}px`;
     }
 
-    if(rowSplitter && previewPanelEl){
-      const previewRect = previewPanelEl.getBoundingClientRect();
-      const leftPx = previewRect.left - appRect.left;
-      const rightPx = appRect.right - previewRect.right;
+    if(rowSplitter && previewPanelEl && editorPanelEl){
+      const rowRect = (isPreviewDock && inspectorPanelEl)
+        ? inspectorPanelEl.getBoundingClientRect()
+        : previewPanelEl.getBoundingClientRect();
+      const editorRect = editorPanelEl.getBoundingClientRect();
+      const leftPx = rowRect.left - appRect.left;
+      const rightPx = appRect.right - rowRect.right;
+      const gutterMidY = ((rowRect.bottom + editorRect.top) / 2) - appRect.top;
       rowSplitter.style.left = `${leftPx}px`;
       rowSplitter.style.right = `${rightPx}px`;
+      rowSplitter.style.top = `${gutterMidY}px`;
     }
   }
 
@@ -539,6 +634,71 @@
       leftPanelToggleBtn.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
       leftPanelToggleBtn.setAttribute("aria-label", isCollapsed ? "Expand left panel" : "Collapse left panel");
       leftPanelToggleBtn.setAttribute("title", isCollapsed ? "Expand left panel" : "Collapse left panel");
+    }
+
+    syncLayoutSplitters();
+    requestAnimationFrame(() => syncLayoutSplitters());
+    applyPreviewTransform();
+  }
+
+  function closeLayoutHoldMenu(){
+    if(!layoutHoldMenuEl) return;
+    layoutHoldMenuEl.classList.add("isHidden");
+    layoutHoldMenuEl.setAttribute("aria-hidden", "true");
+    layoutMenuBtn?.setAttribute("aria-expanded", "false");
+  }
+
+  function openLayoutHoldMenu(){
+    if(!layoutMenuBtn || !layoutHoldMenuEl) return;
+    const rect = layoutMenuBtn.getBoundingClientRect();
+    const menuW = Math.max(220, layoutHoldMenuEl.offsetWidth || 220);
+    const menuH = Math.max(88, layoutHoldMenuEl.offsetHeight || 88);
+    const edgePad = 8;
+    const preferredLeft = rect.left + (rect.width / 2) - (menuW / 2);
+    const preferredTop = rect.top - menuH - 10;
+    const left = Math.min(window.innerWidth - menuW - edgePad, Math.max(edgePad, preferredLeft));
+    const top = preferredTop >= edgePad
+      ? preferredTop
+      : Math.min(window.innerHeight - menuH - edgePad, rect.bottom + 10);
+    layoutHoldMenuEl.style.left = `${Math.round(left)}px`;
+    layoutHoldMenuEl.style.top = `${Math.round(top)}px`;
+    layoutHoldMenuEl.classList.remove("isHidden");
+    layoutHoldMenuEl.setAttribute("aria-hidden", "false");
+    layoutMenuBtn.setAttribute("aria-expanded", "true");
+    // Ignore immediate clicks right after opening so the initial button click cannot select an option.
+    layoutMenuIgnoreUntil = performance.now() + 240;
+    layoutHoldMenuEl.querySelectorAll(".layoutHoldOption").forEach(btn => {
+      btn.classList.toggle("active", btn.getAttribute("data-layout-mode") === currentLayoutMode);
+    });
+  }
+
+  function applyLayoutMode(mode){
+    if(!appEl) return;
+
+    if(mode === LAYOUT_MODE_PREVIEW_DOCK){
+      if(currentLayoutMode !== LAYOUT_MODE_PREVIEW_DOCK){
+        layoutModeBeforeDock.rightW = getComputedStyle(document.documentElement).getPropertyValue("--rightW").trim() || "500px";
+        layoutModeBeforeDock.topH = getComputedStyle(document.documentElement).getPropertyValue("--topH").trim() || "54vh";
+        layoutModeBeforeDock.inspectorExpanded = appEl.classList.contains("inspectorExpanded");
+      }
+
+      appEl.classList.add("layoutPreviewDock");
+      setInspectorExpanded(false);
+      document.documentElement.style.setProperty("--rightW", "32%");
+      document.documentElement.style.setProperty("--topH", "50%");
+      currentLayoutMode = LAYOUT_MODE_PREVIEW_DOCK;
+    }else{
+      appEl.classList.remove("layoutPreviewDock");
+
+      if(layoutModeBeforeDock.rightW){
+        document.documentElement.style.setProperty("--rightW", layoutModeBeforeDock.rightW);
+      }
+      if(layoutModeBeforeDock.topH){
+        document.documentElement.style.setProperty("--topH", layoutModeBeforeDock.topH);
+      }
+
+      setInspectorExpanded(layoutModeBeforeDock.inspectorExpanded !== false);
+      currentLayoutMode = LAYOUT_MODE_DEFAULT;
     }
 
     syncLayoutSplitters();
@@ -1132,7 +1292,7 @@
 
   let previewBase = { w: 1280, h: 720 };
   const PREVIEW_ZOOM_MIN = 0.25;
-  const PREVIEW_ZOOM_MAX = 6;
+  const PREVIEW_ZOOM_MAX = 10;
 
   let previewZoomValue = Number(previewZoomSel.value) || 1;
   let previewScale = 1;
@@ -2813,7 +2973,10 @@
       && selectedNode.params
       && typeof selectedNode.params.x !== "undefined"
       && typeof selectedNode.params.y !== "undefined"
-      && previewInner.contains(e.target);
+      && (
+        previewInner.contains(e.target)
+        || (selectedNode.type === "Transform" && previewViewport.contains(e.target))
+      );
 
     if(canDrag){
       pushHistory();
@@ -3240,6 +3403,7 @@ const saveNamed = utilsApi.saveNamed;
 const loadNamed = utilsApi.loadNamed;
 const deleteNamed = utilsApi.deleteNamed;
 const importProjectFromFile = utilsApi.importProjectFromFile;
+const previewOutputBadge = document.getElementById("previewOutputBadge");
 
 utilsApi.bindProjectButtons();
 
@@ -3257,7 +3421,7 @@ const exportLottieJSON = exportApi.exportLottieJSON;
 const LOTTIE_ALLOWED_NODE_TYPES = new Set(["Output", "Shape", "Text", "Transform", "Motion", "Color", "Gradient", "Ramp", "Composite", "Glow"]);
 
 function isLottieRestrictionEnabled(){
-  const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+  const outNode = findActiveOutputNode();
   return Boolean(outNode?.params?.exportLottieMode);
 }
 
@@ -3303,6 +3467,21 @@ function syncOutputRatio(node){
   const ratio = getEffectiveOutputRatio(node);
   node.params.ratio = ratio;
   return ratio;
+}
+
+function findActiveOutputNode(){
+  const wiredOutput = Array.from(state.nodes.values()).find(n => n.type === "Output" && findWireToInput(n.id, "in"));
+  return wiredOutput || findFirstOutputNode();
+}
+
+function syncPreviewOutputBadge(outNode){
+  if(!previewOutputBadge) return;
+  if(!outNode){
+    previewOutputBadge.textContent = "No Output";
+    return;
+  }
+  const ratio = getEffectiveOutputRatio(outNode);
+  previewOutputBadge.textContent = `Output ${String(outNode.id)} · ${ratio}`;
 }
 function canAddNodeType(type){
   if(type === "Group") return { ok: true };
@@ -5019,7 +5198,7 @@ utilsApi.initProjectUtils();
     parseHexColor,
     getCanvasSize: () => ({ width: previewBase?.w || 1280, height: previewBase?.h || 720 }),
     getOutputDuration: () => {
-      const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+      const outNode = findActiveOutputNode();
       return Math.max(0.5, Number(outNode?.params?.duration) || 5);
     }
   });
@@ -5703,8 +5882,9 @@ async function evaluate(){
   async function evaluateAndRender(){
     renderRoot.innerHTML = "";
 
-    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output") || null;
+    const outNode = findActiveOutputNode();
     if(!outNode){
+      syncPreviewOutputBadge(null);
       const msg = document.createElement("div");
       msg.style.position="absolute";
       msg.style.inset="0";
@@ -5723,6 +5903,7 @@ async function evaluate(){
     if(outNode?.params?.ratio){
       applyOutputRatio(outNode.params.ratio);
     }
+    syncPreviewOutputBadge(outNode);
 
 
     const cache = await evaluate();
@@ -5967,10 +6148,29 @@ async function evaluate(){
   // -----------------------------
   // Editor utilities
   // -----------------------------
+  function syncNodeReadabilityCompensation(){
+    const isCompactViewport = window.innerHeight <= 1120 && window.innerWidth <= 2100;
+    const zoom = Math.max(0.06, Number(state.zoom) || 1);
+    let comp = 1;
+
+    if(isCompactViewport && zoom < 1){
+      // Stronger inverse scaling for compact-height screens to keep node labels readable.
+      const t = 1 - zoom;
+      comp = 1 + (t * 0.95);
+      if(zoom < 0.62){
+        comp += (0.62 - zoom) * 0.28;
+      }
+      comp = Math.min(1.72, comp);
+    }
+
+    document.documentElement.style.setProperty("--nodeZoomComp", comp.toFixed(3));
+  }
+
   function applyEditorTransform(){
     document.documentElement.style.setProperty("--nx", state.panX + "px");
     document.documentElement.style.setProperty("--ny", state.panY + "px");
     document.documentElement.style.setProperty("--nz", state.zoom);
+    syncNodeReadabilityCompensation();
     requestWireDraw();
   }
 
@@ -5996,13 +6196,17 @@ async function evaluate(){
 
   if(rowSplitter && appEl){
     rowSplitter.addEventListener("mousedown", (e) => {
+      if(e.button !== 0) return;
       e.preventDefault();
       splitDragging = true;
       splitStartY = e.clientY;
 
       const appRect = appEl.getBoundingClientRect();
-      const cssTopH = getComputedStyle(document.documentElement).getPropertyValue("--topH");
-      splitStartTop = topHToPx(cssTopH, appRect.height);
+      const isPreviewDock = appEl.classList.contains("layoutPreviewDock");
+      const baseRect = (isPreviewDock && inspectorPanelEl)
+        ? inspectorPanelEl.getBoundingClientRect()
+        : previewPanelEl.getBoundingClientRect();
+      splitStartTop = baseRect.bottom - appRect.top;
 
       document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
@@ -6030,6 +6234,7 @@ async function evaluate(){
 
   if(colSplitter && appEl){
     colSplitter.addEventListener("mousedown", (e) => {
+      if(e.button !== 0) return;
       e.preventDefault();
       colSplitDragging = true;
       colSplitStartX = e.clientX;
@@ -6046,11 +6251,12 @@ async function evaluate(){
       if(!colSplitDragging) return;
       const appRect = appEl.getBoundingClientRect();
       const cssLeftW = getComputedStyle(document.documentElement).getPropertyValue("--leftW");
+      const cssRightWMin = getComputedStyle(document.documentElement).getPropertyValue("--rightWMin");
       const leftWidth = parseCssLengthPx(cssLeftW, appRect.width);
 
       const dx = e.clientX - colSplitStartX;
       let newRight = colSplitStartRight - dx;
-      const minRight = 280;
+      const minRight = Math.max(320, parseCssLengthPx(cssRightWMin, appRect.width) || 0);
       const minCenter = 420;
       const maxRight = Math.max(minRight + 40, appRect.width - leftWidth - minCenter);
       newRight = clamp(newRight, minRight, maxRight);
@@ -9321,7 +9527,7 @@ async function evaluate(){
     const screen = document.querySelector(".screen");
     const previewInner = document.getElementById("previewInner");
 
-    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+    const outNode = findActiveOutputNode();
     if(outNode){
       normalizeOutputRatioParams(outNode);
       if(outNode.params?.ratioMode === "custom"){
@@ -9341,6 +9547,7 @@ async function evaluate(){
             applyPreviewTransform();
           }
           updatePreviewSelectionBox();
+          syncPreviewOutputBadge(outNode);
           return;
         }
       }
@@ -9368,6 +9575,8 @@ async function evaluate(){
       previewInner.style.width = previewBase.w + "px";
       previewInner.style.height = previewBase.h + "px";
     }
+
+    syncPreviewOutputBadge(outNode);
 
     // only reset pan when canvas dimensions actually changed
     if(previewBase.w !== prevW || previewBase.h !== prevH){
@@ -10147,7 +10356,7 @@ async function evaluate(){
   }
 
   async function exportMp4(name){
-    const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+    const outNode = findActiveOutputNode();
     if(!outNode){ toast("No Output node found."); return; }
     if(typeof VideoEncoder !== "function" || typeof VideoFrame !== "function"){
       toast("MP4 export now requires WebCodecs support in this browser.");
@@ -10389,6 +10598,38 @@ async function evaluate(){
     }
   }
 
+  function handleUndoAction(){
+    const snap = state.history.pop();
+    if(!snap) return;
+    const keepView = { panX: state.panX, panY: state.panY, zoom: state.zoom };
+    pushRedoSnapshot(cloneGraphSnapshot());
+    restoreSnapshot(snap);
+    state.panX = keepView.panX;
+    state.panY = keepView.panY;
+    state.zoom = keepView.zoom;
+    applyEditorTransform();
+  }
+
+  function handleRedoAction(){
+    const snap = state.future.pop();
+    if(!snap) return;
+    const keepView = { panX: state.panX, panY: state.panY, zoom: state.zoom };
+    state.history.push(cloneGraphSnapshot());
+    if(state.history.length > state.historyMax){
+      state.history.shift();
+    }
+    restoreSnapshot(snap);
+    state.panX = keepView.panX;
+    state.panY = keepView.panY;
+    state.zoom = keepView.zoom;
+    applyEditorTransform();
+  }
+
+  function handleSaveAction(){
+    const name = document.getElementById("projectName")?.value;
+    saveNamed(name);
+  }
+
   window.addEventListener("keydown", (e) => {
     if(helpVisible) return;
 
@@ -10402,33 +10643,14 @@ async function evaluate(){
     // Undo (Ctrl+Z / Cmd+Z)
     if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z"){
       e.preventDefault();
-      const snap = state.history.pop();
-      if(!snap) return;
-      const keepView = { panX: state.panX, panY: state.panY, zoom: state.zoom };
-      pushRedoSnapshot(cloneGraphSnapshot());
-      restoreSnapshot(snap);
-      state.panX = keepView.panX;
-      state.panY = keepView.panY;
-      state.zoom = keepView.zoom;
-      applyEditorTransform();
+      handleUndoAction();
       return;
     }
 
     // Redo (Ctrl/Cmd + Shift + R)
     if((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "r"){
       e.preventDefault();
-      const snap = state.future.pop();
-      if(!snap) return;
-      const keepView = { panX: state.panX, panY: state.panY, zoom: state.zoom };
-      state.history.push(cloneGraphSnapshot());
-      if(state.history.length > state.historyMax){
-        state.history.shift();
-      }
-      restoreSnapshot(snap);
-      state.panX = keepView.panX;
-      state.panY = keepView.panY;
-      state.zoom = keepView.zoom;
-      applyEditorTransform();
+      handleRedoAction();
       return;
     }
 
@@ -10464,8 +10686,7 @@ async function evaluate(){
       if(key === "s"){
         if(isTypingTarget(e.target)) return;
         e.preventDefault();
-        const name = document.getElementById("projectName")?.value;
-        saveNamed(name);
+        handleSaveAction();
         return;
       }
     }
@@ -11113,7 +11334,7 @@ function quickConnectSelectedToOutput(){
 
   pushHistory();
 
-  let outputNode = findFirstOutputNode();
+  let outputNode = findActiveOutputNode();
   if(!outputNode){
     const pos = { x: node.pos.x + 360, y: node.pos.y };
     outputNode = addNode("Output", pos);
@@ -11144,7 +11365,7 @@ function quickConnectSelectedToOutput(){
 }
 
 function centerEditorOnOutputNode(){
-  const outputNode = findFirstOutputNode();
+  const outputNode = findActiveOutputNode();
   if(!outputNode){
     toast("No Output node found.");
     return;
@@ -11490,6 +11711,7 @@ function loadGraph(data){
   });
   window.addEventListener("keydown", (e) => {
     if(e.key === "Escape") setCoffeeBoardVisible(false);
+    if(e.key === "Escape") closeLayoutHoldMenu();
   });
 
   inspectorExpandBtn?.addEventListener("click", () => {
@@ -11500,6 +11722,82 @@ function loadGraph(data){
   leftPanelToggleBtn?.addEventListener("click", () => {
     const collapsed = appEl?.classList.contains("leftCollapsed");
     setLeftPanelCollapsed(!collapsed);
+  });
+
+  layoutMenuBtn?.addEventListener("pointerdown", (e) => {
+    if(e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    layoutHoldOpenedByTimer = false;
+    clearTimeout(layoutHoldTimerId);
+    layoutHoldTimerId = setTimeout(() => {
+      layoutHoldOpenedByTimer = true;
+      openLayoutHoldMenu();
+    }, 260);
+  });
+
+  // Shield mouse events so clicking the layout button cannot trigger row splitter drag.
+  layoutMenuBtn?.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  layoutMenuBtn?.addEventListener("mouseup", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  const clearLayoutHoldTimer = () => {
+    clearTimeout(layoutHoldTimerId);
+    layoutHoldTimerId = null;
+  };
+
+  layoutMenuBtn?.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearLayoutHoldTimer();
+    if(!layoutHoldOpenedByTimer && layoutHoldMenuEl?.classList.contains("isHidden")){
+      openLayoutHoldMenu();
+    }
+    layoutHoldOpenedByTimer = false;
+  });
+  layoutMenuBtn?.addEventListener("pointercancel", clearLayoutHoldTimer);
+  layoutMenuBtn?.addEventListener("pointerleave", clearLayoutHoldTimer);
+  layoutMenuBtn?.addEventListener("click", (e) => {
+    // Opening is handled via pointer events to avoid first-click layout jumps.
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  layoutHoldMenuEl?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.button !== 0) return;
+    if(performance.now() < layoutMenuIgnoreUntil){
+      return;
+    }
+    const optionBtn = e.target instanceof Element ? e.target.closest(".layoutHoldOption") : null;
+    if(!optionBtn) return;
+    const mode = optionBtn.getAttribute("data-layout-mode") || LAYOUT_MODE_DEFAULT;
+    applyLayoutMode(mode);
+    closeLayoutHoldMenu();
+  });
+
+  layoutHoldMenuEl?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    if(layoutHoldMenuEl?.classList.contains("isHidden")) return;
+    const inMenu = layoutHoldMenuEl?.contains(e.target);
+    const onButton = layoutMenuBtn?.contains(e.target);
+    if(!inMenu && !onButton) closeLayoutHoldMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if(layoutHoldMenuEl && !layoutHoldMenuEl.classList.contains("isHidden")){
+      openLayoutHoldMenu();
+    }
   });
 
   document.getElementById("btnNew").addEventListener("click", () => {
@@ -11518,7 +11816,7 @@ function loadGraph(data){
     setTimeout(() => {
       try {
         const animData = (() => {
-          const outNode = Array.from(state.nodes.values()).find(n => n.type === "Output");
+          const outNode = findActiveOutputNode();
           if(!outNode){ toast("No Output node found."); return null; }
           const payload = serializeGraph();
           payload.name = projectName;
@@ -11593,6 +11891,21 @@ function loadGraph(data){
     saveSettings();
   });
 
+  const btnQuickUndo = document.getElementById("btnQuickUndo");
+  if(btnQuickUndo){
+    btnQuickUndo.addEventListener("click", () => handleUndoAction());
+  }
+
+  const btnQuickRedo = document.getElementById("btnQuickRedo");
+  if(btnQuickRedo){
+    btnQuickRedo.addEventListener("click", () => handleRedoAction());
+  }
+
+  const btnQuickSave = document.getElementById("btnQuickSave");
+  if(btnQuickSave){
+    btnQuickSave.addEventListener("click", () => handleSaveAction());
+  }
+
   // Sync UI with current settings on load
   document.getElementById("settingsZoomSpeed").value = settings.zoomSpeed;
   document.getElementById("settingsZoomSpeedValue").textContent = settings.zoomSpeed.toFixed(1) + "x";
@@ -11630,6 +11943,7 @@ function loadGraph(data){
 
   window.addEventListener("resize", () => {
     requestWireDraw();
+    try{ syncNodeReadabilityCompensation(); }catch(e){/* ignore */}
     try{ renderInspector(); }catch(e){/* ignore */}
     try{ applyPreviewTransform(); }catch(e){/* ignore */}
     try{ syncLayoutSplitters(); }catch(e){/* ignore */}
