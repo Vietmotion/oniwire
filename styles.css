@@ -71,7 +71,7 @@ select#nodeType optgroup{
 
 .editorWrap .hdrInlineControls{
   flex: 1;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .nodeGroups{
@@ -81,8 +81,7 @@ select#nodeType optgroup{
   flex-wrap: nowrap;
   position: relative;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,.28) transparent;
 }
