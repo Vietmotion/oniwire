@@ -99,8 +99,9 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       const liveMaskEl = inputs.mask?.el || null;
       const hasAnimatedMask = hasMotionFlag(liveMaskEl);
       const hasFilteredMask = hasStylizedMaskFilter(liveMaskEl);
+      const forceRasterMask = String(liveMaskEl?.dataset?.maskMetaMode || "").trim().toLowerCase() === "raster";
       // Blur/stylized masks must be captured as live matte to preserve feathered edges.
-      const isLiveMask = liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask || hasFilteredMask;
+      const isLiveMask = forceRasterMask || liveMaskEl?.dataset?.frozenLive === "true" || hasAnimatedMask || hasFilteredMask;
       let liveMaskSourceEl = liveMaskEl;
 
       const frozenUrl = inputs.mask?.dataUrl || inputs.mask?.el?.dataset?.frozenUrl;
@@ -137,14 +138,25 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
       }
 
       if(isLiveMask && liveMaskEl){
+        const liveMaskHost = document.createElement("div");
+        liveMaskHost.style.position = "fixed";
+        liveMaskHost.style.left = "-200vw";
+        liveMaskHost.style.top = "-200vh";
+        liveMaskHost.style.width = "1280px";
+        liveMaskHost.style.height = "720px";
+        liveMaskHost.style.overflow = "hidden";
+        liveMaskHost.style.pointerEvents = "none";
+        liveMaskHost.style.zIndex = "-1";
+        liveMaskHost.setAttribute("aria-hidden", "true");
+
         const liveMaskDriver = liveMaskEl.cloneNode(true);
         liveMaskDriver.style.position = "absolute";
         liveMaskDriver.style.inset = "0";
         liveMaskDriver.style.pointerEvents = "none";
-        liveMaskDriver.style.zIndex = "0";
         liveMaskDriver.setAttribute("aria-hidden", "true");
         liveMaskDriver.dataset.liveMaskSource = "true";
-        wrap.appendChild(liveMaskDriver);
+        liveMaskHost.appendChild(liveMaskDriver);
+        wrap.appendChild(liveMaskHost);
         liveMaskSourceEl = liveMaskDriver;
       }
 
@@ -193,57 +205,45 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         wrap.style.maskSize = "100% 100%";
         wrap.style.webkitMaskSize = "100% 100%";
         if(isLiveMask){
-          const liveMaskFps = hasAnimatedMask ? 15 : 5;
+          const liveMaskFps = hasAnimatedMask ? 15 : (forceRasterMask ? 10 : 5);
           wrap.dataset.liveMaskEnabled = "true";
           wrap.dataset.liveMaskFps = String(liveMaskFps);
           startLiveMaskUpdate(wrap, liveMaskSourceEl, liveMaskFps);
         }
       } else if(M){
-        setTimeout(() => {
-          try {
-            const canvas = document.createElement("canvas");
-            canvas.width = 1280;
-            canvas.height = 720;
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        const applyRasterMask = (dataUrl) => {
+          if(!dataUrl) return;
+          wrap.style.maskImage = `url(${dataUrl})`;
+          wrap.style.webkitMaskImage = `url(${dataUrl})`;
+          wrap.style.maskMode = "alpha";
+          wrap.style.webkitMaskMode = "alpha";
+          wrap.style.maskRepeat = "no-repeat";
+          wrap.style.webkitMaskRepeat = "no-repeat";
+          wrap.style.maskPosition = "0 0";
+          wrap.style.webkitMaskPosition = "0 0";
+          wrap.style.maskSize = "100% 100%";
+          wrap.style.webkitMaskSize = "100% 100%";
+        };
 
-            const tempDiv = document.createElement("div");
-            tempDiv.style.position = "absolute";
-            tempDiv.style.left = "-9999px";
-            tempDiv.style.top = "-9999px";
-            tempDiv.style.width = "1280px";
-            tempDiv.style.height = "720px";
-            tempDiv.style.overflow = "hidden";
+        const cachedMaskUrl = String(inputs.mask?.el?.dataset?.frozenUrl || "").trim()
+          || (typeof window.oniwireGetLiveMaskCacheUrl === "function"
+            ? String(window.oniwireGetLiveMaskCacheUrl(inputs.mask?.el) || "").trim()
+            : "");
+        if(cachedMaskUrl) applyRasterMask(cachedMaskUrl);
 
-            const maskClone = M.cloneNode(true);
-            maskClone.style.position = "absolute";
-            maskClone.style.inset = "0";
-            tempDiv.appendChild(maskClone);
-            document.body.appendChild(tempDiv);
-
-            const svg = new XMLSerializer().serializeToString(tempDiv);
-            const img = new Image();
-            img.onload = () => {
-              ctx.drawImage(img, 0, 0);
-              const dataUrl = canvas.toDataURL("image/png");
-              wrap.style.maskImage = `url(${dataUrl})`;
-              wrap.style.webkitMaskImage = `url(${dataUrl})`;
-              wrap.style.maskMode = "luminance";
-              wrap.style.webkitMaskMode = "luminance";
-              wrap.style.maskPosition = "0 0";
-              wrap.style.webkitMaskPosition = "0 0";
-              wrap.style.maskSize = "100% 100%";
-              wrap.style.webkitMaskSize = "100% 100%";
-            };
-            img.src = "data:image/svg+xml;base64," + btoa(svg);
-
-            document.body.removeChild(tempDiv);
-          } catch(_e) {
-            M.style.position = "absolute";
-            M.style.inset = "0";
-            M.style.opacity = "0.5";
-            wrap.appendChild(M);
-          }
-        }, 0);
+        const canRenderMask = typeof window.renderLayerToDataUrl === "function";
+        if(canRenderMask && inputs.mask?.el){
+          window.renderLayerToDataUrl(inputs.mask.el, {
+            useSimpleShapeRender: false,
+            timeoutMs: 500,
+            bakeComputedStyles: true,
+            backgroundColor: null
+          }).then((dataUrl) => {
+            if(dataUrl) applyRasterMask(dataUrl);
+          }).catch(() => {
+            // Best-effort: keep cached URL if available.
+          });
+        }
       }
 
       // When a shape mask is connected, add a hidden bounds marker sized to the

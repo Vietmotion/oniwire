@@ -3517,6 +3517,8 @@ utilsApi.initProjectUtils();
 
   function resolveMaskMetaFromEl(maskEl, options = {}){
     if(!maskEl) return null;
+    const metaMode = String(maskEl.dataset?.maskMetaMode || "").trim().toLowerCase();
+    if(metaMode === "none" || metaMode === "raster") return null;
     const includeNested = options.includeNested !== false;
     const hasMaskData = Boolean(maskEl.dataset?.maskShape || maskEl.dataset?.maskPathData);
     const direct = hasMaskData ? maskEl : null;
@@ -5934,6 +5936,23 @@ async function evaluate(){
         if(outVal instanceof Promise) {
           outVal = await outVal;
         }
+
+        const outEl = outVal?.el;
+        const inset = String(outEl?.style?.inset || "").trim();
+        const isCanvasWrap = outEl && outEl.style && outEl.style.position === "absolute" && (inset === "0" || inset === "0px");
+        if(isCanvasWrap){
+          const nodeIdToken = String(node.id);
+          const existingTokens = String(outEl.dataset.previewOverflowNodeIds || outEl.dataset.previewOverflowNodeId || "")
+            .split(/\s+/)
+            .map(token => token.trim())
+            .filter(Boolean);
+          if(!existingTokens.includes(nodeIdToken)) existingTokens.push(nodeIdToken);
+          outEl.dataset.previewOverflowNodeIds = existingTokens.join(" ");
+          if(!outEl.dataset.previewOverflowNodeId){
+            outEl.dataset.previewOverflowNodeId = nodeIdToken;
+          }
+          outEl.style.overflow = "hidden";
+        }
       }
       catch(e){ console.error(e); outVal = null; }
     }
@@ -6000,21 +6019,88 @@ async function evaluate(){
     }
   }
 
-  function updatePenWrapOverflow(){
+  function updatePreviewNodeOverflow(){
     if(!renderRoot) return;
+    const previewOverflowSelector = "[data-preview-overflow-node-id], [data-preview-overflow-node-ids]";
+    const getPreviewOverflowTokens = (el) => {
+      const legacy = String(el?.dataset?.previewOverflowNodeId || "").trim();
+      const list = String(el?.dataset?.previewOverflowNodeIds || "")
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(Boolean);
+      if(legacy && !list.includes(legacy)) list.push(legacy);
+      return list;
+    };
+    const findPreviewOverflowWrapsByNodeId = (id) => {
+      const result = [];
+      renderRoot.querySelectorAll(previewOverflowSelector).forEach((el) => {
+        if(getPreviewOverflowTokens(el).includes(id)) result.push(el);
+      });
+      return result;
+    };
+
+    renderRoot.querySelectorAll(previewOverflowSelector).forEach(el => {
+      el.style.overflow = "hidden";
+    });
+
+    const selectedIds = new Set();
+    if(state.selected) selectedIds.add(String(state.selected));
+    if(state.selectedNodes instanceof Set){
+      state.selectedNodes.forEach((id) => selectedIds.add(String(id)));
+    }
+
+    const visiblePreviewWraps = new Set();
+    selectedIds.forEach((id) => {
+      findPreviewOverflowWrapsByNodeId(id).forEach((el) => {
+        visiblePreviewWraps.add(el);
+        el.querySelectorAll?.(previewOverflowSelector)?.forEach((child) => {
+          visiblePreviewWraps.add(child);
+        });
+        let parent = el.parentElement;
+        while(parent && parent !== renderRoot){
+          if(parent.matches && parent.matches(previewOverflowSelector)){
+            visiblePreviewWraps.add(parent);
+          }
+          parent = parent.parentElement;
+        }
+      });
+    });
+    visiblePreviewWraps.forEach((el) => {
+      el.style.overflow = "visible";
+    });
+
+    // Backward compatibility for nodes rendered before the generalized marker.
     renderRoot.querySelectorAll("[data-pen-wrap-node-id]").forEach(el => {
       el.style.overflow = "hidden";
     });
-    const selNode = state.selected ? state.nodes.get(state.selected) : null;
-    if(selNode && selNode.type === "Pen"){
-      const activeWrap = renderRoot.querySelector(`[data-pen-wrap-node-id="${selNode.id}"]`);
-      if(activeWrap) activeWrap.style.overflow = "visible";
-    }
+    const visiblePenWraps = new Set();
+    selectedIds.forEach((id) => {
+      renderRoot.querySelectorAll(`[data-pen-wrap-node-id="${id}"]`).forEach((el) => {
+        visiblePenWraps.add(el);
+        el.querySelectorAll?.("[data-pen-wrap-node-id]")?.forEach((child) => {
+          visiblePenWraps.add(child);
+        });
+        let parent = el.parentElement;
+        while(parent && parent !== renderRoot){
+          if(parent.hasAttribute && parent.hasAttribute("data-pen-wrap-node-id")){
+            visiblePenWraps.add(parent);
+          }
+          parent = parent.parentElement;
+        }
+      });
+    });
+    visiblePenWraps.forEach((el) => {
+      el.style.overflow = "visible";
+    });
+  }
+
+  function updatePenWrapOverflow(){
+    updatePreviewNodeOverflow();
   }
 
   function updatePreviewSelectionBox(){
     renderRoot.querySelectorAll(".previewSelectionBox, .previewSelectionDot").forEach(el => el.remove());
-    updatePenWrapOverflow();
+    updatePreviewNodeOverflow();
     if(!state.selected){
       drawPenCanvasOverlay();
       return;

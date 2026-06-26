@@ -27,6 +27,10 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       wrap.style.position = "absolute";
       wrap.style.inset = "0";
       wrap.dataset.boundId = node.id;
+      // Clone output can contain multiple repeated elements; force downstream
+      // mask resolution to use the rendered mask layer instead of a single
+      // nested geometric metadata payload from the source node.
+      wrap.dataset.maskMetaMode = "raster";
       propagateMotionFlag(wrap, src.el);
 
       const mode = node.params.mode || "x";
