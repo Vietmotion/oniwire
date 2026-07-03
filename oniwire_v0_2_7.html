@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Oniwire (v0.2.6 | 2026-06-20 00:00)</title>
+  <title>Oniwire (v0.2.7 | 2026-07-03 00:00)</title>
   <link rel="stylesheet" href="styles.css?v=20260607-1752">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -98,6 +98,7 @@
   <script src="scripts/node-search.js"></script>
   <script src="scripts/nodes/color.js"></script>
   <script src="scripts/nodes/gradient.js"></script>
+  <script src="scripts/nodes/particle.js"></script>
   <script src="scripts/nodes/ramp.js"></script>
   <script src="scripts/nodes/shape.js"></script>
   <script src="scripts/nodes/text.js"></script>
@@ -197,6 +198,7 @@
           <div class="screen" id="previewViewport" draggable ="false">
             <div class="previewScale" id="previewInner">
               <div id="safeZoneOverlay" class="safeZoneOverlay isHidden" aria-hidden="true">
+                <div class="safeZoneFrame"></div>
                 <div class="safeZoneBox safeZoneBox--action"></div>
                 <div class="safeZoneBox safeZoneBox--title"></div>
                 <div class="safeZoneEdge safeZoneEdge--top"></div>
@@ -735,6 +737,7 @@
         id: String(g.id),
         label: String(g.label || "Group"),
         collapsed: Boolean(g.collapsed),
+        bypassed: Boolean(g.bypassed),
         memberIds: Array.isArray(g.memberIds) ? g.memberIds.map(id => String(id)) : [],
         rect: {
           x: Number(g.rect?.x) || 0,
@@ -808,6 +811,7 @@
         id: String(g.id),
         label: String(g.label || "Group"),
         collapsed: Boolean(g.collapsed),
+        bypassed: Boolean(g.bypassed),
         memberIds: Array.isArray(g.memberIds) ? g.memberIds.map(id => String(id)) : [],
         rect: {
           x: Number(g.rect?.x) || 0,
@@ -1710,11 +1714,15 @@
     return (dx * dx) + (dy * dy);
   }
 
+  function getPenHitRadiusCanvas(screenRadiusPx){
+    return screenRadiusPx / Math.max(0.1, previewScale);
+  }
+
   function pickPenSelectionControl(node, points, selectedIndices, canvasPt){
     const selectionBounds = getPenSelectionBounds(node, points, selectedIndices);
     if(!selectionBounds || selectedIndices.length < 2) return { kind: "none", bounds: null };
 
-    const radius = Math.max(8, 10 / Math.max(0.1, previewScale));
+    const radius = getPenHitRadiusCanvas(10);
     const radius2 = radius * radius;
     if(distanceSquared(canvasPt, selectionBounds.rotateHandle) <= radius2){
       return { kind: "selectionRotate", bounds: selectionBounds };
@@ -1737,7 +1745,7 @@
     const selectionBounds = getPenPathSelectionBounds(node, paths, selectedPathIndices);
     if(!selectionBounds || selectedPathIndices.length < 2) return { kind: "none", bounds: null };
 
-    const radius = Math.max(8, 10 / Math.max(0.1, previewScale));
+    const radius = getPenHitRadiusCanvas(10);
     const radius2 = radius * radius;
 
     if(distanceSquared(canvasPt, selectionBounds.rotateHandle) <= radius2){
@@ -2164,7 +2172,7 @@
     const path = getPenActivePath(node);
     const closest = getClosestPenPathPoint(node, path, canvasPt);
     if(!closest) return null;
-    const threshold = Math.max(PEN_PATH_INSERT_CANVAS_THRESHOLD, PEN_PATH_INSERT_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    const threshold = getPenHitRadiusCanvas(PEN_PATH_INSERT_CANVAS_THRESHOLD);
     return closest.dist2 <= (threshold * threshold) ? closest : null;
   }
 
@@ -2211,7 +2219,7 @@
     const pts = normalizePenPoints(path?.points);
     if(!pts.length) return null;
 
-    const threshold = Math.max(PEN_POINT_DELETE_CANVAS_THRESHOLD, PEN_POINT_DELETE_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    const threshold = getPenHitRadiusCanvas(PEN_POINT_DELETE_CANVAS_THRESHOLD);
     const threshold2 = threshold * threshold;
     let best = null;
 
@@ -2266,7 +2274,7 @@
     const pts = normalizePenPoints(path?.points);
     if(!canvasPt || !pts.length || path?.closed || pts.length < 3) return null;
     const first = penLocalToCanvas(node, pts[0]);
-    const threshold = Math.max(PEN_CLOSE_PATH_CANVAS_THRESHOLD, PEN_CLOSE_PATH_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    const threshold = getPenHitRadiusCanvas(PEN_CLOSE_PATH_CANVAS_THRESHOLD);
     const dx = canvasPt.x - first.x;
     const dy = canvasPt.y - first.y;
     return ((dx * dx) + (dy * dy)) <= (threshold * threshold) ? { first, threshold } : null;
@@ -2275,7 +2283,7 @@
   function findClosestPenPathTarget(node, canvasPt, options){
     const paths = Array.isArray(options?.paths) ? options.paths : normalizePenPaths(node?.params?.paths);
     const exclude = Number.isInteger(options?.excludeIndex) ? options.excludeIndex : -1;
-    const threshold = Math.max(PEN_PATH_INSERT_CANVAS_THRESHOLD, PEN_PATH_INSERT_CANVAS_THRESHOLD / Math.max(0.1, previewScale));
+    const threshold = getPenHitRadiusCanvas(PEN_PATH_INSERT_CANVAS_THRESHOLD);
     let best = null;
 
     for(let i = 0; i < paths.length; i++){
@@ -2423,7 +2431,7 @@
   function pickPenControl(node, canvasPt){
     const activePath = getPenActivePath(node);
     const pts = activePath ? normalizePenPoints(activePath.points) : [];
-    const radius = Math.max(8, 10 / Math.max(0.1, previewScale));
+    const radius = getPenHitRadiusCanvas(10);
     const r2 = radius * radius;
     const toCanvas = (p) => penLocalToCanvas(node, p);
 
@@ -2506,6 +2514,11 @@
     const offsetY = (vh - scaledH) / 2;
     previewInner.style.transform =
       `translate(${offsetX + pan.x}px, ${offsetY + pan.y}px) scale(${scale})`;
+
+    // Keep Safe Zone lines readable when zoomed out.
+    const targetScreenPx = scale < 0.5 ? 2.2 : (scale < 1 ? 1.6 : 1.1);
+    const safeLineWidth = Math.max(1, Math.min(12, targetScreenPx / Math.max(scale, 0.001)));
+    previewInner.style.setProperty("--safe-line-w", `${safeLineWidth}px`);
 
     drawPenCanvasOverlay();
     syncLayoutSplitters();
@@ -3787,6 +3800,56 @@ utilsApi.initProjectUtils();
   }
 
   const liveMaskCache = new Map();
+  const invertedMaskUrlCache = new Map();
+
+  async function invertMaskDataUrl(dataUrl){
+    const url = String(dataUrl || "").trim();
+    if(!url) return "";
+    if(invertedMaskUrlCache.has(url)) return invertedMaskUrlCache.get(url);
+
+    const out = await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try{
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, img.naturalWidth || img.width || 1);
+          canvas.height = Math.max(1, img.naturalHeight || img.height || 1);
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if(!ctx){
+            resolve(url);
+            return;
+          }
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          for(let i = 0; i < data.length; i += 4){
+            const r = data[i] / 255;
+            const g = data[i + 1] / 255;
+            const b = data[i + 2] / 255;
+            const a = data[i + 3] / 255;
+            const lum = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+            const coverage = Math.max(a, lum);
+            const inv = 1 - coverage;
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = Math.round(inv * 255);
+          }
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+        }catch(_){
+          resolve(url);
+        }
+      };
+      img.onerror = () => resolve(url);
+      img.src = url;
+    });
+
+    invertedMaskUrlCache.set(url, out);
+    return out;
+  }
+
+  window.oniwireInvertMaskDataUrl = invertMaskDataUrl;
 
   function resolveLiveMaskCacheKey(el){
     if(!el) return "";
@@ -3826,24 +3889,30 @@ utilsApi.initProjectUtils();
   window.oniwireSetLiveMaskCacheUrl = setLiveMaskCacheUrl;
   window.oniwireGetLiveMaskCacheUrl = getLiveMaskCacheUrl;
 
-  function startLiveMaskUpdate(targetEl, maskEl, fps = 15){
+  function startLiveMaskUpdate(targetEl, maskEl, fps = 15, options = null){
     if(!targetEl || !maskEl) return;
     if(targetEl.dataset.liveMaskBound === "true") return;
 
     targetEl.dataset.liveMaskBound = "true";
     const interval = 1000 / Math.max(1, Number(fps) || 15);
+    const invertMask = Boolean(options?.invertMask || targetEl.dataset?.liveMaskInvert === "true");
     let lastTime = 0;
     let captureBusy = false;
     let disconnectedSince = 0;
 
-    const applyMaskUrl = (url) => {
+    const applyMaskUrl = (url, options = null) => {
       if(!url) return;
-      if(maskEl?.dataset) maskEl.dataset.frozenUrl = url;
+      const cacheSource = options?.cacheSource !== false;
+      if(cacheSource && maskEl?.dataset) maskEl.dataset.frozenUrl = url;
       if(targetEl?.dataset) targetEl.dataset.frozenUrl = url;
-      setLiveMaskCacheUrl(maskEl, url);
+      if(cacheSource) setLiveMaskCacheUrl(maskEl, url);
       setLiveMaskCacheUrl(targetEl, url);
       targetEl.style.maskImage = `url(${url})`;
       targetEl.style.webkitMaskImage = `url(${url})`;
+      targetEl.style.maskMode = "alpha";
+      targetEl.style.webkitMaskMode = "alpha";
+      targetEl.style.maskComposite = "";
+      targetEl.style.webkitMaskComposite = "";
     };
 
     const captureLiveMask = async () => {
@@ -3852,13 +3921,21 @@ utilsApi.initProjectUtils();
       if(typeof renderLayerToDataUrl !== "function") return;
       captureBusy = true;
       try{
-        const dataUrl = await renderLayerToDataUrl(maskEl, {
+        const sourceDataUrl = await renderLayerToDataUrl(maskEl, {
           useSimpleShapeRender: false,
-          timeoutMs: 300,
+          timeoutMs: 700,
           bakeComputedStyles: true,
           backgroundColor: null
         });
-        if(dataUrl) applyMaskUrl(dataUrl);
+        if(!sourceDataUrl) return;
+        if(invertMask && typeof invertMaskDataUrl === "function"){
+          if(maskEl?.dataset) maskEl.dataset.frozenUrl = sourceDataUrl;
+          setLiveMaskCacheUrl(maskEl, sourceDataUrl);
+          const invertedUrl = await invertMaskDataUrl(sourceDataUrl);
+          if(invertedUrl) applyMaskUrl(invertedUrl, { cacheSource: false });
+        }else{
+          applyMaskUrl(sourceDataUrl);
+        }
       }catch(_){
         // Best-effort live mask capture.
       }finally{
@@ -3881,8 +3958,21 @@ utilsApi.initProjectUtils();
       disconnectedSince = 0;
       if(t - lastTime >= interval){
         lastTime = t;
-        const liveUrl = maskEl.dataset?.frozenUrl || getLiveMaskCacheUrl(maskEl) || "";
-        if(liveUrl){
+        let liveUrl = maskEl.dataset?.frozenUrl || getLiveMaskCacheUrl(maskEl) || "";
+        if(invertMask && liveUrl && typeof invertMaskDataUrl === "function"){
+          if(captureBusy){
+            requestAnimationFrame(tick);
+            return;
+          }
+          captureBusy = true;
+          invertMaskDataUrl(liveUrl).then((invertedUrl) => {
+            if(invertedUrl) applyMaskUrl(invertedUrl, { cacheSource: false });
+          }).catch(() => {
+            applyMaskUrl(liveUrl, { cacheSource: false });
+          }).finally(() => {
+            captureBusy = false;
+          });
+        }else if(liveUrl){
           applyMaskUrl(liveUrl);
         }else{
           captureLiveMask();
@@ -5727,6 +5817,7 @@ const NODE_CATEGORIES = {
   Reroute: "Editor",
   Color: "Generators",
   Gradient: "Generators",
+  Particle: "Generators",
   Ramp: "Generators",
   Shape: "Generators",
   Text: "Generators",
@@ -5926,7 +6017,7 @@ async function evaluate(){
     }
 
     let outVal = null;
-    if(node.bypassed){
+    if(node.bypassed || isNodeBypassedByGroup(nodeId)){
       // Pass the first connected input straight through, or null
       outVal = inputValues[Object.keys(inputValues)[0]] ?? null;
     } else {
@@ -6216,20 +6307,31 @@ async function evaluate(){
         const center = { x: left + width / 2, y: top + height / 2 };
         const startPt = getPreviewPoint(ev);
         const startDist = Math.hypot(startPt.x - center.x, startPt.y - center.y) || 1;
+        const cornerVec = { x: c.x - center.x, y: c.y - center.y };
+        const cornerVecLen2 = Math.max(1e-6, (cornerVec.x * cornerVec.x) + (cornerVec.y * cornerVec.y));
 
         const startSize = Number(node.params?.size ?? 0);
         const startWidth = Number(node.params?.width ?? 100);
         const startHeight = Number(node.params?.height ?? 100);
+        const startBoxWidth = Number(node.params?.boxWidth ?? 560);
         const startScale = Number(node.params?.scale ?? 1);
         const startX = Number(node.params?.x ?? 0);
         const startY = Number(node.params?.y ?? 0);
         const startW = width;
         const startH = height;
+        const textAlign = String(node.params?.align || "left").toLowerCase();
+        const textWrapMode = String(node.params?.wrapMode || "manual").toLowerCase();
 
         const onMove = (eMove) => {
           const pt = getPreviewPoint(eMove);
           const dist = Math.hypot(pt.x - center.x, pt.y - center.y);
-          const factor = clamp(dist / startDist, 0.1, 10);
+          let factor = clamp(dist / startDist, 0.1, 10);
+          if(node.type === "Text"){
+            const curVecX = pt.x - center.x;
+            const curVecY = pt.y - center.y;
+            const projected = ((curVecX * cornerVec.x) + (curVecY * cornerVec.y)) / cornerVecLen2;
+            factor = clamp(projected, 0.1, 10);
+          }
           const hasWidthHeight = typeof node.params?.width !== "undefined" && typeof node.params?.height !== "undefined";
 
           if(hasSize){
@@ -6265,6 +6367,11 @@ async function evaluate(){
               const nextSize = Math.max(1, startSize * factor);
               node.params.size = nextSize;
               syncInspectorValue("size", Math.round(nextSize));
+              if(textWrapMode === "box" && typeof node.params?.boxWidth !== "undefined"){
+                const nextBoxWidth = Math.max(80, startBoxWidth * factor);
+                node.params.boxWidth = nextBoxWidth;
+                syncInspectorValue("boxWidth", Math.round(nextBoxWidth));
+              }
             }
 
             if(node.type === "Text"){
@@ -6272,7 +6379,13 @@ async function evaluate(){
               const nextH = startH * factor;
               const dx = (nextW - startW) / 2;
               const dy = (nextH - startH) / 2;
-              node.params.x = startX - dx;
+              if(textAlign === "center"){
+                node.params.x = startX;
+              }else if(textAlign === "right"){
+                node.params.x = startX + dx;
+              }else{
+                node.params.x = startX - dx;
+              }
               node.params.y = startY - dy;
               syncInspectorValue("x", Math.round(node.params.x));
               syncInspectorValue("y", Math.round(node.params.y));
@@ -6890,6 +7003,17 @@ async function evaluate(){
     return null;
   }
 
+  function isNodeBypassedByGroup(nodeId){
+    const targetId = String(nodeId || "");
+    if(!targetId) return false;
+    for(const group of state.groups.values()){
+      if(!group?.bypassed) continue;
+      const memberIds = getNodeIdsInsideGroup(group);
+      if(memberIds.some(id => String(id) === targetId)) return true;
+    }
+    return false;
+  }
+
   function getGroupMemberIdsByBounds(group){
     const gr = getGroupRect(group);
     const inside = [];
@@ -6990,6 +7114,7 @@ async function evaluate(){
       id: gid,
       label: `Group ${gid.slice(1)}`,
       collapsed: false,
+      bypassed: false,
       memberIds: ids.map(id => String(id)),
       rect: {
         x: Number(rect.x) || 0,
@@ -7148,8 +7273,9 @@ async function evaluate(){
 
     for(const group of state.groups.values()){
       const isCollapsed = Boolean(group.collapsed);
+      const isBypassed = Boolean(group.bypassed);
       const wrap = document.createElement("div");
-      wrap.className = "groupBox" + (isCollapsed ? " collapsed" : "");
+      wrap.className = "groupBox" + (isCollapsed ? " collapsed" : "") + (isBypassed ? " bypassed" : "");
       wrap.dataset.gid = group.id;
       wrap.style.left = (Number(group.rect?.x) || 0) + "px";
       wrap.style.top = (Number(group.rect?.y) || 0) + "px";
@@ -7164,6 +7290,7 @@ async function evaluate(){
           <span class="groupLabel" contenteditable="true" spellcheck="false">${escapeAttr(group.label || "Group")}</span>
           <div class="groupHeaderRight">
             <span class="groupBadge">${memberCount} node${memberCount === 1 ? "" : "s"}</span>
+            <button class="groupBypassBtn" type="button" title="Bypass group" aria-label="Bypass group" style="opacity:${isBypassed ? 1 : 0.4}">👁</button>
             <button class="groupCollapseBtn" type="button" title="${isCollapsed ? "Expand group" : "Collapse group"}" aria-label="${isCollapsed ? "Expand group" : "Collapse group"}">${isCollapsed ? "▸" : "▾"}</button>
           </div>
         </div>
@@ -7171,6 +7298,7 @@ async function evaluate(){
 
       const header = wrap.querySelector(".groupHeader");
       const labelEl = wrap.querySelector(".groupLabel");
+      const bypassBtn = wrap.querySelector(".groupBypassBtn");
       const collapseBtn = wrap.querySelector(".groupCollapseBtn");
       if(labelEl){
         labelEl.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -7186,6 +7314,18 @@ async function evaluate(){
           labelEl.textContent = next;
         });
       }
+
+      bypassBtn?.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+      });
+      bypassBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pushHistory();
+        group.bypassed = !group.bypassed;
+        render();
+        evaluateAndRender();
+        toast(group.bypassed ? "Group bypass ON" : "Group bypass OFF");
+      });
 
       collapseBtn?.addEventListener("mousedown", (e) => {
         e.stopPropagation();
@@ -7354,9 +7494,22 @@ async function evaluate(){
           if(ev.target.classList.contains("dot")) return;
           ev.stopPropagation();
           selectNode(node.id, ev.ctrlKey || ev.metaKey, ev.shiftKey);
+          let dragNodeId = node.id;
+          if(ev.altKey){
+            const duplicated = duplicateNodesByIds([node.id], { selectNew: true, pushHistoryEntry: true });
+            if(duplicated.length){
+              dragNodeId = duplicated[duplicated.length - 1];
+              render();
+              evaluateAndRender();
+              renderInspector();
+              requestWireDraw();
+            }
+          }
           const m = editorMouse(ev);
           const mw = editorToWorld(m.x, m.y);
-          state.draggingNode = { id: node.id, ox: mw.x - node.pos.x, oy: mw.y - node.pos.y };
+          const dragNode = state.nodes.get(String(dragNodeId));
+          if(!dragNode) return;
+          state.draggingNode = { id: dragNodeId, ox: mw.x - dragNode.pos.x, oy: mw.y - dragNode.pos.y };
         });
         // Right-click to delete
         el.addEventListener("contextmenu", (ev) => {
@@ -7505,14 +7658,29 @@ async function evaluate(){
           selectNode(node.id, ev.ctrlKey || ev.metaKey, ev.shiftKey);
         }
 
+        let dragIds = (state.selectedNodes.size > 1 && state.selectedNodes.has(node.id))
+          ? Array.from(state.selectedNodes)
+          : [node.id];
+
+        if(ev.altKey){
+          const duplicatedIds = duplicateNodesByIds(dragIds, { selectNew: true, pushHistoryEntry: true });
+          if(duplicatedIds.length){
+            dragIds = duplicatedIds;
+            render();
+            evaluateAndRender();
+            renderInspector();
+            requestWireDraw();
+          }
+        }
+
         const m = editorMouse(ev);
         const mWorld = editorToWorld(m.x, m.y);
 
         // Check if we should drag multiple nodes
-        if(state.selectedNodes.size > 1 && state.selectedNodes.has(node.id)){
+        if(dragIds.length > 1){
           // Drag all selected nodes
           const offsets = new Map();
-          for(const nid of state.selectedNodes){
+          for(const nid of dragIds){
             const n = state.nodes.get(nid);
             if(n){
               offsets.set(nid, {
@@ -7522,15 +7690,18 @@ async function evaluate(){
             }
           }
           state.draggingNode = {
-            ids: new Set(state.selectedNodes),
+            ids: new Set(dragIds),
             offsets: offsets
           };
         } else {
           // Drag single node
+          const dragNodeId = dragIds[0];
+          const dragNode = state.nodes.get(String(dragNodeId));
+          if(!dragNode) return;
           state.draggingNode = {
-            id: node.id,
-            ox: mWorld.x - node.pos.x,
-            oy: mWorld.y - node.pos.y
+            id: dragNodeId,
+            ox: mWorld.x - dragNode.pos.x,
+            oy: mWorld.y - dragNode.pos.y
           };
         }
       });
@@ -7937,6 +8108,40 @@ async function evaluate(){
     }
   }
 
+  function getCompositeInspectorPorts(node){
+    if(node?.type !== "Composite") return [];
+    if(Array.isArray(node.params?.inputPorts) && node.params.inputPorts.length){
+      return node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean);
+    }
+    return ["a", "b"];
+  }
+
+  function resolveCompositeSelectedLayerPort(node){
+    const ports = getCompositeInspectorPorts(node);
+    if(!ports.length) return "";
+    const raw = String(node?.params?.selectedLayer || "").trim();
+    const selected = ports.includes(raw) ? raw : ports[0];
+    if(node?.params) node.params.selectedLayer = selected;
+    return selected;
+  }
+
+  function getCompositeLayerBlendMap(node){
+    if(!node?.params || typeof node.params !== "object") return {};
+    if(!node.params.layerBlend || typeof node.params.layerBlend !== "object"){
+      node.params.layerBlend = {};
+    }
+    return node.params.layerBlend;
+  }
+
+  function getCompositeLayerBlendMode(node, port){
+    const key = String(port || "").trim();
+    if(!key) return String(node?.params?.blend || "normal") || "normal";
+    const map = getCompositeLayerBlendMap(node);
+    const explicit = String(map[key] || "").trim();
+    if(explicit) return explicit;
+    return String(node?.params?.blend || "normal") || "normal";
+  }
+
   function renderInspectorField(node, f){
     if(f.showIf){
       const ok = typeof f.showIf === "function"
@@ -7946,10 +8151,22 @@ async function evaluate(){
     }
 
     let controlHtml = "";
+    const blendTargetPort = (node?.type === "Composite" && f?.k === "blend")
+      ? resolveCompositeSelectedLayerPort(node)
+      : "";
+    const fieldLabel = (node?.type === "Composite" && f?.k === "blend")
+      ? (blendTargetPort ? `${f.label} (${blendTargetPort})` : f.label)
+      : f.label;
+    const isInputConnected = (port) => {
+      const p = String(port || "").trim();
+      if(!p) return false;
+      return state.wires.some(w => String(w?.to?.nodeId) === String(node?.id) && String(w?.to?.port) === p);
+    };
+
     const isDisabled = Boolean(
-      typeof f.disabledIf === "function"
-        ? f.disabledIf(node)
-        : f.disabled
+      (typeof f.disabledIf === "function" ? f.disabledIf(node) : false)
+      || (f.disabledIfConnected ? isInputConnected(f.disabledIfConnected) : false)
+      || f.disabled
     );
     const disabledAttr = isDisabled ? " disabled" : "";
     const disabledStyle = isDisabled ? " opacity:.35; filter:grayscale(1) saturate(0); pointer-events:none;" : "";
@@ -8010,13 +8227,16 @@ async function evaluate(){
         </div>
       `;
     } else if(f.type === "select"){
+      const selectValue = (node?.type === "Composite" && f?.k === "blend")
+        ? getCompositeLayerBlendMode(node, resolveCompositeSelectedLayerPort(node))
+        : node.params[f.k];
       controlHtml = `
         <select data-k="${f.k}" style="${disabledControlStyle}"${disabledAttr}${disabledTitleAttr}>
           ${f.options.map(opt => {
             const value = (typeof opt === "object" && opt !== null) ? opt.value : opt;
             const label = (typeof opt === "object" && opt !== null) ? (opt.label ?? opt.value) : opt;
             return `
-            <option value="${escapeAttr(value)}" ${String(node.params[f.k]) === String(value) ? "selected" : ""}>
+            <option value="${escapeAttr(value)}" ${String(selectValue) === String(value) ? "selected" : ""}>
               ${label}
             </option>
           `;
@@ -8061,6 +8281,30 @@ async function evaluate(){
             <span class="smScrubValue">${valY}</span>
           </button>
           <button type="button" class="clonePivotCenterBtn" data-action-btn="cloneCenterPivot"${disabledAttr}>⊕ Center</button>
+        </div>
+      `;
+    } else if(f.type === "compactScrub2d"){
+      const kx = f.kx || "x";
+      const ky = f.ky || "y";
+      const lx = String(f.lx || "X");
+      const ly = String(f.ly || "Y");
+      const minX = Number.isFinite(Number(f.minX)) ? Number(f.minX) : -1200;
+      const maxX = Number.isFinite(Number(f.maxX)) ? Number(f.maxX) : 2400;
+      const minY = Number.isFinite(Number(f.minY)) ? Number(f.minY) : -1200;
+      const maxY = Number.isFinite(Number(f.maxY)) ? Number(f.maxY) : 1600;
+      const step = Number.isFinite(Number(f.step)) ? Number(f.step) : 1;
+      const valX = clamp(Number(node.params[kx]) || 0, minX, maxX);
+      const valY = clamp(Number(node.params[ky]) || 0, minY, maxY);
+      controlHtml = `
+        <div class="clonePivotCompact" style="grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); ${disabledStyle}"${disabledTitleAttr}>
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change ${escapeAttr(lx)}">
+            <span class="smScrubTag">${escapeAttr(lx)}</span>
+            <span class="smScrubValue">${Number.isInteger(valX) ? Math.round(valX) : valX}</span>
+          </button>
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change ${escapeAttr(ly)}">
+            <span class="smScrubTag">${escapeAttr(ly)}</span>
+            <span class="smScrubValue">${Number.isInteger(valY) ? Math.round(valY) : valY}</span>
+          </button>
         </div>
       `;
     } else if(f.type === "range"){
@@ -8241,6 +8485,10 @@ async function evaluate(){
       const ports = Array.isArray(node.params?.inputPorts) && node.params.inputPorts.length
         ? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
         : ["a", "b"];
+      const selectedPort = resolveCompositeSelectedLayerPort(node);
+      const layerOpacityMap = (node?.params?.layerOpacity && typeof node.params.layerOpacity === "object")
+        ? node.params.layerOpacity
+        : {};
 
       const rows = ports.map((port, idx) => {
         const wire = state.wires.find(w => String(w?.to?.nodeId) === String(node.id) && String(w?.to?.port) === String(port));
@@ -8248,10 +8496,17 @@ async function evaluate(){
         const fromName = fromNode
           ? String(fromNode.name || getNodeDisplayName(fromNode.type))
           : "Not connected";
+        const opacityVal = Math.max(0, Math.min(100, Number(layerOpacityMap?.[port] ?? 100)));
+        const opN = opacityVal / 100;
+        const hue = Math.round(8 + (186 * opN));
+        const fillAlpha = (0.07 + (0.12 * opN)).toFixed(3);
+        const fillColor = `hsla(${hue}, 82%, 30%, ${fillAlpha})`;
+        const borderColor = `hsla(${hue}, 84%, 46%, 0.28)`;
         return `
-          <div class="compInputItem" draggable="true" data-comp-input-port="${escapeAttr(port)}" data-comp-input-index="${idx}" title="Drag to reorder inputs">
-            <span class="compInputPort">${escapeAttr(port)}:</span>
+          <div class="compInputItem${port === selectedPort ? " isSelectedLayer" : ""}" data-comp-input-port="${escapeAttr(port)}" data-comp-input-index="${idx}" data-comp-opacity="${opacityVal}" style="--comp-op-pct:${opacityVal}%; --comp-op-fill:${fillColor}; --comp-op-border:${borderColor};" title="Click to select layer. Drag left/right to change opacity. Use left circle to reorder.">
+            <button type="button" class="compInputPortDot" data-comp-drag-handle="1" data-comp-input-port="${escapeAttr(port)}" draggable="true" aria-label="Reorder layer ${escapeAttr(port)}" title="Drag to reorder layer">${escapeAttr(port)}</button>
             <span class="compInputSource">${escapeAttr(fromName)}</span>
+            <span class="compInputOpacity" data-comp-opacity-label="${escapeAttr(port)}">${Math.round(opacityVal)}%</span>
             <span class="compInputHandle" aria-hidden="true">${idx + 1}</span>
           </div>
         `;
@@ -8324,7 +8579,7 @@ async function evaluate(){
 
     return `
       <div class="row" style="${rowMutedStyle}"${disabledTitleAttr}>
-        <label>${f.label}</label>
+        <label${f.k ? ` data-field-label-k="${escapeAttr(f.k)}"` : ""}>${fieldLabel}</label>
         ${controlHtml}
       </div>
     `;
@@ -8624,6 +8879,9 @@ async function evaluate(){
 
           const removed = currentPorts.shift();
           node.params.inputPorts = currentPorts;
+          if(String(node.params.selectedLayer || "") === String(removed || "")){
+            node.params.selectedLayer = currentPorts[0] || "";
+          }
           state.wires = state.wires.filter(w => !(String(w.to.nodeId) === String(node.id) && w.to.port === removed));
           render();
           evaluateAndRender();
@@ -8636,6 +8894,56 @@ async function evaluate(){
     inspectorBody.querySelectorAll('[data-comp-input-order-box]').forEach(box => {
       let draggingPort = null;
       let dragInsertIndex = -1;
+      let scrubState = null;
+
+      const clampOpacity = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+      const getLayerOpacityMap = () => {
+        if(!node.params.layerOpacity || typeof node.params.layerOpacity !== "object") node.params.layerOpacity = {};
+        return node.params.layerOpacity;
+      };
+      const getSelectedLayerPort = () => resolveCompositeSelectedLayerPort(node);
+      const updateBlendControlForSelection = () => {
+        const blendSelect = inspectorBody.querySelector('select[data-k="blend"]');
+        if(blendSelect){
+          const selected = getSelectedLayerPort();
+          const blend = getCompositeLayerBlendMode(node, selected);
+          blendSelect.value = String(blend || "normal");
+        }
+        const blendLabel = inspectorBody.querySelector('[data-field-label-k="blend"]');
+        if(blendLabel){
+          const selected = getSelectedLayerPort();
+          blendLabel.textContent = selected ? `Blend Mode (${selected})` : "Blend Mode";
+        }
+      };
+      const refreshSelectionVisuals = () => {
+        const selected = getSelectedLayerPort();
+        box.querySelectorAll('.compInputItem').forEach((item) => {
+          const port = String(item.getAttribute('data-comp-input-port') || '');
+          item.classList.toggle('isSelectedLayer', port === selected);
+        });
+        updateBlendControlForSelection();
+      };
+      const selectLayer = (port) => {
+        const selected = String(port || '').trim();
+        if(!selected) return;
+        node.params.selectedLayer = selected;
+        refreshSelectionVisuals();
+      };
+      const styleCompOpacityItem = (item, value) => {
+        if(!item) return;
+        const op = clampOpacity(value);
+        const opN = op / 100;
+        const hue = Math.round(8 + (186 * opN));
+        const fillAlpha = (0.07 + (0.12 * opN)).toFixed(3);
+        const fillColor = `hsla(${hue}, 82%, 30%, ${fillAlpha})`;
+        const borderColor = `hsla(${hue}, 84%, 46%, 0.28)`;
+        item.style.setProperty("--comp-op-pct", `${op}%`);
+        item.style.setProperty("--comp-op-fill", fillColor);
+        item.style.setProperty("--comp-op-border", borderColor);
+        item.setAttribute("data-comp-opacity", String(Math.round(op)));
+        const label = item.querySelector("[data-comp-opacity-label]");
+        if(label) label.textContent = `${Math.round(op)}%`;
+      };
 
       const clearDragVisuals = () => {
         box.querySelectorAll('.compInputItem').forEach(item => {
@@ -8678,21 +8986,102 @@ async function evaluate(){
         }
       };
 
-      box.querySelectorAll('[data-comp-input-port]').forEach(item => {
-        item.addEventListener('dragstart', (ev) => {
-          draggingPort = item.getAttribute('data-comp-input-port');
-          item.classList.add('isDragging');
+      box.querySelectorAll('[data-comp-drag-handle]').forEach(handle => {
+        handle.addEventListener('dragstart', (ev) => {
+          const row = handle.closest('.compInputItem');
+          draggingPort = handle.getAttribute('data-comp-input-port');
+          selectLayer(draggingPort);
+          row?.classList.add('isDragging');
           if(ev.dataTransfer){
             ev.dataTransfer.effectAllowed = 'move';
             try{ ev.dataTransfer.setData('text/plain', draggingPort || ''); }catch(_){ }
           }
         });
 
-        item.addEventListener('dragend', () => {
+        handle.addEventListener('dragend', () => {
           draggingPort = null;
           clearDragVisuals();
         });
       });
+
+      box.querySelectorAll('.compInputItem').forEach((item) => {
+        item.addEventListener('pointerdown', (ev) => {
+          if(ev.button !== 0) return;
+          const dragHandle = ev.target.closest('[data-comp-drag-handle]');
+          if(dragHandle){
+            selectLayer(dragHandle.getAttribute('data-comp-input-port'));
+            return;
+          }
+
+          const port = String(item.getAttribute('data-comp-input-port') || '');
+          if(!port) return;
+          selectLayer(port);
+
+          const layerOpacityMap = getLayerOpacityMap();
+          const startOpacity = clampOpacity(layerOpacityMap[port] ?? item.getAttribute('data-comp-opacity') ?? 100);
+          scrubState = {
+            port,
+            startX: ev.clientX,
+            startOpacity,
+            rafId: null,
+            nextOpacity: startOpacity,
+            active: false
+          };
+          try{ item.setPointerCapture(ev.pointerId); }catch(_){ }
+
+          const flush = () => {
+            if(!scrubState || !scrubState.active) return;
+            scrubState.rafId = null;
+            const map = getLayerOpacityMap();
+            map[scrubState.port] = Math.round(scrubState.nextOpacity);
+            node.params.layerOpacity = map;
+            styleCompOpacityItem(item, scrubState.nextOpacity);
+            evaluateAndRender();
+          };
+
+          const onMove = (moveEv) => {
+            if(!scrubState) return;
+            const dx = moveEv.clientX - scrubState.startX;
+            if(!scrubState.active){
+              if(Math.abs(dx) < 3) return;
+              pushHistory();
+              scrubState.active = true;
+              item.classList.add('isScrubbing');
+            }
+            scrubState.nextOpacity = clampOpacity(scrubState.startOpacity + (dx * 0.35));
+            styleCompOpacityItem(item, scrubState.nextOpacity);
+            if(scrubState.rafId === null){
+              scrubState.rafId = requestAnimationFrame(flush);
+            }
+          };
+
+          const onUp = (upEv) => {
+            item.removeEventListener('pointermove', onMove);
+            item.removeEventListener('pointerup', onUp);
+            item.removeEventListener('pointercancel', onUp);
+            try{ item.releasePointerCapture(upEv.pointerId); }catch(_){ }
+            item.classList.remove('isScrubbing');
+            if(scrubState?.rafId !== null){
+              cancelAnimationFrame(scrubState.rafId);
+              scrubState.rafId = null;
+            }
+            if(scrubState?.active){
+              const map = getLayerOpacityMap();
+              map[scrubState.port] = Math.round(scrubState.nextOpacity);
+              node.params.layerOpacity = map;
+              styleCompOpacityItem(item, scrubState.nextOpacity);
+              evaluateAndRender();
+            }
+            scrubState = null;
+          };
+
+          item.addEventListener('pointermove', onMove);
+          item.addEventListener('pointerup', onUp);
+          item.addEventListener('pointercancel', onUp);
+        });
+      });
+
+      refreshSelectionVisuals();
 
       box.addEventListener('dragover', (ev) => {
         if(!draggingPort) return;
@@ -8779,6 +9168,14 @@ async function evaluate(){
 
         // coerce numeric types when appropriate
         if(inp.type === 'number' || inp.type === 'range') v = Number(v);
+
+        if(node.type === "Composite" && k === "blend"){
+          const selectedPort = resolveCompositeSelectedLayerPort(node);
+          const layerBlendMap = getCompositeLayerBlendMap(node);
+          layerBlendMap[selectedPort] = String(v || "normal") || "normal";
+          node.params.layerBlend = layerBlendMap;
+          node.params.blend = String(v || "normal") || "normal";
+        }
 
         node.params[k] = v;
 
@@ -8905,7 +9302,6 @@ async function evaluate(){
     inspectorBody.querySelectorAll('[data-pivot-scrub]').forEach(btn => {
       btn.addEventListener('pointerdown', (ev) => {
         if(ev.button !== 0) return;
-        if(!(node?.type === "Clone")) return;
         ev.preventDefault();
 
         const prop = btn.getAttribute('data-pivot-scrub') || '';
@@ -8913,6 +9309,16 @@ async function evaluate(){
         const max = Number(btn.getAttribute('data-pivot-max'));
         const step = Number(btn.getAttribute('data-pivot-step')) || 1;
         if(!prop || !Number.isFinite(min) || !Number.isFinite(max)) return;
+
+        const stepRaw = String(btn.getAttribute('data-pivot-step') || '1');
+        const decimals = (() => {
+          const dot = stepRaw.indexOf('.');
+          return dot >= 0 ? Math.max(0, stepRaw.length - dot - 1) : 0;
+        })();
+        const formatVal = (v) => {
+          const n = clamp(Number(v), min, max);
+          return decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n);
+        };
 
         let currentValue = clamp(Number(node.params[prop]) || 0, min, max);
         let carry = 0;
@@ -8926,8 +9332,8 @@ async function evaluate(){
 
         const commitRender = () => {
           rafId = null;
-          node.params[prop] = Math.round(currentValue);
-          if(valueEl) valueEl.textContent = String(Math.round(currentValue));
+          node.params[prop] = formatVal(currentValue);
+          if(valueEl) valueEl.textContent = String(node.params[prop]);
           evaluateAndRender();
           updatePreviewSelectionBox();
         };
@@ -8944,7 +9350,7 @@ async function evaluate(){
           carry -= units;
 
           currentValue = clamp(currentValue + (units * step), min, max);
-          if(valueEl) valueEl.textContent = String(Math.round(currentValue));
+          if(valueEl) valueEl.textContent = String(formatVal(currentValue));
           if(rafId === null) rafId = requestAnimationFrame(commitRender);
         };
 
@@ -8956,7 +9362,7 @@ async function evaluate(){
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
           if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
-          node.params[prop] = Math.round(clamp(currentValue, min, max));
+          node.params[prop] = formatVal(currentValue);
           evaluateAndRender();
           updatePreviewSelectionBox();
           if(moved) pushHistory();
@@ -9767,6 +10173,125 @@ async function evaluate(){
       });
 
       syncTaperScrubUi();
+    });
+
+    // Number scrub: drag left/right to change value; double-click to type.
+    inspectorBody.querySelectorAll('input[type="number"]').forEach(inp => {
+      if(inp.dataset.numDragBound === "1") return;
+      inp.dataset.numDragBound = "1";
+      inp.classList.add('numDragInput');
+      inp.readOnly = true;
+      inp.setAttribute('title', 'Drag left/right to change. Double-click to type.');
+
+      const stepRaw = Number(inp.step);
+      const step = Number.isFinite(stepRaw) && stepRaw > 0 ? stepRaw : 1;
+      const minRaw = Number(inp.min);
+      const maxRaw = Number(inp.max);
+      const hasMin = Number.isFinite(minRaw);
+      const hasMax = Number.isFinite(maxRaw);
+
+      const stepStr = String(inp.step || '1');
+      const stepDecimals = (() => {
+        if(stepStr.includes('e') || stepStr.includes('E')) return 4;
+        const dot = stepStr.indexOf('.');
+        return dot >= 0 ? Math.max(0, stepStr.length - dot - 1) : 0;
+      })();
+
+      const clampVal = (v) => {
+        let out = Number(v);
+        if(!Number.isFinite(out)) out = Number(inp.value);
+        if(!Number.isFinite(out)) out = 0;
+        if(hasMin) out = Math.max(minRaw, out);
+        if(hasMax) out = Math.min(maxRaw, out);
+        return out;
+      };
+
+      const snapToStep = (v) => {
+        if(!(step > 0)) return v;
+        const base = hasMin ? minRaw : 0;
+        const units = Math.round((v - base) / step);
+        return base + (units * step);
+      };
+
+      const setValue = (v) => {
+        const clamped = clampVal(snapToStep(v));
+        inp.value = stepDecimals > 0 ? clamped.toFixed(stepDecimals) : String(Math.round(clamped));
+      };
+
+      inp.addEventListener('dblclick', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        inp.readOnly = false;
+        inp.classList.add('isNumEditing');
+        inp.focus();
+        try{ inp.select(); }catch(_){ }
+      });
+
+      inp.addEventListener('blur', () => {
+        inp.readOnly = true;
+        inp.classList.remove('isNumEditing');
+      });
+
+      inp.addEventListener('keydown', (ev) => {
+        if(ev.key === 'Enter'){
+          inp.blur();
+        }else if(ev.key === 'Escape'){
+          inp.blur();
+        }
+      });
+
+      inp.addEventListener('pointerdown', (ev) => {
+        if(ev.button !== 0) return;
+        if(inp.classList.contains('isNumEditing')) return;
+        ev.preventDefault();
+
+        const startX = ev.clientX;
+        const startValue = clampVal(Number(inp.value));
+        let moved = false;
+        let rafId = null;
+        let nextValue = startValue;
+
+        inp.classList.add('isNumScrubbing');
+        try{ inp.setPointerCapture(ev.pointerId); }catch(_){ }
+
+        const flush = () => {
+          rafId = null;
+          setValue(nextValue);
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+
+        const onMove = (moveEv) => {
+          const dx = moveEv.clientX - startX;
+          if(!moved && Math.abs(dx) < 2) return;
+          moved = true;
+          const sensitivity = moveEv.shiftKey ? 0.05 : 0.18;
+          nextValue = startValue + (dx * step * sensitivity);
+          if(rafId === null) rafId = requestAnimationFrame(flush);
+        };
+
+        const onUp = (upEv) => {
+          inp.removeEventListener('pointermove', onMove);
+          inp.removeEventListener('pointerup', onUp);
+          inp.removeEventListener('pointercancel', onUp);
+          try{ inp.releasePointerCapture(upEv.pointerId); }catch(_){ }
+          inp.classList.remove('isNumScrubbing');
+
+          if(rafId !== null){
+            cancelAnimationFrame(rafId);
+            rafId = null;
+          }
+
+          if(moved){
+            setValue(nextValue);
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        };
+
+        inp.addEventListener('pointermove', onMove);
+        inp.addEventListener('pointerup', onUp);
+        inp.addEventListener('pointercancel', onUp);
+      });
     });
 
     // Auto-resize textarea fields and initialize their height
@@ -11455,6 +11980,7 @@ function serializeGraph(){
       id: String(g.id),
       label: String(g.label || "Group"),
       collapsed: Boolean(g.collapsed),
+      bypassed: Boolean(g.bypassed),
       memberIds: Array.isArray(g.memberIds) ? g.memberIds.map(id => String(id)) : [],
       rect: {
         x: Number(g.rect?.x) || 0,
@@ -11518,6 +12044,57 @@ function copySelectedNodes(){
   copyBuffer = { nodes, wires };
   pasteOffsetCount = 0;
   toast(`Copied ${nodes.length} node${nodes.length > 1 ? "s" : ""}.`);
+}
+
+function duplicateNodesByIds(ids, options = {}){
+  const normalizedIds = Array.isArray(ids)
+    ? ids.map(id => String(id)).filter(id => state.nodes.has(id))
+    : [];
+  if(!normalizedIds.length) return [];
+
+  if(options.pushHistoryEntry) pushHistory();
+
+  const idSet = new Set(normalizedIds);
+  const idMap = new Map();
+  const newIds = [];
+
+  for(const sourceId of normalizedIds){
+    const src = state.nodes.get(sourceId);
+    if(!src) continue;
+    const newId = uid();
+    idMap.set(sourceId, newId);
+    newIds.push(newId);
+    state.nodes.set(newId, {
+      id: newId,
+      type: src.type,
+      name: String(src.name || src.type || ""),
+      pos: {
+        x: Number(src.pos?.x) || 0,
+        y: Number(src.pos?.y) || 0
+      },
+      params: JSON.parse(JSON.stringify(src.params || {}))
+    });
+  }
+
+  for(const wire of state.wires){
+    const fromId = String(wire?.from?.nodeId || "");
+    const toId = String(wire?.to?.nodeId || "");
+    if(!idSet.has(fromId) || !idSet.has(toId)) continue;
+    const newFrom = idMap.get(fromId);
+    const newTo = idMap.get(toId);
+    if(!newFrom || !newTo) continue;
+    state.wires.push({
+      from: { nodeId: newFrom, port: wire.from.port },
+      to: { nodeId: newTo, port: wire.to.port }
+    });
+  }
+
+  if(options.selectNew){
+    state.selectedNodes = new Set(newIds);
+    state.selected = newIds[newIds.length - 1] || null;
+  }
+
+  return newIds;
 }
 
 window.addEventListener("copy", (e) => {
@@ -11927,6 +12504,7 @@ function loadGraph(data){
       id: String(g.id),
       label: String(g.label || "Group"),
       collapsed: Boolean(g.collapsed),
+      bypassed: Boolean(g.bypassed),
       memberIds: Array.isArray(g.memberIds) ? g.memberIds.map(id => String(id)) : [],
       rect: {
         x: Number(g.rect?.x) || 0,

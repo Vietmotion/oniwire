@@ -37,8 +37,8 @@ window.createOniwireGradientNodeDef = function createOniwireGradientNodeDef({ no
     },
     inspector: () => ([
       { k: "type", type: "select", label: "Type", options: ["linear", "radial"] },
-      { k: "a", type: "color", label: "Color A" },
-      { k: "b", type: "color", label: "Color B" },
+      { k: "a", type: "color", label: "Color A", disabledIfConnected: "ramp", disabledTitle: "Disabled while Ramp is connected." },
+      { k: "b", type: "color", label: "Color B", disabledIfConnected: "ramp", disabledTitle: "Disabled while Ramp is connected." },
       { k: "angle", type: "knob", label: "Angle", min: 0, max: 360, step: 1, showIf: { k: "type", equals: "linear" } },
       { k: "cx", type: "range", label: "Center X %", min: 0, max: 100, step: 1, showIf: { k: "type", equals: "radial" } },
       { k: "cy", type: "range", label: "Center Y %", min: 0, max: 100, step: 1, showIf: { k: "type", equals: "radial" } }

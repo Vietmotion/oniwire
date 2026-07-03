@@ -259,12 +259,30 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		return true;
 	}
 
-	function traceShapePath(ctx, shapeType, width, height, cx, cy){
+	function traceShapePath(ctx, shapeType, width, height, cx, cy, borderRadius){
 		const rx = width / 2;
 		const ry = height / 2;
 		ctx.beginPath();
 		if(shapeType === "square" || shapeType === "rectangle"){
-			ctx.rect(cx - rx, cy - ry, width, height);
+			const r = Math.max(0, Math.min(Number(borderRadius) || 0, Math.min(width, height) / 2));
+			const left = cx - rx;
+			const top = cy - ry;
+			const right = left + width;
+			const bottom = top + height;
+			if(r <= 0){
+				ctx.rect(left, top, width, height);
+				return;
+			}
+			ctx.moveTo(left + r, top);
+			ctx.lineTo(right - r, top);
+			ctx.arcTo(right, top, right, top + r, r);
+			ctx.lineTo(right, bottom - r);
+			ctx.arcTo(right, bottom, right - r, bottom, r);
+			ctx.lineTo(left + r, bottom);
+			ctx.arcTo(left, bottom, left, bottom - r, r);
+			ctx.lineTo(left, top + r);
+			ctx.arcTo(left, top, left + r, top, r);
+			ctx.closePath();
 			return;
 		}
 		if(shapeType === "circle"){
@@ -377,6 +395,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		const p = shapeNode.params || {};
 		const shapeType = String(p.shape || "circle");
 		const { width, height } = getShapeDimensions(p);
+		const borderRadius = Math.max(0, Math.min(Number(p.borderRadius) || 0, Math.min(width, height) / 2));
 		const fillColor = String(fillSpec?.color || p.color || "#3b82f6");
 		const color = hexToRgb01(fillColor);
 
@@ -393,7 +412,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		if(shapeType === "square" || shapeType === "rectangle"){
 			return {
 				items: [
-					{ ty: "rc", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [width, height] }, r: { a: 0, k: 0 }, d: 1, nm: "Rect Path 1" },
+					{ ty: "rc", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [width, height] }, r: { a: 0, k: borderRadius }, d: 1, nm: "Rect Path 1" },
 					{ ty: "fl", c: { a: 0, k: color }, o: { a: 0, k: 100 }, r: 1, bm: 0, nm: "Fill 1" }
 				],
 				ok: true
@@ -753,6 +772,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		const strokeColor = String(p.strokeColor || "#ffffff");
 		const strokeWidth = Math.max(0, Number(p.strokeWidth) || 0);
 		const strokeOpacity = Math.max(0, Math.min(1, Number(p.strokeOpacity) || 0));
+		const borderRadius = Math.max(0, Math.min(Number(p.borderRadius) || 0, Math.min(width, height) / 2));
 		const padding = Math.max(2, Math.ceil(Math.max(width, height) * 0.05));
 		const canvas = document.createElement("canvas");
 		canvas.width = Math.max(1, Math.ceil(width + (padding * 2)));
@@ -762,7 +782,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		applyCanvasFillStyle(ctx, fillSpec, fallbackColor, canvas.width, canvas.height);
-		traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2);
+		traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2, borderRadius);
 		ctx.fill();
 		if(strokeWidth > 0 && strokeOpacity > 0){
 			ctx.save();
@@ -771,7 +791,7 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 			ctx.lineWidth = strokeWidth;
 			ctx.lineJoin = "round";
 			ctx.lineCap = "round";
-			traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2);
+			traceShapePath(ctx, shapeType, width, height, canvas.width / 2, canvas.height / 2, borderRadius);
 			ctx.stroke();
 			ctx.restore();
 		}

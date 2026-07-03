@@ -10,6 +10,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       stepX: 40,
       stepY: 40,
       scalePerStep: 1,
+      opacityPerStep: 1,
       rotPerStep: 0,
       pivotX: 640,
       pivotY: 360,
@@ -39,6 +40,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       const stepX = Number(node.params.stepX) || 0;
       const stepY = Number(node.params.stepY) || 0;
       const scalePerStep = Number.isFinite(Number(node.params.scalePerStep)) ? Number(node.params.scalePerStep) : 1;
+      const opacityPerStep = Number.isFinite(Number(node.params.opacityPerStep)) ? Number(node.params.opacityPerStep) : 1;
       const rotPerStep = Number(node.params.rotPerStep) || 0;
       const pivotX = Number.isFinite(Number(node.params.pivotX)) ? Number(node.params.pivotX) : 640;
       const pivotY = Number.isFinite(Number(node.params.pivotY)) ? Number(node.params.pivotY) : 360;
@@ -53,9 +55,11 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
         c.style.position = "absolute";
         c.style.inset = "0";
         const stepScale = Math.pow(scalePerStep, stepIndex);
+        const stepOpacity = Math.pow(Math.max(0, Math.min(1, opacityPerStep)), stepIndex);
         const stepRot = rotPerStep * stepIndex;
         c.style.transform = `translate(${dx}px, ${dy}px) rotate(${stepRot}deg) scale(${stepScale})`;
         c.style.transformOrigin = `${pivotX}px ${pivotY}px`;
+        c.style.opacity = String(stepOpacity);
         wrap.appendChild(c);
       };
 
@@ -117,6 +121,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       {k:"stepX", type:"range", label:"Step X", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
       {k:"stepY", type:"range", label:"Step Y", min:-400, max:400, step:1, showIf:{ k:"mode", equals:"xy" }},
       {k:"scalePerStep", type:"range", label:"Scale / Step", min:0.1, max:3, step:0.01},
+      {k:"opacityPerStep", type:"range", label:"Opacity / Step", min:0, max:1, step:0.01},
       {k:"rotPerStep", type:"range", label:"Rotate / Step°", min:-180, max:180, step:0.1},
       {k:"angleStart", type:"range", label:"Angle Start", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
       {k:"angleStep", type:"range", label:"Angle Step", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},

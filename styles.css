@@ -344,10 +344,8 @@ select#nodeType optgroup{
 }
 
 .gm3SwatchRow .gm3Color{
-  width:38px;
-  height:28px;
-  padding:0;
-  border-radius: 4px;
+  width:44px;
+  height:34px;
 }
 
 .previewSelectionBox{
@@ -387,6 +385,61 @@ select#nodeType optgroup{
   font-family: var(--mono);
   font-size: 13px;
   outline: none;
+}
+
+#inspectorBody input[type="checkbox"]{
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border-radius: 5px;
+  border: 1px solid rgba(166,198,248,.45);
+  background: linear-gradient(180deg, rgba(16,24,38,.9), rgba(10,16,28,.94));
+  display: inline-grid;
+  place-content: center;
+  vertical-align: middle;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.05);
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+
+#inspectorBody input[type="checkbox"]::before{
+  content: "";
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  transform-origin: center;
+  transition: transform .12s ease;
+  clip-path: polygon(14% 54%, 0 68%, 38% 100%, 100% 24%, 86% 10%, 38% 69%);
+  background: rgba(226,240,255,.98);
+}
+
+#inspectorBody input[type="checkbox"]:checked{
+  border-color: rgba(132,178,255,.9);
+  background: linear-gradient(180deg, rgba(50,98,170,.96), rgba(35,74,134,.98));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 0 0 1px rgba(122,167,255,.28);
+}
+
+#inspectorBody input[type="checkbox"]:checked::before{
+  transform: scale(1);
+}
+
+#inspectorBody input[type="checkbox"]:focus-visible{
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 0 0 3px rgba(122,167,255,.22);
+}
+
+#inspectorBody input[data-k][type="color"],
+#inspectorBody input[data-sm-prop][type="color"],
+#inspectorBody .rampColor,
+#inspectorBody .gm3Color{
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  width: 44px;
+  height: 34px;
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 #inspectorBody select[data-k]{
@@ -866,14 +919,22 @@ select option{
   inset: 0;
   pointer-events: none;
   z-index: 2;
+  --safe-line-w: 1px;
 }
 
 .safeZoneOverlay.isHidden{ display: none; }
 
+.safeZoneFrame{
+  position: absolute;
+  inset: 0;
+  border: var(--safe-line-w) solid rgba(255,255,255,.5);
+  box-shadow: inset 0 0 0 var(--safe-line-w) rgba(0,0,0,.32);
+}
+
 .safeZoneBox{
   position: absolute;
-  border: 1px dashed rgba(255,255,255,.45);
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
+  border: var(--safe-line-w) dashed rgba(255,255,255,.62);
+  box-shadow: inset 0 0 0 var(--safe-line-w) rgba(0,0,0,.4);
 }
 
 .safeZoneBox--action{
@@ -904,35 +965,35 @@ select option{
 .safeZoneCenter::after{
   content: "";
   position: absolute;
-  background: rgba(255,255,255,.75);
+  background: rgba(255,255,255,.88);
 }
 
 .safeZoneCenter::before{
   left: 0;
   top: 50%;
   width: 14px;
-  height: 1px;
+  height: var(--safe-line-w);
   transform: translateY(-50%);
 }
 
 .safeZoneCenter::after{
   left: 50%;
   top: 0;
-  width: 1px;
+  width: var(--safe-line-w);
   height: 14px;
   transform: translateX(-50%);
 }
 
 .safeZoneEdge{
   position: absolute;
-  background: rgba(255,255,255,.55);
-  opacity: .7;
+  background: rgba(255,255,255,.84);
+  opacity: .95;
 }
 
 .safeZoneEdge--top,
 .safeZoneEdge--bottom{
   left: 50%;
-  width: 1px;
+  width: var(--safe-line-w);
   height: 36px;
   transform: translateX(-50%);
 }
@@ -941,7 +1002,7 @@ select option{
 .safeZoneEdge--right{
   top: 50%;
   width: 36px;
-  height: 1px;
+  height: var(--safe-line-w);
   transform: translateY(-50%);
 }
 
@@ -1001,12 +1062,42 @@ input[type="text"], input[type="number"], input[type="color"]{
   font-size:12px;
   outline:none;
 }
+
+#inspectorBody input[type="number"].numDragInput{
+  cursor: ew-resize;
+}
+
+#inspectorBody input[type="number"].numDragInput.isNumScrubbing{
+  border-color: rgba(132,178,255,.62);
+  box-shadow: 0 0 0 2px rgba(122,167,255,.16);
+}
+
+#inspectorBody input[type="number"].numDragInput.isNumEditing{
+  cursor: text;
+}
 input[type="color"]{
+  -webkit-appearance: none;
+  appearance: none;
   padding:0;
-  width:46px;
-  height:46px;
+  width:44px;
+  height:34px;
   border-radius: 6px;
+  overflow: hidden;
   cursor: pointer;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper{
+  padding: 3px;
+}
+
+input[type="color"]::-webkit-color-swatch{
+  border: 0;
+  border-radius: 4px;
+}
+
+input[type="color"]::-moz-color-swatch{
+  border: 0;
+  border-radius: 4px;
 }
 
 .emptyNote{
@@ -1069,20 +1160,37 @@ input[type="color"]{
 
 .compInputItem{
   display:grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 44px 1fr auto auto;
   gap:8px;
   align-items:center;
   border:1px solid rgba(255,255,255,.11);
   border-radius: 6px;
   padding:7px 9px;
-  background: rgba(255,255,255,.03);
-  cursor: grab;
+  background:
+    linear-gradient(90deg,
+      var(--comp-op-fill, rgba(110,162,255,.16)) 0%,
+      var(--comp-op-fill, rgba(110,162,255,.16)) var(--comp-op-pct, 100%),
+      rgba(255,255,255,.03) var(--comp-op-pct, 100%),
+      rgba(255,255,255,.03) 100%);
+  cursor: default;
   user-select: none;
   position: relative;
+  transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
 }
 
 .compInputItem:active{
-  cursor: grabbing;
+  cursor: ew-resize;
+}
+
+.compInputItem.isScrubbing{
+  cursor: ew-resize;
+  border-color: var(--comp-op-border, rgba(122,167,255,.55));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 0 0 1px var(--comp-op-border, rgba(122,167,255,.4));
+}
+
+.compInputItem.isSelectedLayer{
+  border-color: rgba(172,214,255,.72);
+  box-shadow: inset 0 0 0 1px rgba(180,220,255,.2), 0 0 0 1px rgba(115,170,255,.45);
 }
 
 .compInputItem.isDragging{
@@ -1116,10 +1224,38 @@ input[type="color"]{
   bottom:-1px;
 }
 
-.compInputPort{
+.compInputPortDot{
+  width:26px;
+  height:26px;
+  border-radius:999px;
+  border:1px solid rgba(150,196,255,.45);
+  background: linear-gradient(180deg, rgba(35,60,95,.88), rgba(20,36,62,.92));
+  color:#d9ebff;
   font-family: var(--mono);
-  font-size:11px;
-  color:#b9d3ff;
+  font-size:10px;
+  letter-spacing:.03em;
+  text-transform: lowercase;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor: grab;
+  user-select:none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+}
+
+.compInputPortDot:active{
+  cursor: grabbing;
+}
+
+.compInputPortDot:hover{
+  border-color: rgba(172,214,255,.72);
+  background: linear-gradient(180deg, rgba(45,78,120,.92), rgba(24,44,74,.96));
+}
+
+.compInputItem.isSelectedLayer .compInputPortDot{
+  border-color: rgba(188,226,255,.95);
+  background: linear-gradient(180deg, rgba(58,98,145,.96), rgba(30,56,90,.98));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 0 0 1px rgba(120,175,255,.42);
 }
 
 .compInputSource{
@@ -1131,11 +1267,23 @@ input[type="color"]{
   color: rgba(255,255,255,.88);
 }
 
+.compInputOpacity{
+  font-family: var(--mono);
+  font-size:10px;
+  letter-spacing: .03em;
+  color: rgba(230,241,255,.88);
+  padding:2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(5,12,24,.45);
+}
+
 .compInputHandle{
   font-size:10px;
   letter-spacing: .08em;
   text-transform: uppercase;
   color: rgba(255,255,255,.5);
+  cursor: default;
 }
 
 .compInputEmpty{
@@ -1675,6 +1823,26 @@ select optgroup{
   pointer-events: auto;
 }
 
+.groupBypassBtn{
+  border: 1px solid rgba(200, 220, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(234, 242, 255, 0.95);
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.groupBypassBtn:hover{
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .groupCollapseBtn:hover{
   background: rgba(255, 255, 255, 0.14);
 }
@@ -1705,6 +1873,15 @@ select optgroup{
 
 .groupBox.collapsed .groupHeader{
   border-bottom: none;
+}
+
+.groupBox.bypassed{
+  border-color: rgba(255, 189, 122, 0.52);
+}
+
+.groupBox.bypassed .groupHeader{
+  background: rgba(170, 118, 46, 0.3);
+  border-bottom-color: rgba(255, 206, 142, 0.3);
 }
 
 .groupResizeHandle{
@@ -2160,8 +2337,28 @@ select optgroup{
 
   input[type="color"]{
     width: 40px;
-    height: 40px;
+    height: 32px;
     border-radius: 5px;
+  }
+
+  #inspectorBody input[data-k][type="color"],
+  #inspectorBody input[data-sm-prop][type="color"],
+  #inspectorBody .rampColor,
+  #inspectorBody .gm3Color{
+    width: 40px;
+    height: 32px;
+    border-radius: 5px;
+  }
+
+  #inspectorBody input[type="checkbox"]{
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+  }
+
+  #inspectorBody input[type="checkbox"]::before{
+    width: 9px;
+    height: 9px;
   }
 
   .emptyNote{

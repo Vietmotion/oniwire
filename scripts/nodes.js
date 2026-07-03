@@ -20,6 +20,7 @@ window.createOniwireNodeDefsApi = function createOniwireNodeDefsApi(deps){
 	const basicNodes = {
 		Color: window.createOniwireColorNodeDef(),
 		Gradient: window.createOniwireGradientNodeDef({ normalizeRampStops }),
+		Particle: window.createOniwireParticleNodeDef({ getCanvasSize, measureLayerBounds }),
 		Ramp: window.createOniwireRampNodeDef({ normalizeRampStops })
 	};
 

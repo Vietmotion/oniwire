@@ -10,6 +10,7 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
       y: 60,
       weight: 700,
       font: "Inter",
+      orientation: "horizontal",
       align: "left",
       wrapMode: "manual",
       boxWidth: 560
@@ -30,6 +31,15 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
       t.style.fontSize = (Number(node.params.size) || 32) + "px";
       t.style.fontWeight = String(node.params.weight || 700);
       t.style.fontFamily = node.params.font || "Inter";
+
+      const orientation = String(node.params.orientation || "horizontal").toLowerCase();
+      if(orientation === "vertical"){
+        t.style.writingMode = "vertical-rl";
+        t.style.textOrientation = "upright";
+      }else{
+        t.style.writingMode = "horizontal-tb";
+        t.style.textOrientation = "mixed";
+      }
 
       const alignRaw = String(node.params.align || "left").toLowerCase();
       const align = (alignRaw === "center" || alignRaw === "right") ? alignRaw : "left";
@@ -159,6 +169,7 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
           { label: "Right", value: "right" }
         ]
       },
+      { k: "orientation", type: "select", label: "Orientation", options: ["horizontal", "vertical"] },
       { k: "wrapMode", type: "select", label: "Line Break", options: ["manual", "box"] },
       { k: "boxWidth", type: "range", label: "Box Width", min: 80, max: 1200, step: 1, showIf: { k: "wrapMode", equals: "box" } },
       { k: "size", type: "range", label: "Size", min: 8, max: 300, step: 1 },

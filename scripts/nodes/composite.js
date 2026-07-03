@@ -8,6 +8,9 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
   buildShapeMaskUrl,
   startLiveMaskUpdate
 }){
+  const compositeInvertStateByNode = new Map();
+  const INVERT_REFRESH_MIN_INTERVAL_MS = 45;
+
   function getCompositeLayerPorts(node){
     const fromParams = Array.isArray(node?.params?.inputPorts)
       ? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
@@ -79,20 +82,126 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
     }
   }
 
+  function applyCompositeMaskStyle(targetEl, maskUrl, maskMode){
+    if(!targetEl || !maskUrl) return;
+    const mode = String(maskMode || "alpha");
+
+    targetEl.style.maskRepeat = "no-repeat";
+    targetEl.style.webkitMaskRepeat = "no-repeat";
+    targetEl.style.maskPosition = "0 0";
+    targetEl.style.webkitMaskPosition = "0 0";
+    targetEl.style.maskSize = "100% 100%";
+    targetEl.style.webkitMaskSize = "100% 100%";
+
+    targetEl.style.maskImage = maskUrl;
+    targetEl.style.webkitMaskImage = maskUrl;
+    targetEl.style.maskMode = mode;
+    targetEl.style.webkitMaskMode = mode;
+    targetEl.style.maskComposite = "";
+    targetEl.style.webkitMaskComposite = "";
+  }
+
+  function unwrapCssUrl(maskUrl){
+    const raw = String(maskUrl || "").trim();
+    const m = raw.match(/^url\((.*)\)$/i);
+    if(!m) return "";
+    let inner = String(m[1] || "").trim();
+    if((inner.startsWith('"') && inner.endsWith('"')) || (inner.startsWith("'") && inner.endsWith("'"))){
+      inner = inner.slice(1, -1);
+    }
+    return inner;
+  }
+
+  function applyCompositeMaskWithInvert(targetEl, nodeId, maskUrl, maskMode, invertMask){
+    if(!targetEl || !maskUrl) return;
+    const key = String(nodeId || "");
+
+    if(!invertMask || typeof window.oniwireInvertMaskDataUrl !== "function"){
+      if(key) compositeInvertStateByNode.delete(key);
+      applyCompositeMaskStyle(targetEl, maskUrl, maskMode);
+      return;
+    }
+
+    const rawUrl = unwrapCssUrl(maskUrl);
+    if(!rawUrl){
+      applyCompositeMaskStyle(targetEl, maskUrl, maskMode);
+      return;
+    }
+
+    const now = (typeof performance !== "undefined" && performance.now)
+      ? performance.now()
+      : Date.now();
+    const prev = key ? (compositeInvertStateByNode.get(key) || null) : null;
+
+    // Reuse the last stable inverted URL immediately to avoid base-mask flashes.
+    if(prev?.invertedUrl){
+      applyCompositeMaskStyle(targetEl, `url(${prev.invertedUrl})`, "alpha");
+    }else{
+      applyCompositeMaskStyle(targetEl, maskUrl, maskMode);
+    }
+
+    const alreadyPendingSame = Boolean(prev?.pending && prev?.pendingRawUrl === rawUrl);
+    if(alreadyPendingSame) return;
+
+    const sourceChanged = String(prev?.sourceUrl || "") !== rawUrl;
+    const dueByTime = !prev || ((now - Number(prev.lastComputeAt || 0)) >= INVERT_REFRESH_MIN_INTERVAL_MS);
+    const shouldRefresh = sourceChanged && dueByTime;
+    if(!shouldRefresh) return;
+
+    const nextState = {
+      sourceUrl: String(prev?.sourceUrl || ""),
+      invertedUrl: String(prev?.invertedUrl || ""),
+      lastComputeAt: Number(prev?.lastComputeAt || 0),
+      pending: true,
+      pendingRawUrl: rawUrl
+    };
+    if(key) compositeInvertStateByNode.set(key, nextState);
+
+    window.oniwireInvertMaskDataUrl(rawUrl).then((invertedUrl) => {
+      if(!invertedUrl) return;
+      const doneAt = (typeof performance !== "undefined" && performance.now)
+        ? performance.now()
+        : Date.now();
+      if(key){
+        compositeInvertStateByNode.set(key, {
+          sourceUrl: rawUrl,
+          invertedUrl,
+          lastComputeAt: doneAt,
+          pending: false,
+          pendingRawUrl: ""
+        });
+      }
+      if(targetEl.isConnected){
+        applyCompositeMaskStyle(targetEl, `url(${invertedUrl})`, "alpha");
+      }
+    }).catch(() => {
+      if(!key) return;
+      const cur = compositeInvertStateByNode.get(key) || {};
+      compositeInvertStateByNode.set(key, {
+        sourceUrl: String(cur.sourceUrl || ""),
+        invertedUrl: String(cur.invertedUrl || ""),
+        lastComputeAt: Number(cur.lastComputeAt || 0),
+        pending: false,
+        pendingRawUrl: ""
+      });
+    });
+  }
+
   return {
     inputs: (node) => [...getCompositeLayerPorts(node), "mask"],
     outputs: ["layer"],
-    defaults: { blend: "normal", opacity: 100, inputPorts: ["a", "b"] },
+    defaults: { blend: "normal", opacity: 100, maskInvert: false, inputPorts: ["a", "b"], layerOpacity: {}, layerBlend: {}, selectedLayer: "a" },
     icon: "🧬",
     run: (node, inputs) => {
+      const invertMask = Boolean(node?.params?.maskInvert);
       const layerPorts = getCompositeLayerPorts(node);
-      const layerClones = layerPorts
-        .map(port => {
+      const layerEntries = layerPorts
+        .map((port) => {
           if(!inputs[port]?.el) return null;
-          const clone = inputs[port].el.cloneNode(true);
+          const layer = inputs[port].el.cloneNode(true);
           // Re-bind any live mask drivers inside nested composite layers.
-          rebindLiveMaskTargets(clone);
-          return clone;
+          rebindLiveMaskTargets(layer);
+          return { port, layer };
         })
         .filter(Boolean);
       const rampStops = inputs.mask?.stops ? normalizeRampStops(inputs.mask.stops) : [];
@@ -110,8 +219,8 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         shape: resolveMaskMetaFromEl(inputs.mask.el)
       } : null;
 
-      const M = inputs.mask?.el ? inputs.mask.el.cloneNode(true) : null;
-  if(!layerClones.length) return null;
+        const M = inputs.mask?.el ? inputs.mask.el.cloneNode(true) : null;
+        if(!layerEntries.length) return null;
 
       const wrap = document.createElement("div");
       wrap.style.position = "absolute";
@@ -162,19 +271,31 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
 
       const blendMode = node.params.blend || "normal";
       const opacity = Number(node.params.opacity ?? 100) / 100;
+      const layerOpacityMap = (node?.params?.layerOpacity && typeof node.params.layerOpacity === "object")
+        ? node.params.layerOpacity
+        : {};
+      const layerBlendMap = (node?.params?.layerBlend && typeof node.params.layerBlend === "object")
+        ? node.params.layerBlend
+        : {};
+      const hasLayerBlend = Object.keys(layerBlendMap).length > 0;
 
-      for(let i = 0; i < layerClones.length; i++){
-        const layer = layerClones[i];
-        // Apply blend and opacity to all layers above the bottom-most layer.
-        if(i < layerClones.length - 1){
-          layer.style.opacity = String(opacity);
-          layer.style.mixBlendMode = blendMode;
-        }
+      for(let i = 0; i < layerEntries.length; i++){
+        const entry = layerEntries[i];
+        const layer = entry.layer;
+        const port = entry.port;
+        const perLayerOpacity = Math.max(0, Math.min(100, Number(layerOpacityMap?.[port] ?? 100))) / 100;
+        const explicitBlend = String(layerBlendMap?.[port] || "").trim();
+        const perLayerBlend = hasLayerBlend
+          ? (explicitBlend || "normal")
+          : blendMode;
+        layer.style.opacity = String(opacity * perLayerOpacity);
+        // Keep blend mode behavior for stacked layers above the bottom-most layer.
+        layer.style.mixBlendMode = (i < layerEntries.length - 1) ? perLayerBlend : "normal";
       }
 
       // Append bottom -> top. Port order is top -> bottom (a over b over c...).
-      for(let i = layerClones.length - 1; i >= 0; i--){
-        wrap.appendChild(layerClones[i]);
+      for(let i = layerEntries.length - 1; i >= 0; i--){
+        wrap.appendChild(layerEntries[i].layer);
       }
 
         const liveCacheUrl = typeof window.oniwireGetLiveMaskCacheUrl === "function"
@@ -183,46 +304,39 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         const liveUrl = isLiveMask
           ? (liveMaskSourceEl?.dataset?.frozenUrl || liveMaskEl?.dataset?.frozenUrl || liveCacheUrl || "")
           : "";
+      const staticMaskFromMeta = rampStops.length
+        ? buildRampMaskUrl(rampStops, false)
+        : (buildGradientMaskUrl(maskMeta?.gradient, false)
+        || buildShapeMaskUrl(maskMeta?.shape, false));
+      const staticMaskFromFrozen = (frozenUrl && frozenUrl.length > 0)
+        ? `url(${frozenUrl})`
+        : null;
+      const hasGeneratedMask = Boolean(staticMaskFromMeta);
       const maskUrl = isLiveMask
           ? (liveUrl ? `url(${liveUrl})` : null)
-        : ((frozenUrl && frozenUrl.length > 0)
-            ? `url(${frozenUrl})`
-            : (rampStops.length
-                ? buildRampMaskUrl(rampStops)
-                : (buildGradientMaskUrl(maskMeta?.gradient, false)
-                || buildShapeMaskUrl(maskMeta?.shape, false))));
+          : (staticMaskFromMeta || staticMaskFromFrozen);
+      const maskNeedsPostInvert = Boolean(!isLiveMask && invertMask);
       const hasShapeMask = Boolean(maskMeta?.shape);
-      const resolvedMaskMode = (isLiveMask || hasShapeMask) ? "alpha" : "luminance";
+      const resolvedMaskMode = (isLiveMask || hasShapeMask || hasGeneratedMask) ? "alpha" : "luminance";
       if(maskUrl || isLiveMask){
-        wrap.style.maskImage = maskUrl;
-        wrap.style.webkitMaskImage = maskUrl;
-        wrap.style.maskMode = resolvedMaskMode;
-        wrap.style.webkitMaskMode = resolvedMaskMode;
-        wrap.style.maskRepeat = "no-repeat";
-        wrap.style.webkitMaskRepeat = "no-repeat";
-        wrap.style.maskPosition = "0 0";
-        wrap.style.webkitMaskPosition = "0 0";
-        wrap.style.maskSize = "100% 100%";
-        wrap.style.webkitMaskSize = "100% 100%";
+        if(maskUrl){
+          if(maskNeedsPostInvert){
+            applyCompositeMaskWithInvert(wrap, node.id, maskUrl, resolvedMaskMode, true);
+          }else{
+            applyCompositeMaskStyle(wrap, maskUrl, resolvedMaskMode);
+          }
+        }
         if(isLiveMask){
           const liveMaskFps = hasAnimatedMask ? 15 : (forceRasterMask ? 10 : 5);
           wrap.dataset.liveMaskEnabled = "true";
           wrap.dataset.liveMaskFps = String(liveMaskFps);
-          startLiveMaskUpdate(wrap, liveMaskSourceEl, liveMaskFps);
+          wrap.dataset.liveMaskInvert = invertMask ? "true" : "false";
+          startLiveMaskUpdate(wrap, liveMaskSourceEl, liveMaskFps, { invertMask });
         }
       } else if(M){
-        const applyRasterMask = (dataUrl) => {
+        const applyRasterMask = async (dataUrl) => {
           if(!dataUrl) return;
-          wrap.style.maskImage = `url(${dataUrl})`;
-          wrap.style.webkitMaskImage = `url(${dataUrl})`;
-          wrap.style.maskMode = "alpha";
-          wrap.style.webkitMaskMode = "alpha";
-          wrap.style.maskRepeat = "no-repeat";
-          wrap.style.webkitMaskRepeat = "no-repeat";
-          wrap.style.maskPosition = "0 0";
-          wrap.style.webkitMaskPosition = "0 0";
-          wrap.style.maskSize = "100% 100%";
-          wrap.style.webkitMaskSize = "100% 100%";
+          applyCompositeMaskWithInvert(wrap, node.id, `url(${dataUrl})`, "alpha", invertMask);
         };
 
         const cachedMaskUrl = String(inputs.mask?.el?.dataset?.frozenUrl || "").trim()
@@ -275,6 +389,7 @@ window.createOniwireCompositeNodeDef = function createOniwireCompositeNodeDef({
         "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
       ]},
       {k:"opacity", type:"range", label:"Opacity %", min:0, max:100, step:1},
+      {k:"maskInvert", type:"checkbox", label:"Invert Mask"},
       { type:"actionButtons", label:"Inputs", buttons:[{ label:"+ Input", id:"compositeAddInput" }, { label:"- Input", id:"compositeRemoveInput" }] },
       { k:"inputPorts", type:"compositeInputOrder", label:"Input Order" }
     ])
