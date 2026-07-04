@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Oniwire (v0.2.7 | 2026-07-03 00:00)</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260704">
   <link rel="stylesheet" href="styles.css?v=20260607-1752">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -94,11 +95,11 @@
   </style>
   <script src="vendor/html2canvas.min.js"></script>
   <script src="scripts/export.js?v=20260606e"></script>
-  <script src="scripts/node-menu.js?v=20260617a"></script>
-  <script src="scripts/node-search.js"></script>
+  <script src="scripts/node-menu.js?v=20260704"></script>
+  <script src="scripts/node-search.js?v=20260704"></script>
   <script src="scripts/nodes/color.js"></script>
   <script src="scripts/nodes/gradient.js"></script>
-  <script src="scripts/nodes/particle.js"></script>
+  <script src="scripts/nodes/particle.js?v=20260704"></script>
   <script src="scripts/nodes/ramp.js"></script>
   <script src="scripts/nodes/shape.js"></script>
   <script src="scripts/nodes/text.js"></script>
@@ -118,7 +119,7 @@
   <script src="scripts/nodes/output.js"></script>
   <script src="scripts/nodes/reroute.js"></script>
   <script src="scripts/nodes-clone-composite.js"></script>
-  <script src="scripts/nodes.js"></script>
+  <script src="scripts/nodes.js?v=20260704"></script>
   <script src="scripts/utils.js"></script>
 </head>
 <body>
@@ -314,6 +315,10 @@
         or support me with tokens so I can keep pushing Oniwire forward with better features and polish.
       </p>
       <div class="coffeeBoardEmail">PayPal: viet.motiondesign@gmail.com</div>
+      <p class="coffeeBoardQrText">You can also buy me the coffee via this QR</p>
+      <div class="coffeeBoardQrWrap">
+        <img class="coffeeBoardQr" src="img/vietqr.jpg" alt="QR code for coffee payment">
+      </div>
       <div class="coffeeBoardActions">
         <button id="btnCopyCoffeeEmail" type="button">Copy Email</button>
         <a id="btnOpenPaypalCoffee" class="coffeePaypalLink" target="_blank" rel="noopener noreferrer" href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=viet.motiondesign%40gmail.com&currency_code=USD">Open PayPal</a>
@@ -10952,7 +10957,8 @@ async function evaluate(){
     const dataUrl = await renderLayerToDataUrl(renderRoot, {
       useSimpleShapeRender: false,
       timeoutMs: 900,
-      bakeComputedStyles: true
+      bakeComputedStyles: true,
+      backgroundColor: preserveAlpha ? null : "#000000"
     });
     return dataUrlToCanvas(dataUrl, w, h, preserveAlpha);
   }
@@ -12619,10 +12625,32 @@ function loadGraph(data){
       setCoffeeBoardVisible(false);
     }
   });
+  document.addEventListener("contextmenu", (e) => {
+    if(isTypingTarget(e.target)) return;
+    e.preventDefault();
+  }, true);
+  document.addEventListener("selectstart", (e) => {
+    if(isTypingTarget(e.target)) return;
+    e.preventDefault();
+  }, true);
+  document.addEventListener("dragstart", (e) => {
+    if(isTypingTarget(e.target)) return;
+    e.preventDefault();
+  }, true);
   window.addEventListener("keydown", (e) => {
     if(e.key === "Escape") setCoffeeBoardVisible(false);
     if(e.key === "Escape") closeLayoutHoldMenu();
   });
+  window.addEventListener("keydown", (e) => {
+    if(isTypingTarget(e.target)) return;
+    const key = String(e.key || "").toLowerCase();
+    const blocked = key === "f12"
+      || (e.ctrlKey && !e.shiftKey && (key === "s" || key === "u" || key === "p"))
+      || (e.ctrlKey && e.shiftKey && (key === "i" || key === "j" || key === "c"));
+    if(!blocked) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 
   inspectorExpandBtn?.addEventListener("click", () => {
     const expanded = appEl?.classList.contains("inspectorExpanded");

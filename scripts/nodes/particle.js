@@ -262,15 +262,15 @@ window.createOniwireParticleNodeDef = function createOniwireParticleNodeDef({ ge
       { k: "colorVariant", type: "range", label: "Color Variant", min: 0, max: 100, step: 1 },
       { k: "opacity", type: "range", label: "Opacity", min: 0, max: 100, step: 1 },
       { k: "opacityRandom", type: "range", label: "Opacity Random", min: 0, max: 100, step: 1 },
-      { k: "movement", type: "select", label: "Movement", options: ["floating", "blast", "falling", "twirling"] },
-      { k: "movementAmount", type: "range", label: "Move Amount", min: 0, max: 100, step: 1 },
-      { k: "movementSpeed", type: "range", label: "Move Speed", min: 1, max: 300, step: 1 },
       { k: "blur", type: "range", label: "Blur", min: 0, max: 12, step: 0.1 },
       { k: "sizeMin", type: "range", label: "Size Min", min: 0.2, max: 80, step: 0.1 },
       { k: "sizeMax", type: "range", label: "Size Max", min: 0.2, max: 120, step: 0.1 },
       { k: "areaWidth", type: "range", label: "Area Width", min: 1, max: 2400, step: 1 },
       { k: "areaHeight", type: "range", label: "Area Height", min: 1, max: 1600, step: 1 },
       { type: "compactScrub2d", label: "Position", kx: "x", ky: "y", lx: "X", ly: "Y", minX: -1200, maxX: 2400, minY: -1200, maxY: 1600, step: 1 },
+      { k: "movement", type: "select", label: "Movement", options: ["floating", "blast", "falling", "twirling"] },
+      { k: "movementAmount", type: "range", label: "Move Amount", min: 0, max: 100, step: 1 },
+      { k: "movementSpeed", type: "range", label: "Move Speed", min: 1, max: 300, step: 1 },
       { k: "seed", type: "number", label: "Seed", min: 0, max: 999999, step: 1 }
     ])
   };
