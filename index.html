@@ -5253,14 +5253,13 @@ utilsApi.initProjectUtils();
       const referencedFilterDefs = [];
       try{
         const seen = new Set();
-        const allEls = [tempDiv, ...tempDiv.querySelectorAll("*")];
-        for(const el of allEls){
-          if(!(el instanceof HTMLElement)) continue;
-          const filterValue = String(el.style?.filter || "");
-          if(!filterValue || filterValue === "none") continue;
-          const matches = filterValue.match(/url\(#([^)]+)\)/g) || [];
-          for(const raw of matches){
-            const id = raw.replace(/^url\(#/, "").replace(/\)$/, "").trim();
+        const collectFilterRefs = (filterValue) => {
+          const text = String(filterValue || "");
+          if(!text || text === "none") return;
+          const re = /url\(\s*["']?#([^"')\s]+)["']?\s*\)/gi;
+          let m;
+          while((m = re.exec(text)) !== null){
+            const id = String(m[1] || "").trim();
             if(!id || seen.has(id)) continue;
             seen.add(id);
             const srcDef = document.getElementById(id);
@@ -5268,6 +5267,13 @@ utilsApi.initProjectUtils();
               referencedFilterDefs.push(srcDef.outerHTML);
             }
           }
+        };
+
+        const allEls = [tempDiv, ...tempDiv.querySelectorAll("*")];
+        for(const el of allEls){
+          if(!(el instanceof HTMLElement)) continue;
+          collectFilterRefs(el.style?.filter || "");
+          try{ collectFilterRefs(getComputedStyle(el).filter || ""); }catch(_){ }
         }
       }catch(_){ }
 
