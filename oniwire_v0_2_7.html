@@ -10600,6 +10600,7 @@ async function evaluate(){
       const hasMaskInScene = hasCssMaskInScene;
       const hasImagesInScene = renderRoot.querySelector("img") !== null;
       const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
+      const hasSvgUrlFilterInScene = sceneHasSvgUrlFilters(renderRoot);
       const hasClipPathInScene = sceneHasClipPath(renderRoot);
       const premaskCanvas = (hasMaskInScene && hasImagesInScene)
         ? await runCaptureAttempt("buildLuminanceMaskCanvas", () => buildLuminanceMaskCanvas(renderRoot, w, h), 5000)
@@ -10628,8 +10629,17 @@ async function evaluate(){
           );
         }
       }else if(hasFilterEffectsInScene){
-        // Curves and other filter nodes rely on baked filter capture. Prioritize
-        // html2canvas path when filters are present.
+        // Curves-style SVG url(#filter) effects are more reliable through
+        // DOM snapshot rendering before html2canvas fallback.
+        if(hasSvgUrlFilterInScene && !capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            "captureFrameCanvasFromDomSnapshot (svg-filter first)",
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha }),
+            6000
+          );
+        }
+
+        // For other filter stacks, keep the baked html2canvas path.
         if(!capturedCanvas){
           capturedCanvas = await runCaptureAttempt(
             "captureFrameCanvasWithHtml2canvas (filters)",
@@ -11001,6 +11011,21 @@ async function evaluate(){
       try{
         const cs = getComputedStyle(el);
         if(cs.filter && cs.filter !== "none") return true;
+      }catch(_){ }
+    }
+    return false;
+  }
+
+  function sceneHasSvgUrlFilters(rootEl){
+    if(!(rootEl instanceof HTMLElement)) return false;
+    const all = [rootEl, ...rootEl.querySelectorAll("*")];
+    for(const el of all){
+      if(!(el instanceof HTMLElement)) continue;
+      const inlineFilter = String(el.style.filter || "");
+      if(/url\(\s*["']?#[^)\s"']+["']?\s*\)/i.test(inlineFilter)) return true;
+      try{
+        const csFilter = String(getComputedStyle(el).filter || "");
+        if(/url\(\s*["']?#[^)\s"']+["']?\s*\)/i.test(csFilter)) return true;
       }catch(_){ }
     }
     return false;
