@@ -8509,7 +8509,7 @@ async function evaluate(){
         const borderColor = `hsla(${hue}, 84%, 46%, 0.28)`;
         return `
           <div class="compInputItem${port === selectedPort ? " isSelectedLayer" : ""}" data-comp-input-port="${escapeAttr(port)}" data-comp-input-index="${idx}" data-comp-opacity="${opacityVal}" style="--comp-op-pct:${opacityVal}%; --comp-op-fill:${fillColor}; --comp-op-border:${borderColor};" title="Click to select layer. Drag left/right to change opacity. Use left circle to reorder.">
-            <button type="button" class="compInputPortDot" data-comp-drag-handle="1" data-comp-input-port="${escapeAttr(port)}" draggable="true" aria-label="Reorder layer ${escapeAttr(port)}" title="Drag to reorder layer">${escapeAttr(port)}</button>
+            <button type="button" class="compInputPortDot" data-comp-drag-handle="1" data-comp-input-port="${escapeAttr(port)}" aria-label="Reorder layer ${escapeAttr(port)}" title="Drag up/down to reorder layer">${escapeAttr(port)}</button>
             <span class="compInputSource">${escapeAttr(fromName)}</span>
             <span class="compInputOpacity" data-comp-opacity-label="${escapeAttr(port)}">${Math.round(opacityVal)}%</span>
             <span class="compInputHandle" aria-hidden="true">${idx + 1}</span>
@@ -8991,21 +8991,75 @@ async function evaluate(){
         }
       };
 
+      const commitCompositeReorder = () => {
+        if(!draggingPort) return;
+
+        const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
+          ? [...node.params.inputPorts]
+          : ["a", "b"];
+
+        const fromIdx = currentPorts.indexOf(draggingPort);
+        let insertIdx = dragInsertIndex;
+        if(fromIdx < 0 || insertIdx < 0) return;
+
+        insertIdx = clamp(insertIdx, 0, currentPorts.length);
+        if(fromIdx < insertIdx) insertIdx -= 1;
+        if(fromIdx === insertIdx) return;
+
+        pushHistory();
+        const [moved] = currentPorts.splice(fromIdx, 1);
+        currentPorts.splice(insertIdx, 0, moved);
+        node.params.inputPorts = currentPorts;
+
+        render();
+        evaluateAndRender();
+        renderInspector();
+      };
+
       box.querySelectorAll('[data-comp-drag-handle]').forEach(handle => {
-        handle.addEventListener('dragstart', (ev) => {
+        handle.addEventListener('pointerdown', (ev) => {
+          if(ev.button !== 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+
           const row = handle.closest('.compInputItem');
           draggingPort = handle.getAttribute('data-comp-input-port');
           selectLayer(draggingPort);
           row?.classList.add('isDragging');
-          if(ev.dataTransfer){
-            ev.dataTransfer.effectAllowed = 'move';
-            try{ ev.dataTransfer.setData('text/plain', draggingPort || ''); }catch(_){ }
-          }
-        });
+          updateDragInsertVisual(ev.clientY);
 
-        handle.addEventListener('dragend', () => {
-          draggingPort = null;
-          clearDragVisuals();
+          const pointerId = ev.pointerId;
+          let hasMoved = false;
+
+          try{ handle.setPointerCapture(pointerId); }catch(_){ }
+
+          const onMove = (moveEv) => {
+            if(moveEv.pointerId !== pointerId) return;
+            hasMoved = true;
+            updateDragInsertVisual(moveEv.clientY);
+          };
+
+          const finish = (commit, endEv) => {
+            if(endEv && endEv.pointerId !== pointerId) return;
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', onUp);
+            handle.removeEventListener('pointercancel', onCancel);
+            try{ handle.releasePointerCapture(pointerId); }catch(_){ }
+
+            if(commit && hasMoved){
+              commitCompositeReorder();
+            }
+
+            draggingPort = null;
+            clearDragVisuals();
+          };
+
+          const onUp = (upEv) => finish(true, upEv);
+          const onCancel = (cancelEv) => finish(false, cancelEv);
+
+          handle.addEventListener('pointermove', onMove);
+          handle.addEventListener('pointerup', onUp);
+          handle.addEventListener('pointercancel', onCancel);
         });
       });
 
@@ -9088,50 +9142,6 @@ async function evaluate(){
 
       refreshSelectionVisuals();
 
-      box.addEventListener('dragover', (ev) => {
-        if(!draggingPort) return;
-        ev.preventDefault();
-        updateDragInsertVisual(ev.clientY);
-        if(ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-      });
-
-      box.addEventListener('dragleave', (ev) => {
-        if(box.contains(ev.relatedTarget)) return;
-        clearDragVisuals();
-      });
-
-      box.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        if(!draggingPort) return;
-
-        const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
-          ? [...node.params.inputPorts]
-          : ["a", "b"];
-
-        const fromIdx = currentPorts.indexOf(draggingPort);
-        let insertIdx = dragInsertIndex;
-        if(fromIdx < 0 || insertIdx < 0) {
-          clearDragVisuals();
-          return;
-        }
-
-        insertIdx = clamp(insertIdx, 0, currentPorts.length);
-        if(fromIdx < insertIdx) insertIdx -= 1;
-        if(fromIdx === insertIdx) {
-          clearDragVisuals();
-          return;
-        }
-
-        pushHistory();
-        const [moved] = currentPorts.splice(fromIdx, 1);
-        currentPorts.splice(insertIdx, 0, moved);
-        node.params.inputPorts = currentPorts;
-
-        clearDragVisuals();
-        render();
-        evaluateAndRender();
-        renderInspector();
-      });
     });
 
     inspectorBody.querySelectorAll('[data-option-k]').forEach(btn => {
