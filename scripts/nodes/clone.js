@@ -125,7 +125,7 @@ window.createOniwireCloneNodeDef = function createOniwireCloneNodeDef({ propagat
       {k:"rotPerStep", type:"range", label:"Rotate / Step°", min:-180, max:180, step:0.1},
       {k:"angleStart", type:"range", label:"Angle Start", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
       {k:"angleStep", type:"range", label:"Angle Step", min:-180, max:180, step:1, showIf:(node) => node.params?.mode === "radial" && String(node.params?.radialMode || "simple") === "advanced"},
-      {type:"clonePivotCompact", label:"Pivot", kx:"pivotX", ky:"pivotY", minX:0, maxX:1280, minY:0, maxY:720, step:1}
+      {type:"clonePivotCompact", label:"Pivot", kx:"pivotX", ky:"pivotY", resetX:640, resetY:360, minX:0, maxX:1280, minY:0, maxY:720, step:1}
     ])
   };
 };

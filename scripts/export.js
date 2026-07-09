@@ -176,11 +176,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				{ x: 180, y: 320, inX: 150, inY: 300, outX: 220, outY: 340 }
 			],
 			closed: true,
+			isHole: false,
 			fillColor: '#ffffff',
-			fillOpacity: 0.8,
+			fillOpacity: 1,
 			strokeColor: '#ffffff',
 			strokeWidth: 2,
 			strokeOpacity: 1,
+			strokeLinecap: 'round',
 			visible: true
 		};
 	}
@@ -192,11 +194,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				name: String(path.name || ('Path ' + String(i + 1).padStart(2, '0'))),
 				points: normalizePenPoints(path.points),
 				closed: Boolean(path.closed),
+				isHole: Boolean(path.isHole),
 				fillColor: String(path.fillColor || '#ffffff'),
-				fillOpacity: clampPenValue(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 0.8, 0, 1),
+				fillOpacity: clampPenValue(Number.isFinite(Number(path.fillOpacity)) ? Number(path.fillOpacity) : 1, 0, 1),
 				strokeColor: String(path.strokeColor || '#ffffff'),
 				strokeWidth: Math.max(0.1, Number(path.strokeWidth) || 2),
 				strokeOpacity: clampPenValue(Number.isFinite(Number(path.strokeOpacity)) ? Number(path.strokeOpacity) : 1, 0, 1),
+				strokeLinecap: ['round', 'butt', 'square'].includes(path.strokeLinecap) ? path.strokeLinecap : 'round',
 				visible: path.visible !== false
 			};
 		});
@@ -209,11 +213,13 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 				name: 'Path 01',
 				points: params.points,
 				closed: Boolean(params.closed),
+				isHole: false,
 				fillColor: String(params.fillColor || '#ffffff'),
-				fillOpacity: clampPenValue(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 0.8, 0, 1),
+				fillOpacity: clampPenValue(Number.isFinite(Number(params.fillOpacity)) ? Number(params.fillOpacity) : 1, 0, 1),
 				strokeColor: String(params.strokeColor || '#ffffff'),
 				strokeWidth: Math.max(0.1, Number(params.strokeWidth) || 2),
 				strokeOpacity: clampPenValue(Number.isFinite(Number(params.strokeOpacity)) ? Number(params.strokeOpacity) : 1, 0, 1),
+				strokeLinecap: 'round',
 				visible: true
 			}];
 			params.activePath = 0;
@@ -2765,9 +2771,507 @@ window.createOniwireExportApi = function createOniwireExportApi(deps){
 		toast(`Lottie JSON exported (beta) ✅ (${formatBytes(blob.size)})`);
 	}
 
+	async function exportSVG(name = "animation"){
+		persistExportBackup(name);
+
+		const activeOutput = state.activeOutputNodeId ? state.nodes.get(String(state.activeOutputNodeId)) : null;
+		const outNode = (activeOutput && activeOutput.type === "Output")
+			? activeOutput
+			: Array.from(state.nodes.values()).find(n => n.type === "Output");
+		if(!outNode){
+			toast("No Output node found.");
+			return;
+		}
+
+		const ratioMode = String(outNode.params?.ratioMode || "preset");
+		const exportW = ratioMode === "custom"
+			? Math.max(1, Math.round(Number(outNode.params?.customWidth) || 0))
+			: Math.max(1, Math.round(Number(previewBase?.w) || 1280));
+		const exportH = ratioMode === "custom"
+			? Math.max(1, Math.round(Number(outNode.params?.customHeight) || 0))
+			: Math.max(1, Math.round(Number(previewBase?.h) || 720));
+
+		const nodesById = new Map(Array.from(state.nodes.values()).map(n => [String(n.id), n]));
+		const inboundByNode = new Map();
+		for(const wire of state.wires){
+			const toId = String(wire.to?.nodeId || "");
+			if(!inboundByNode.has(toId)) inboundByNode.set(toId, []);
+			inboundByNode.get(toId).push(wire);
+		}
+
+		function findInput(nodeId, ports){
+			const wires = inboundByNode.get(String(nodeId)) || [];
+			const list = Array.isArray(ports) ? ports : [ports];
+			for(const port of list){
+				const wire = wires.find(w => w.to && w.to.port === port);
+				if(wire && wire.from) return String(wire.from.nodeId);
+			}
+			return null;
+		}
+
+		function resolveGradientStops(gradientNode){
+			const rampId = findInput(gradientNode.id, ["ramp"]);
+			const rampNode = rampId ? nodesById.get(String(rampId)) : null;
+			const rampStops = Array.isArray(rampNode?.params?.stops) ? rampNode.params.stops : [];
+			if(rampStops.length >= 2){
+				return rampStops
+					.map(s => ({ pos: Math.max(0, Math.min(100, Number(s.pos) || 0)), color: String(s.color || "#ffffff") }))
+					.sort((a, b) => a.pos - b.pos);
+			}
+			return [
+				{ pos: 0, color: String(gradientNode.params?.a || "#000000") },
+				{ pos: 100, color: String(gradientNode.params?.b || "#ffffff") }
+			];
+		}
+
+		function resolveNodeFillSpec(node, fallbackColor, ports = ["fill", "color", "paint"]){
+			const fillId = findInput(node.id, ports);
+			if(!fillId){
+				return { type: "solid", color: String(fallbackColor || "#ffffff") };
+			}
+			const fillNode = nodesById.get(String(fillId));
+			if(!fillNode){
+				return { type: "solid", color: String(fallbackColor || "#ffffff") };
+			}
+			if(fillNode.type === "Color"){
+				return { type: "solid", color: String(fillNode.params?.color || fallbackColor || "#ffffff") };
+			}
+			if(fillNode.type === "Gradient"){
+				return {
+					type: "gradient",
+					gradientType: String(fillNode.params?.type || "linear"),
+					angle: Number(fillNode.params?.angle || 0),
+					cx: Number(fillNode.params?.cx ?? 50),
+					cy: Number(fillNode.params?.cy ?? 50),
+					stops: resolveGradientStops(fillNode)
+				};
+			}
+			return { type: "solid", color: String(fallbackColor || "#ffffff") };
+		}
+
+		function resolveConnectedFillSpec(node, ports = ["fill", "color", "paint"]){
+			const fillId = findInput(node.id, ports);
+			if(!fillId) return null;
+			const fillNode = nodesById.get(String(fillId));
+			if(!fillNode) return null;
+			if(fillNode.type === "Color"){
+				return { type: "solid", color: String(fillNode.params?.color || "#ffffff") };
+			}
+			if(fillNode.type === "Gradient"){
+				return {
+					type: "gradient",
+					gradientType: String(fillNode.params?.type || "linear"),
+					angle: Number(fillNode.params?.angle || 0),
+					cx: Number(fillNode.params?.cx ?? 50),
+					cy: Number(fillNode.params?.cy ?? 50),
+					stops: resolveGradientStops(fillNode)
+				};
+			}
+			return null;
+		}
+
+		function getCompositeLayerPorts(node){
+			const fromParams = Array.isArray(node?.params?.inputPorts)
+				? node.params.inputPorts.map(p => String(p || "").trim()).filter(Boolean)
+				: [];
+			if(fromParams.length) return fromParams;
+			return ["a", "b"];
+		}
+
+		const supportedTypes = new Set(["Output", "Shape", "Transform", "Motion", "Color", "Gradient", "Ramp", "Text", "Composite", "Pen"]);
+		const usedNodeIds = new Set();
+		(function walk(nodeId){
+			const id = String(nodeId || "");
+			if(!id || usedNodeIds.has(id)) return;
+			usedNodeIds.add(id);
+			const wires = inboundByNode.get(id) || [];
+			for(const wire of wires){
+				if(wire.from?.nodeId != null) walk(String(wire.from.nodeId));
+			}
+		})(String(outNode.id));
+
+		const unsupportedTypes = Array.from(usedNodeIds)
+			.map(id => nodesById.get(id)?.type)
+			.filter(type => type && !supportedTypes.has(type));
+		if(unsupportedTypes.length > 0){
+			const unique = Array.from(new Set(unsupportedTypes));
+			toast(`SVG export blocked: unsupported nodes used (${unique.join(", ")}).`);
+			return;
+		}
+
+		let motionWarned = false;
+		function decodeLayer(nodeId, accum){
+			const node = nodesById.get(String(nodeId));
+			if(!node) return null;
+
+			if(node.type === "Transform"){
+				const p = node.params || {};
+				const ox = (Math.max(-100, Math.min(100, Number(p.originX) || 0)) + 100) / 200;
+				const oy = (Math.max(-100, Math.min(100, Number(p.originY) || 0)) + 100) / 200;
+				const mode = String(p.scaleMode || "uniform").toLowerCase() === "individual" ? "individual" : "uniform";
+				const baseScale = Math.max(0.01, Number(p.scale) || 1);
+				const sx = mode === "individual" ? Math.max(0.01, Number(p.scaleX) || baseScale) : baseScale;
+				const sy = mode === "individual" ? Math.max(0.01, Number(p.scaleY) || baseScale) : baseScale;
+				const next = {
+					tx: (accum.tx || 0) + (Number(p.x) || 0),
+					ty: (accum.ty || 0) + (Number(p.y) || 0),
+					scaleX: (accum.scaleX || 1) * sx,
+					scaleY: (accum.scaleY || 1) * sy,
+					rot: (accum.rot || 0) + (Number(p.rot) || 0),
+					anchorX: exportW * ox,
+					anchorY: exportH * oy,
+					hasExplicitAnchor: true
+				};
+				const srcId = findInput(node.id, ["in", "layer", "source"]);
+				return srcId ? decodeLayer(srcId, next) : null;
+			}
+
+			if(node.type === "Motion"){
+				const srcId = findInput(node.id, ["in", "layer", "source"]);
+				if(!motionWarned){
+					motionWarned = true;
+					toast("SVG note: Motion animation is exported as a static frame.");
+				}
+				return srcId ? decodeLayer(srcId, accum) : null;
+			}
+
+			if(node.type === "Color") return { type: "solid", node, transform: accum };
+			if(node.type === "Gradient"){
+				return {
+					type: "gradient",
+					node,
+					fillSpec: {
+						type: "gradient",
+						gradientType: String(node.params?.type || "linear"),
+						angle: Number(node.params?.angle || 0),
+						cx: Number(node.params?.cx ?? 50),
+						cy: Number(node.params?.cy ?? 50),
+						stops: resolveGradientStops(node)
+					},
+					transform: accum
+				};
+			}
+			if(node.type === "Shape") return { type: "shape", node, fillSpec: resolveNodeFillSpec(node, node.params?.color || "#3b82f6", ["fill", "fill color"]), strokeSpec: resolveNodeFillSpec(node, node.params?.strokeColor || "#ffffff", ["stroke color", "stroke"]), transform: accum };
+			if(node.type === "Text") return { type: "text", node, fillSpec: resolveNodeFillSpec(node, node.params?.color || "#ffffff"), transform: accum };
+			if(node.type === "Pen") return { type: "pen", node, transform: accum };
+
+			if(node.type === "Composite"){
+				const layerPorts = getCompositeLayerPorts(node);
+				// Runtime compositing paints bottom layers first, top layers last.
+				// inputPorts are stored as top->bottom, so decode in reverse.
+				const layers = [];
+				for(let i = layerPorts.length - 1; i >= 0; i--){
+					const srcId = findInput(node.id, [layerPorts[i]]);
+					const decodedLayer = srcId ? decodeLayer(srcId, { ...accum }) : null;
+					if(decodedLayer) layers.push(decodedLayer);
+				}
+				if(!layers.length) return null;
+				return { type: "composite", node, layers, transform: accum };
+			}
+
+			return null;
+		}
+
+		const sourceId = findInput(outNode.id, ["in", "layer", "source", "a"]);
+		if(!sourceId){
+			toast("Output node has no connected input for SVG export.");
+			return;
+		}
+
+		const decoded = decodeLayer(sourceId, {
+			tx: 0,
+			ty: 0,
+			scaleX: 1,
+			scaleY: 1,
+			rot: 0,
+			anchorX: exportW / 2,
+			anchorY: exportH / 2,
+			hasExplicitAnchor: false
+		});
+		if(!decoded){
+			toast("Could not convert current graph to SVG.");
+			return;
+		}
+
+		const toNum = (n) => Number(Number(n || 0).toFixed(3));
+		const esc = (s) => String(s || "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/\"/g, "&quot;")
+			.replace(/'/g, "&apos;");
+		const escText = (s) => String(s || "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;");
+		const sanitizeTextForIllustrator = (s) => {
+			let out = "";
+			let changed = false;
+			for(const ch of String(s || "")){
+				const cp = ch.codePointAt(0) || 0;
+				const isAllowedBmp = cp >= 0x20 && cp <= 0xFFFD;
+				// Illustrator can drop text objects when emoji / non-BMP glyphs are present.
+				if(cp > 0xFFFF || !isAllowedBmp){
+					changed = true;
+					continue;
+				}
+				out += ch;
+			}
+			return { text: out, changed };
+		};
+ 
+		let illustratorTextWarned = false;
+
+		function buildPenPathD(points, closed){
+			if(!points || !points.length) return "";
+			let d = `M ${toNum(points[0].x)} ${toNum(points[0].y)}`;
+			for(let i = 1; i < points.length; i++){
+				const prev = points[i - 1];
+				const curr = points[i];
+				d += ` C ${toNum(prev.outX)} ${toNum(prev.outY)}, ${toNum(curr.inX)} ${toNum(curr.inY)}, ${toNum(curr.x)} ${toNum(curr.y)}`;
+			}
+			if(closed && points.length > 1){
+				const last = points[points.length - 1];
+				const first = points[0];
+				d += ` C ${toNum(last.outX)} ${toNum(last.outY)}, ${toNum(first.inX)} ${toNum(first.inY)}, ${toNum(first.x)} ${toNum(first.y)} Z`;
+			}
+			return d;
+		}
+
+		function getPenPathBounds(path){
+			const points = Array.isArray(path?.points) ? path.points : [];
+			let minX = Infinity;
+			let minY = Infinity;
+			let maxX = -Infinity;
+			let maxY = -Infinity;
+			for(const pt of points){
+				const coords = [
+					[pt.x, pt.y],
+					[pt.inX, pt.inY],
+					[pt.outX, pt.outY]
+				];
+				for(const [xRaw, yRaw] of coords){
+					const x = Number(xRaw);
+					const y = Number(yRaw);
+					if(!Number.isFinite(x) || !Number.isFinite(y)) continue;
+					if(x < minX) minX = x;
+					if(y < minY) minY = y;
+					if(x > maxX) maxX = x;
+					if(y > maxY) maxY = y;
+				}
+			}
+			if(!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)){
+				return { x: 0, y: 0, width: exportW, height: exportH };
+			}
+			const width = Math.max(1, maxX - minX);
+			const height = Math.max(1, maxY - minY);
+			return { x: minX, y: minY, width, height };
+		}
+
+		const defs = [];
+		let gradId = 0;
+		let maskId = 0;
+
+		function resolvePaint(fillSpec, bounds){
+			if(!fillSpec || fillSpec.type !== "gradient") return String(fillSpec?.color || "#ffffff");
+			const safeBounds = bounds || { x: 0, y: 0, width: exportW, height: exportH };
+			const id = `svg_grad_${++gradId}`;
+			const stops = Array.isArray(fillSpec.stops) && fillSpec.stops.length
+				? fillSpec.stops
+				: [{ pos: 0, color: "#000000" }, { pos: 100, color: "#ffffff" }];
+			if(String(fillSpec.gradientType || "linear") === "radial"){
+				const cx = safeBounds.x + (safeBounds.width * (Number(fillSpec.cx ?? 50) / 100));
+				const cy = safeBounds.y + (safeBounds.height * (Number(fillSpec.cy ?? 50) / 100));
+				const r = Math.max(1, Math.hypot(safeBounds.width, safeBounds.height) / 2);
+				defs.push(
+					`<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${toNum(cx)}" cy="${toNum(cy)}" r="${toNum(r)}">` +
+					stops.map(s => `<stop offset="${toNum(Number(s.pos) || 0)}%" stop-color="${esc(s.color || "#ffffff")}"/>`).join("") +
+					`</radialGradient>`
+				);
+			}else{
+				const angle = Number(fillSpec.angle) || 0;
+				const rad = (angle - 90) * Math.PI / 180;
+				const cx = safeBounds.x + (safeBounds.width / 2);
+				const cy = safeBounds.y + (safeBounds.height / 2);
+				const len = Math.hypot(safeBounds.width, safeBounds.height);
+				const dx = Math.cos(rad) * (len / 2);
+				const dy = Math.sin(rad) * (len / 2);
+				defs.push(
+					`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${toNum(cx - dx)}" y1="${toNum(cy - dy)}" x2="${toNum(cx + dx)}" y2="${toNum(cy + dy)}">` +
+					stops.map(s => `<stop offset="${toNum(Number(s.pos) || 0)}%" stop-color="${esc(s.color || "#ffffff")}"/>`).join("") +
+					`</linearGradient>`
+				);
+			}
+			return `url(#${id})`;
+		}
+
+		function transformAttr(t){
+			if(!t) return "";
+			const tx = Number(t.tx || 0);
+			const ty = Number(t.ty || 0);
+			const sx = Number(t.scaleX || 1);
+			const sy = Number(t.scaleY || 1);
+			const rot = Number(t.rot || 0);
+			const ax = Number(t.anchorX || (exportW / 2));
+			const ay = Number(t.anchorY || (exportH / 2));
+			if(Math.abs(tx) < 1e-6 && Math.abs(ty) < 1e-6 && Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6 && Math.abs(rot) < 1e-6){
+				return "";
+			}
+			return ` transform="translate(${toNum(tx)} ${toNum(ty)}) translate(${toNum(ax)} ${toNum(ay)}) rotate(${toNum(rot)}) scale(${toNum(sx)} ${toNum(sy)}) translate(${toNum(-ax)} ${toNum(-ay)})"`;
+		}
+
+		function renderItem(item){
+			if(!item) return "";
+			if(item.type === "composite"){
+				const body = (item.layers || []).map(renderItem).join("");
+				if(!body) return "";
+				const tf = transformAttr(item.transform);
+				return tf ? `<g${tf}>${body}</g>` : body;
+			}
+
+			if(item.type === "solid"){
+				const paint = resolvePaint({ type: "solid", color: String(item.node?.params?.color || "#000000") }, { x: 0, y: 0, width: exportW, height: exportH });
+				const tf = transformAttr(item.transform);
+				return `<g${tf}><rect x="0" y="0" width="${toNum(exportW)}" height="${toNum(exportH)}" fill="${paint}"/></g>`;
+			}
+
+			if(item.type === "gradient"){
+				const paint = resolvePaint(item.fillSpec, { x: 0, y: 0, width: exportW, height: exportH });
+				const tf = transformAttr(item.transform);
+				return `<g${tf}><rect x="0" y="0" width="${toNum(exportW)}" height="${toNum(exportH)}" fill="${paint}"/></g>`;
+			}
+
+			if(item.type === "shape"){
+				const p = item.node?.params || {};
+				const shapeType = String(p.shape || "circle");
+				const width = Math.max(1, Number(p.width) || Number(p.size) || 100);
+				const height = Math.max(1, Number(p.height) || Number(p.size) || 100);
+				const x = Number(p.x || 0);
+				const y = Number(p.y || 0);
+				const fillOpacity = Math.max(0, Math.min(1, Number(p.fillOpacity ?? 1)));
+				const strokeWidth = Math.max(0, Number(p.strokeWidth) || 0);
+				const strokeOpacity = Math.max(0, Math.min(1, Number(p.strokeOpacity ?? 1)));
+				const radius = Math.max(0, Math.min(Math.min(width, height) / 2, Number(p.borderRadius) || 0));
+				const bounds = { x: x - (width / 2), y: y - (height / 2), width, height };
+				const fillPaint = resolvePaint(item.fillSpec, bounds);
+				const strokePaint = resolvePaint(item.strokeSpec, bounds);
+				let shapeMarkup = "";
+				if(shapeType === "circle"){
+					shapeMarkup = `<ellipse cx="${toNum(x)}" cy="${toNum(y)}" rx="${toNum(width / 2)}" ry="${toNum(height / 2)}" fill="${fillPaint}" fill-opacity="${toNum(fillOpacity)}"${strokeWidth > 0 ? ` stroke=\"${strokePaint}\" stroke-width=\"${toNum(strokeWidth)}\" stroke-opacity=\"${toNum(strokeOpacity)}\"` : ""}/>`;
+				}else if(shapeType === "rectangle"){
+					shapeMarkup = `<rect x="${toNum(bounds.x)}" y="${toNum(bounds.y)}" width="${toNum(width)}" height="${toNum(height)}" rx="${toNum(radius)}" ry="${toNum(radius)}" fill="${fillPaint}" fill-opacity="${toNum(fillOpacity)}"${strokeWidth > 0 ? ` stroke=\"${strokePaint}\" stroke-width=\"${toNum(strokeWidth)}\" stroke-opacity=\"${toNum(strokeOpacity)}\"` : ""}/>`;
+				}else{
+					const pts = polygonPoints(shapeType, width, height, x, y);
+					if(!pts.length) return "";
+					const ptsStr = pts.map(pt => `${toNum(pt[0])},${toNum(pt[1])}`).join(" ");
+					shapeMarkup = `<polygon points="${ptsStr}" fill="${fillPaint}" fill-opacity="${toNum(fillOpacity)}"${strokeWidth > 0 ? ` stroke=\"${strokePaint}\" stroke-width=\"${toNum(strokeWidth)}\" stroke-opacity=\"${toNum(strokeOpacity)}\"` : ""}/>`;
+				}
+				const tf = transformAttr(item.transform);
+				return `<g${tf}>${shapeMarkup}</g>`;
+			}
+
+			if(item.type === "text"){
+				const p = item.node?.params || {};
+				const lines = String(p.text || "").split(/\r?\n/);
+				const x = Number(p.x || 0);
+				const y = Number(p.y || 0);
+				const size = Math.max(1, Number(p.size) || 32);
+				const lineHeight = Number(p.lineHeight) > 0 ? Number(p.lineHeight) : (size * 1.2);
+				const letterSpacing = Number(p.letterSpacing) || 0;
+				const alignRaw = String(p.align || "left").toLowerCase();
+				const anchor = alignRaw === "center" ? "middle" : (alignRaw === "right" ? "end" : "start");
+				const fillPaint = resolvePaint(item.fillSpec, { x, y, width: Math.max(10, size * 4), height: Math.max(10, lineHeight * Math.max(1, lines.length)) });
+				const orientation = String(p.orientation || "horizontal").toLowerCase();
+				const fontFamily = `${String(p.font || "Inter")}, Arial, sans-serif`;
+				const textLines = lines.map((line, i) => {
+					const ly = toNum(y + (i * lineHeight));
+					const sanitized = sanitizeTextForIllustrator(line);
+					if(sanitized.changed && !illustratorTextWarned){
+						illustratorTextWarned = true;
+						toast("SVG note: Some emoji/special glyphs were omitted for Illustrator compatibility.");
+					}
+					return `<text x="${toNum(x)}" y="${ly}" text-anchor="${anchor}" xml:space="preserve" font-family="${esc(fontFamily)}" font-size="${toNum(size)}" font-weight="${esc(String(p.weight || 700))}" letter-spacing="${toNum(letterSpacing)}" fill="${fillPaint}">${escText(sanitized.text)}</text>`;
+				}).join("");
+				const tf = transformAttr(item.transform);
+				if(orientation === "vertical"){
+					const vx = toNum(x);
+					const vy = toNum(y);
+					const verticalGroup = `<g transform="translate(${vx} ${vy}) rotate(-90) translate(${-vx} ${-vy})">${textLines}</g>`;
+					return tf ? `<g${tf}>${verticalGroup}</g>` : verticalGroup;
+				}
+				return tf ? `<g${tf}>${textLines}</g>` : textLines;
+			}
+
+			if(item.type === "pen"){
+				const params = item.node?.params || {};
+				migrateLegacyPenParams(params);
+				const paths = normalizePenPaths(params.paths).filter(path => path && path.visible !== false);
+				if(!paths.length) return "";
+				const connectedFillSpec = resolveConnectedFillSpec(item.node, ["fill", "color", "paint"]);
+				const connectedStrokeSpec = resolveConnectedFillSpec(item.node, ["stroke", "stroke color", "strokeColor", "outline"]);
+				const holes = paths.filter(path => path.closed && path.isHole);
+				const drawPaths = paths.filter(path => !(path.closed && path.isHole));
+				const body = drawPaths.map((path) => {
+					const d = buildPenPathD(path.points, Boolean(path.closed));
+					if(!d) return "";
+					const pathBounds = getPenPathBounds(path);
+					const fillSpec = connectedFillSpec || { type: "solid", color: String(path.fillColor || "#ffffff") };
+					const strokeSpec = connectedStrokeSpec || { type: "solid", color: String(path.strokeColor || "#ffffff") };
+					const fill = path.closed ? resolvePaint(fillSpec, pathBounds) : "none";
+					const fillOpacity = path.closed ? toNum(Math.max(0, Math.min(1, Number(path.fillOpacity) || 0))) : 0;
+					const stroke = resolvePaint(strokeSpec, pathBounds);
+					const strokeWidth = toNum(Math.max(0.1, Number(path.strokeWidth) || 2));
+					const strokeOpacity = toNum(Math.max(0, Math.min(1, Number(path.strokeOpacity) || 1)));
+					const linecap = ["round", "butt", "square"].includes(path.strokeLinecap) ? path.strokeLinecap : "round";
+					return `<path d="${esc(d)}" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}" stroke-linecap="${linecap}" stroke-linejoin="round"/>`;
+				}).join("");
+				if(!body) return "";
+				let wrapped = body;
+				if(holes.length){
+					const id = `svg_pen_mask_${++maskId}`;
+					const holesMarkup = holes.map((path) => {
+						const d = buildPenPathD(path.points, true);
+						return d ? `<path d="${esc(d)}" fill="black" stroke="none"/>` : "";
+					}).join("");
+					defs.push(`<mask id="${id}" maskUnits="userSpaceOnUse"><rect x="0" y="0" width="${toNum(exportW)}" height="${toNum(exportH)}" fill="white"/>${holesMarkup}</mask>`);
+					wrapped = `<g mask="url(#${id})">${body}</g>`;
+				}
+				const tf = transformAttr(item.transform);
+				return `<g${tf}>${wrapped}</g>`;
+			}
+
+			return "";
+		}
+
+		const content = renderItem(decoded);
+		if(!content){
+			toast("SVG export failed: empty result.");
+			return;
+		}
+
+		const svgMarkup =
+			`<?xml version="1.0" encoding="UTF-8"?>\n` +
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${exportW}" height="${exportH}" viewBox="0 0 ${exportW} ${exportH}">` +
+			(defs.length ? `<defs>${defs.join("")}</defs>` : "") +
+			content +
+			`</svg>`;
+
+		const blob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+		const link = document.createElement("a");
+		link.href = URL.createObjectURL(blob);
+		link.download = `${name.replace(/[^\w\-]+/g, "_")}_vector.svg`;
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		URL.revokeObjectURL(link.href);
+
+		toast(`SVG exported ✅ (${formatBytes(blob.size)})`);
+	}
+
 	return {
 		exportAnimationJSON,
 		exportEmbedJS,
-		exportLottieJSON
+		exportLottieJSON,
+		exportSVG
 	};
 };

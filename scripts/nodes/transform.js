@@ -1,5 +1,5 @@
 window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ propagateMotionFlag, state, measureLayerBounds, getCanvasSize }){
-  function getTransformedBounds(bounds, { x, y, scale, rotateDeg, pivotX, pivotY }){
+  function getTransformedBounds(bounds, { x, y, scaleX, scaleY, rotateDeg, pivotX, pivotY }){
     if(!bounds) return null;
 
     const rad = (rotateDeg * Math.PI) / 180;
@@ -13,8 +13,8 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
     ].map((point) => {
       const dx = point.x - pivotX;
       const dy = point.y - pivotY;
-      const scaledX = dx * scale;
-      const scaledY = dy * scale;
+      const scaledX = dx * scaleX;
+      const scaledY = dy * scaleY;
       return {
         x: pivotX + x + (scaledX * cos) - (scaledY * sin),
         y: pivotY + y + (scaledX * sin) + (scaledY * cos)
@@ -39,7 +39,7 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
   return {
     inputs: ["in"],
     outputs: ["layer"],
-    defaults: { x:0, y:0, scale:1, rot:0, originX:0, originY:0 },
+    defaults: { x:0, y:0, scaleMode:"uniform", scale:1, scaleX:1, scaleY:1, rot:0, originX:0, originY:0 },
     icon: "↔️",
     run: (node, inputs) => {
       const src = inputs.in;
@@ -56,7 +56,17 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
 
       const x = Number(node.params.x) || 0;
       const y = Number(node.params.y) || 0;
-      const s = Number(node.params.scale) || 1;
+      const mode = String(node.params.scaleMode || "uniform").toLowerCase() === "individual" ? "individual" : "uniform";
+      const uniformScale = Number(node.params.scale);
+      const fallbackScale = Number.isFinite(uniformScale) && uniformScale > 0 ? uniformScale : 1;
+      const rawScaleX = Number(node.params.scaleX);
+      const rawScaleY = Number(node.params.scaleY);
+      const scaleX = mode === "individual"
+        ? ((Number.isFinite(rawScaleX) && rawScaleX > 0) ? rawScaleX : fallbackScale)
+        : fallbackScale;
+      const scaleY = mode === "individual"
+        ? ((Number.isFinite(rawScaleY) && rawScaleY > 0) ? rawScaleY : fallbackScale)
+        : fallbackScale;
       const r = Number(node.params.rot) || 0;
       const ox = Number(node.params.originX) ?? 0;
       const oy = Number(node.params.originY) ?? 0;
@@ -72,13 +82,14 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
       const pivotY = canvasHeight * (oyPercent / 100);
 
       clone.style.transformOrigin = `${oxPercent}% ${oyPercent}%`;
-      clone.style.transform = `translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
+      clone.style.transform = `translate(${x}px, ${y}px) scale(${scaleX}, ${scaleY}) rotate(${r}deg)`;
 
       const sourceBounds = typeof measureLayerBounds === "function" ? measureLayerBounds(src.el) : null;
       const transformedBounds = getTransformedBounds(sourceBounds, {
         x,
         y,
-        scale: s,
+        scaleX,
+        scaleY,
         rotateDeg: r,
         pivotX,
         pivotY
@@ -126,12 +137,63 @@ window.createOniwireTransformNodeDef = function createOniwireTransformNodeDef({ 
       return { el: wrap };
     },
     inspector: () => ([
-      {k:"x", type:"range", label:"X", min:-600, max:600, step:1},
-      {k:"y", type:"range", label:"Y", min:-600, max:600, step:1},
-      {k:"scale", type:"range", label:"Scale", min:0.05, max:5, step:0.01},
+      {
+        type: "compactScrub2d",
+        label: "Position",
+        kx: "x",
+        ky: "y",
+        lx: "X",
+        ly: "Y",
+        resetX: 0,
+        resetY: 0,
+        minX: -600,
+        maxX: 600,
+        minY: -600,
+        maxY: 600,
+        step: 1
+      },
+      {
+        k: "scaleMode",
+        type: "options",
+        label: "Scale Mode",
+        options: [
+          { label: "Uniform", value: "uniform" },
+          { label: "Individual", value: "individual" }
+        ]
+      },
+      {k:"scale", type:"range", label:"Scale", min:0.05, max:5, step:0.01, showIf: { k: "scaleMode", equals: "uniform" }},
+      {
+        type: "compactScrub2d",
+        label: "Scale",
+        kx: "scaleX",
+        ky: "scaleY",
+        lx: "X",
+        ly: "Y",
+        resetX: 1,
+        resetY: 1,
+        minX: 0.05,
+        maxX: 5,
+        minY: 0.05,
+        maxY: 5,
+        step: 0.01,
+        showIf: { k: "scaleMode", equals: "individual" }
+      },
       {k:"rot", type:"range", label:"Rotate°", min:-360, max:360, step:1},
-      {k:"originX", type:"range", label:"Pivot X", min:-100, max:100, step:0.5},
-      {k:"originY", type:"range", label:"Pivot Y", min:-100, max:100, step:0.5}
+      {
+        type: "compactScrub2d",
+        label: "Pivot",
+        kx: "originX",
+        ky: "originY",
+        lx: "X",
+        ly: "Y",
+        resetX: 0,
+        resetY: 0,
+        minX: -100,
+        maxX: 100,
+        minY: -100,
+        maxY: 100,
+        step: 0.5
+      }
     ])
   };
 };

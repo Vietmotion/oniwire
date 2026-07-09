@@ -94,7 +94,7 @@
     }
   </style>
   <script src="vendor/html2canvas.min.js"></script>
-  <script src="scripts/export.js?v=20260606e"></script>
+  <script src="scripts/export.js?v=20260709e"></script>
   <script src="scripts/node-menu.js?v=20260704"></script>
   <script src="scripts/node-search.js?v=20260704"></script>
   <script src="scripts/nodes/color.js"></script>
@@ -224,7 +224,7 @@
           <div class="hintRow" id="tipsContent">
             <span class="pill">Hi, this is an online node based visual creation app. <br> 
               - Press Tab for node searching. <br>
-              - Press Shift+O to quick connect node to Output. <br>
+              - Press 1-0 to switch Outputs. Ctrl+1-0 quick-connects to Output 1-10. <br>
               - You can pan and scroll for viewport Control. 
               - More is coming. 
             </span>
@@ -434,6 +434,7 @@
     groups: new Map(),
     nextId: 1,
     nextGroupId: 1,
+    activeOutputNodeId: null,
 
     draggingNode: null,   // {id, ox, oy} or {ids: Set, offsets: Map}
     connecting: null,     // {nodeId, port}
@@ -1298,6 +1299,267 @@
     if(!tipsContentEl) return;
     const lines = (nodeType && NODE_TIPS[nodeType]) ? NODE_TIPS[nodeType] : TIPS_DEFAULT;
     tipsContentEl.innerHTML = lines.map(l => `<span class="pill">${l}</span>`).join("");
+  }
+
+  let scrubValueMenuEl = null;
+  let scrubValueMenuDismiss = null;
+  let scrubValueEditorEl = null;
+  let scrubValueEditorDismiss = null;
+
+  function closeScrubValueMenu(){
+    if(scrubValueMenuDismiss){
+      document.removeEventListener("pointerdown", scrubValueMenuDismiss, true);
+      document.removeEventListener("keydown", scrubValueMenuDismiss, true);
+      scrubValueMenuDismiss = null;
+    }
+    if(scrubValueMenuEl){
+      scrubValueMenuEl.remove();
+      scrubValueMenuEl = null;
+    }
+  }
+
+  function closeScrubValueEditor(keepValue = false){
+    if(scrubValueEditorDismiss){
+      document.removeEventListener("pointerdown", scrubValueEditorDismiss, true);
+      document.removeEventListener("keydown", scrubValueEditorDismiss, true);
+      scrubValueEditorDismiss = null;
+    }
+    if(scrubValueEditorEl){
+      const btn = scrubValueEditorEl._scrubButton || null;
+      if(btn) btn.classList.remove("isEditing");
+      if(!keepValue && scrubValueEditorEl._scrubRestore){
+        try{ scrubValueEditorEl._scrubRestore(); }catch(_){/* ignore */}
+      }
+      scrubValueEditorEl.remove();
+      scrubValueEditorEl = null;
+    }
+  }
+
+  function scrubNumberToText(value, step){
+    const next = Number(value);
+    if(!Number.isFinite(next)) return "0";
+    const stepRaw = String(step ?? 1);
+    const dot = stepRaw.indexOf(".");
+    const decimals = dot >= 0 ? Math.max(0, stepRaw.length - dot - 1) : 0;
+    return decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
+  }
+
+  function scrubSnapValue(value, min, max, step){
+    const minNum = Number.isFinite(Number(min)) ? Number(min) : -Infinity;
+    const maxNum = Number.isFinite(Number(max)) ? Number(max) : Infinity;
+    const stepNum = Number(step);
+    let next = Number(value);
+    if(!Number.isFinite(next)) next = 0;
+    if(Number.isFinite(stepNum) && stepNum > 0){
+      const base = Number.isFinite(minNum) ? minNum : 0;
+      const units = Math.round((next - base) / stepNum);
+      next = base + (units * stepNum);
+    }
+    next = Math.max(minNum, Math.min(maxNum, next));
+    return next;
+  }
+
+  function scrubResetValue(btn, attrName, fallback){
+    const raw = btn?.getAttribute?.(attrName);
+    const next = Number(raw);
+    return Number.isFinite(next) ? next : fallback;
+  }
+
+  function openScrubValueMenu(btn, getValue, copyLabel){
+    closeScrubValueMenu();
+    closeScrubValueEditor(true);
+
+    const menu = document.createElement("div");
+    menu.className = "previewLayerMenu scrubValueMenu";
+    menu.setAttribute("role", "menu");
+
+    const header = document.createElement("div");
+    header.className = "previewLayerMenuHeader";
+    header.textContent = copyLabel || "Value";
+    menu.appendChild(header);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "previewLayerMenuItem";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    copyBtn.addEventListener("click", async () => {
+      const valueText = String(getValue());
+      try{
+        if(navigator.clipboard?.writeText){
+          await navigator.clipboard.writeText(valueText);
+        }else{
+          const temp = document.createElement("textarea");
+          temp.value = valueText;
+          temp.style.position = "fixed";
+          temp.style.left = "-9999px";
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand("copy");
+          temp.remove();
+        }
+        toast(`Copied ${valueText}`);
+      }catch(_){
+        toast("Copy failed.");
+      }
+      closeScrubValueMenu();
+    });
+    menu.appendChild(copyBtn);
+
+    menu.style.visibility = "hidden";
+    document.body.appendChild(menu);
+
+    const menuRect = menu.getBoundingClientRect();
+    const x = Math.max(8, Math.min(btn._scrubMenuX || 8, window.innerWidth - menuRect.width - 8));
+    const y = Math.max(8, Math.min(btn._scrubMenuY || 8, window.innerHeight - menuRect.height - 8));
+    menu.style.left = x + "px";
+    menu.style.top = y + "px";
+    menu.style.visibility = "";
+
+    scrubValueMenuEl = menu;
+    const dismiss = (ev) => {
+      if(ev.type === "keydown" && ev.key !== "Escape") return;
+      if(ev.type === "pointerdown" && scrubValueMenuEl && scrubValueMenuEl.contains(ev.target)) return;
+      closeScrubValueMenu();
+    };
+    scrubValueMenuDismiss = dismiss;
+    setTimeout(() => {
+      document.addEventListener("pointerdown", dismiss, true);
+      document.addEventListener("keydown", dismiss, true);
+    }, 0);
+  }
+
+  function openScrubValueEditor(btn, getValue, setValue, min, max, step, resetLabel){
+    closeScrubValueMenu();
+    closeScrubValueEditor(true);
+
+    const rect = btn.getBoundingClientRect();
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "numDragInput isNumEditing scrubValueEditor";
+    input.value = scrubNumberToText(getValue(), step);
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.style.position = "fixed";
+    input.style.left = rect.left + "px";
+    input.style.top = rect.top + "px";
+    input.style.width = Math.max(64, rect.width) + "px";
+    input.style.height = rect.height + "px";
+    input.style.zIndex = "10090";
+    input.style.margin = "0";
+
+    let originalValue = input.value;
+    let committed = false;
+    const restore = () => {
+      if(committed) return;
+      try{ setValue(getValue(), false); }catch(_){/* ignore */}
+    };
+
+    input._scrubButton = btn;
+    input._scrubRestore = restore;
+    btn.classList.add("isEditing");
+
+    const commit = (shouldPushHistory = true) => {
+      if(committed) return;
+      committed = true;
+      const next = scrubSnapValue(input.value, min, max, step);
+      setValue(next, shouldPushHistory);
+      closeScrubValueEditor(true);
+    };
+
+    const cancel = () => {
+      if(committed) return;
+      committed = true;
+      input.value = originalValue;
+      closeScrubValueEditor(false);
+    };
+
+    const dismiss = (ev) => {
+      if(ev.type === "keydown"){
+        if(ev.key === "Enter"){
+          ev.preventDefault();
+          commit(true);
+        }else if(ev.key === "Escape"){
+          ev.preventDefault();
+          cancel();
+        }
+        return;
+      }
+      if(ev.type === "pointerdown" && ev.target === input) return;
+      commit(true);
+    };
+
+    scrubValueEditorEl = input;
+    scrubValueEditorDismiss = dismiss;
+    document.body.appendChild(input);
+    input.focus();
+    try{ input.select(); }catch(_){/* ignore */}
+
+    setTimeout(() => {
+      document.addEventListener("pointerdown", dismiss, true);
+      document.addEventListener("keydown", dismiss, true);
+    }, 0);
+
+    input.addEventListener("blur", () => commit(true));
+  }
+
+  function enableScrubBoxExtras(btn, options){
+    const valueEl = btn.querySelector(".smScrubValue");
+    if(!valueEl) return;
+
+    let openEditTimer = null;
+
+    const cancelPendingEdit = () => {
+      if(openEditTimer !== null){
+        clearTimeout(openEditTimer);
+        openEditTimer = null;
+      }
+    };
+
+    valueEl.addEventListener("pointerdown", (ev) => {
+      ev.stopPropagation();
+    });
+
+    valueEl.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cancelPendingEdit();
+      openEditTimer = setTimeout(() => {
+        openEditTimer = null;
+        openScrubValueEditor(
+          btn,
+          options.getValue,
+          options.setValue,
+          options.min,
+          options.max,
+          options.step,
+          options.label
+        );
+      }, 160);
+    });
+
+    btn.addEventListener("dblclick", (ev) => {
+      if(ev.button !== 0 && ev.detail !== 2) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      cancelPendingEdit();
+      closeScrubValueEditor(true);
+      options.setValue(options.getResetValue(), true);
+    });
+
+    btn.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cancelPendingEdit();
+      btn._scrubMenuX = ev.clientX;
+      btn._scrubMenuY = ev.clientY;
+      openScrubValueMenu(btn, options.getValue, options.label);
+    });
+
+    btn.addEventListener("pointerleave", () => {
+      cancelPendingEdit();
+    });
   }
 
   let previewBase = { w: 1280, h: 720 };
@@ -3439,6 +3701,7 @@ const exportApi = window.createOniwireExportApi({
 const exportAnimationJSON = exportApi.exportAnimationJSON;
 const exportEmbedJS = exportApi.exportEmbedJS;
 const exportLottieJSON = exportApi.exportLottieJSON;
+const exportSVG = exportApi.exportSVG;
 
 const LOTTIE_ALLOWED_NODE_TYPES = new Set(["Output", "Shape", "Text", "Transform", "Motion", "Color", "Gradient", "Ramp", "Composite", "Glow"]);
 
@@ -3491,7 +3754,35 @@ function syncOutputRatio(node){
   return ratio;
 }
 
+function getOrderedOutputNodes(){
+  return Array.from(state.nodes.values())
+    .filter(n => n.type === "Output")
+    .sort((a, b) => {
+      const aNum = Number(a.id);
+      const bNum = Number(b.id);
+      if(Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: "base" });
+    });
+}
+
+function getOutputNodeByShortcutIndex(index){
+  const slot = Number(index);
+  if(!Number.isInteger(slot) || slot < 1 || slot > 10) return null;
+  return getOrderedOutputNodes()[slot - 1] || null;
+}
+
+function setActiveOutputNode(outputNode){
+  state.activeOutputNodeId = outputNode && outputNode.type === "Output"
+    ? String(outputNode.id)
+    : null;
+  return state.activeOutputNodeId;
+}
+
 function findActiveOutputNode(){
+  if(state.activeOutputNodeId){
+    const active = state.nodes.get(String(state.activeOutputNodeId));
+    if(active && active.type === "Output") return active;
+  }
   const wiredOutput = Array.from(state.nodes.values()).find(n => n.type === "Output" && findWireToInput(n.id, "in"));
   return wiredOutput || findFirstOutputNode();
 }
@@ -5680,8 +5971,9 @@ const HELP_GENERAL_PAGES = {
         <h3 class="helpSectionTitle">Node Graph</h3>
         <ul class="helpChecklist">
           <li><kbd>Tab</kbd> open node search to add a node.</li>
-          <li><kbd>O</kbd> center the editor view on the Output node.</li>
-          <li><kbd>Shift + O</kbd> quick-connect the selected node to Output.</li>
+          <li><kbd>1</kbd> to <kbd>0</kbd> switch between Output 1..10.</li>
+          <li><kbd>Ctrl</kbd> + <kbd>1</kbd> to <kbd>0</kbd> quick-connect the selected node to Output 1..10.</li>
+          <li><kbd>O</kbd> center the editor view on the active Output node.</li>
           <li><kbd>U</kbd> center the editor view on the selected node.</li>
           <li><kbd>Space</kbd> + drag pan the node editor (only when zoomed in).</li>
           <li>Mouse wheel zoom in / out.</li>
@@ -6987,10 +7279,58 @@ async function evaluate(){
     };
   }
 
+  function getNormalizedGroupMemberIds(group){
+    const raw = Array.isArray(group?.memberIds) ? group.memberIds : [];
+    const seen = new Set();
+    const out = [];
+    for(const id of raw){
+      const sid = String(id);
+      if(!sid || seen.has(sid) || !state.nodes.has(sid)) continue;
+      seen.add(sid);
+      out.push(sid);
+    }
+    return out;
+  }
+
+  function getCollapsedMemberSetExcludingGroup(groupId){
+    const excludeId = String(groupId || "");
+    const claimed = new Set();
+    for(const g of state.groups.values()){
+      if(!g?.collapsed) continue;
+      if(excludeId && String(g.id) === excludeId) continue;
+      for(const id of getNormalizedGroupMemberIds(g)){
+        claimed.add(String(id));
+      }
+    }
+    return claimed;
+  }
+
+  function captureGroupMembersForCollapse(group){
+    const existingMembers = getNormalizedGroupMemberIds(group);
+    const boundedMembers = getGroupMemberIdsByBounds(group).map(id => String(id));
+    const claimedByOthers = getCollapsedMemberSetExcludingGroup(group?.id);
+
+    const existingSet = new Set(existingMembers);
+    const merged = [];
+    const seen = new Set();
+    const source = [...existingMembers, ...boundedMembers];
+
+    for(const id of source){
+      const sid = String(id);
+      if(!sid || seen.has(sid) || !state.nodes.has(sid)) continue;
+      // Keep existing ownership, but do not newly steal nodes that are already
+      // owned by another collapsed group.
+      if(claimedByOthers.has(sid) && !existingSet.has(sid)) continue;
+      seen.add(sid);
+      merged.push(sid);
+    }
+
+    return merged;
+  }
+
   function getNodeIdsInsideGroup(group){
     if(group?.collapsed){
-      const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
-      return memberIds.filter(nid => state.nodes.has(String(nid)));
+      return getNormalizedGroupMemberIds(group);
     }
     const gr = getGroupRect(group);
     const inside = [];
@@ -7008,7 +7348,7 @@ async function evaluate(){
     if(!node) return null;
     for(const group of state.groups.values()){
       if(!group?.collapsed) continue;
-      const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
+      const memberIds = getNormalizedGroupMemberIds(group);
       if(memberIds.some(id => String(id) === String(nodeId))) return group;
     }
     return null;
@@ -7040,7 +7380,7 @@ async function evaluate(){
   function hydrateCollapsedGroupMembers(){
     for(const group of state.groups.values()){
       if(!group?.collapsed) continue;
-      const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
+      const memberIds = getNormalizedGroupMemberIds(group);
       if(memberIds.length > 0) continue;
       group.memberIds = getGroupMemberIdsByBounds(group);
     }
@@ -7345,7 +7685,7 @@ async function evaluate(){
         e.stopPropagation();
         pushHistory();
         if(!group.collapsed){
-          group.memberIds = getGroupMemberIdsByBounds(group);
+          group.memberIds = captureGroupMembersForCollapse(group);
         }
         group.collapsed = !group.collapsed;
         render();
@@ -8279,15 +8619,17 @@ async function evaluate(){
       const minY = Number.isFinite(Number(f.minY)) ? Number(f.minY) : 0;
       const maxY = Number.isFinite(Number(f.maxY)) ? Number(f.maxY) : 720;
       const step = Number.isFinite(Number(f.step)) ? Number(f.step) : 1;
+      const resetX = Number.isFinite(Number(f.resetX)) ? Number(f.resetX) : 640;
+      const resetY = Number.isFinite(Number(f.resetY)) ? Number(f.resetY) : 360;
       const valX = Math.round(clamp(Number(node.params[kx]), minX, maxX) || 0);
       const valY = Math.round(clamp(Number(node.params[ky]), minY, maxY) || 0);
       controlHtml = `
         <div class="clonePivotCompact" style="${disabledStyle}"${disabledTitleAttr}>
-          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change Pivot X">
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}" data-pivot-reset="${resetX}"${disabledAttr} title="Drag left or right to change Pivot X">
             <span class="smScrubTag">X</span>
             <span class="smScrubValue">${valX}</span>
           </button>
-          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change Pivot Y">
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}" data-pivot-reset="${resetY}"${disabledAttr} title="Drag left or right to change Pivot Y">
             <span class="smScrubTag">Y</span>
             <span class="smScrubValue">${valY}</span>
           </button>
@@ -8304,15 +8646,17 @@ async function evaluate(){
       const minY = Number.isFinite(Number(f.minY)) ? Number(f.minY) : -1200;
       const maxY = Number.isFinite(Number(f.maxY)) ? Number(f.maxY) : 1600;
       const step = Number.isFinite(Number(f.step)) ? Number(f.step) : 1;
+      const resetX = Number.isFinite(Number(f.resetX)) ? Number(f.resetX) : 0;
+      const resetY = Number.isFinite(Number(f.resetY)) ? Number(f.resetY) : 0;
       const valX = clamp(Number(node.params[kx]) || 0, minX, maxX);
       const valY = clamp(Number(node.params[ky]) || 0, minY, maxY);
       controlHtml = `
         <div class="clonePivotCompact" style="grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); ${disabledStyle}"${disabledTitleAttr}>
-          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change ${escapeAttr(lx)}">
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}" data-pivot-reset="${resetX}"${disabledAttr} title="Drag left or right to change ${escapeAttr(lx)}">
             <span class="smScrubTag">${escapeAttr(lx)}</span>
             <span class="smScrubValue">${Number.isInteger(valX) ? Math.round(valX) : valX}</span>
           </button>
-          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}"${disabledAttr} title="Drag left or right to change ${escapeAttr(ly)}">
+          <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}" data-pivot-reset="${resetY}"${disabledAttr} title="Drag left or right to change ${escapeAttr(ly)}">
             <span class="smScrubTag">${escapeAttr(ly)}</span>
             <span class="smScrubValue">${Number.isInteger(valY) ? Math.round(valY) : valY}</span>
           </button>
@@ -8472,8 +8816,8 @@ async function evaluate(){
             <option value="butt"${(ap.strokeLinecap||"round")==="butt"?" selected":""}>Butt</option>
             <option value="square"${(ap.strokeLinecap||"round")==="square"?" selected":""}>Square</option>
           </select></div>
-          <div class="row"><label>Taper</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="taperStartStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change start taper strength"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.taperStartStrength ?? 70)}</span></button><button type="button" class="smScrubBox" data-sm-scrub="taperEndStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to change end taper strength"><span class="smScrubTag">E</span><span class="smScrubValue">${Math.round(ap.taperEndStrength ?? 70)}</span></button></div></div>
-          <div class="row"><label>Smooth</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="smoothStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" title="Drag left or right to smooth the active path" style="grid-column:1 / -1;"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.smoothStrength ?? 0)}</span></button></div></div>
+          <div class="row"><label>Taper</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="taperStartStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" data-sm-reset="70" title="Drag left or right to change start taper strength"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.taperStartStrength ?? 70)}</span></button><button type="button" class="smScrubBox" data-sm-scrub="taperEndStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" data-sm-reset="70" title="Drag left or right to change end taper strength"><span class="smScrubTag">E</span><span class="smScrubValue">${Math.round(ap.taperEndStrength ?? 70)}</span></button></div></div>
+          <div class="row"><label>Smooth</label><div class="smScrubRow"><button type="button" class="smScrubBox" data-sm-scrub="smoothStrength" data-sm-min="0" data-sm-max="100" data-sm-step="1" data-sm-reset="0" title="Drag left or right to smooth the active path" style="grid-column:1 / -1;"><span class="smScrubTag">S</span><span class="smScrubValue">${Math.round(ap.smoothStrength ?? 0)}</span></button></div></div>
         </div>
       ` : "";
 
@@ -8787,6 +9131,8 @@ async function evaluate(){
           runExport(() => exportEmbedJS(projectName));
         }else if(exportType === "exportLottieJSON"){
           runExport(() => exportLottieJSON(projectName));
+        }else if(exportType === "exportSVG"){
+          runExport(() => exportSVG(projectName));
         }else if(exportType === "exportMp4"){
           runExport(() => exportMp4(projectName));
         }else{
@@ -9321,32 +9667,31 @@ async function evaluate(){
     });
 
     inspectorBody.querySelectorAll('[data-pivot-scrub]').forEach(btn => {
+      const prop = btn.getAttribute('data-pivot-scrub') || '';
+      const min = Number(btn.getAttribute('data-pivot-min'));
+      const max = Number(btn.getAttribute('data-pivot-max'));
+      const step = Number(btn.getAttribute('data-pivot-step')) || 1;
+      if(!prop || !Number.isFinite(min) || !Number.isFinite(max)) return;
+
+      const stepRaw = String(btn.getAttribute('data-pivot-step') || '1');
+      const decimals = (() => {
+        const dot = stepRaw.indexOf('.');
+        return dot >= 0 ? Math.max(0, stepRaw.length - dot - 1) : 0;
+      })();
+      const formatVal = (v) => {
+        const n = clamp(Number(v), min, max);
+        return decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n);
+      };
+      const valueEl = btn.querySelector('.smScrubValue');
+
       btn.addEventListener('pointerdown', (ev) => {
         if(ev.button !== 0) return;
         ev.preventDefault();
-
-        const prop = btn.getAttribute('data-pivot-scrub') || '';
-        const min = Number(btn.getAttribute('data-pivot-min'));
-        const max = Number(btn.getAttribute('data-pivot-max'));
-        const step = Number(btn.getAttribute('data-pivot-step')) || 1;
-        if(!prop || !Number.isFinite(min) || !Number.isFinite(max)) return;
-
-        const stepRaw = String(btn.getAttribute('data-pivot-step') || '1');
-        const decimals = (() => {
-          const dot = stepRaw.indexOf('.');
-          return dot >= 0 ? Math.max(0, stepRaw.length - dot - 1) : 0;
-        })();
-        const formatVal = (v) => {
-          const n = clamp(Number(v), min, max);
-          return decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n);
-        };
 
         let currentValue = clamp(Number(node.params[prop]) || 0, min, max);
         let carry = 0;
         let moved = false;
         let rafId = null;
-
-        const valueEl = btn.querySelector('.smScrubValue');
         document.body.style.cursor = 'ew-resize';
         document.body.style.userSelect = 'none';
         btn.setPointerCapture(ev.pointerId);
@@ -9392,6 +9737,23 @@ async function evaluate(){
         btn.addEventListener('pointermove', onMove);
         btn.addEventListener('pointerup', onUp);
         btn.addEventListener('pointercancel', onUp);
+      });
+
+      enableScrubBoxExtras(btn, {
+        label: prop,
+        min,
+        max,
+        step,
+        getValue: () => Number(node.params[prop]) || 0,
+        setValue: (next, shouldPushHistory = true) => {
+          const snapped = formatVal(next);
+          if(shouldPushHistory) pushHistory();
+          node.params[prop] = snapped;
+          if(valueEl) valueEl.textContent = String(snapped);
+          evaluateAndRender();
+          updatePreviewSelectionBox();
+        },
+        getResetValue: () => scrubResetValue(btn, 'data-pivot-reset', Number(node.params[prop]) || 0)
       });
     });
 
@@ -10054,24 +10416,28 @@ async function evaluate(){
       });
 
       sm.querySelectorAll('[data-sm-scrub]').forEach(btn => {
+        const prop = btn.getAttribute('data-sm-scrub') || '';
+        const min  = Number(btn.getAttribute('data-sm-min'));
+        const max  = Number(btn.getAttribute('data-sm-max'));
+        const step = Number(btn.getAttribute('data-sm-step')) || 1;
+        if(!prop || !Number.isFinite(min) || !Number.isFinite(max)) return;
+
+        // Helper: always read/write the live path object, even after normalization
+        const getLivePath = () => {
+          const paths = node.params.paths;
+          if(!Array.isArray(paths) || !paths.length) return null;
+          const idx = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
+          return paths[idx];
+        };
+
+        const live = getLivePath();
+        if(!live || !(prop in live)) return;
+
+        const valueEl = btn.querySelector('.smScrubValue');
+
         btn.addEventListener('pointerdown', (ev) => {
           if(ev.button !== 0) return;
           ev.preventDefault();
-          const prop = btn.getAttribute('data-sm-scrub') || '';
-          const min  = Number(btn.getAttribute('data-sm-min'));
-          const max  = Number(btn.getAttribute('data-sm-max'));
-          const step = Number(btn.getAttribute('data-sm-step')) || 1;
-
-          // Helper: always read/write the live path object, even after normalization
-          const getLivePath = () => {
-            const paths = node.params.paths;
-            if(!Array.isArray(paths) || !paths.length) return null;
-            const idx = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
-            return paths[idx];
-          };
-
-          const live = getLivePath();
-          if(!live || !(prop in live)) return;
 
           let currentValue = Number(live[prop]) || 0;
           let carry = 0;
@@ -10086,7 +10452,6 @@ async function evaluate(){
             live.smoothSourcePoints = clonePenPoints(live.points);
           }
 
-          const valueEl = btn.querySelector('.smScrubValue');
           document.body.style.cursor = 'ew-resize';
           document.body.style.userSelect = 'none';
           btn.setPointerCapture(ev.pointerId);
@@ -10155,6 +10520,39 @@ async function evaluate(){
           btn.addEventListener('pointermove', onMove);
           btn.addEventListener('pointerup', onUp);
           btn.addEventListener('pointercancel', onUp);
+        });
+
+        enableScrubBoxExtras(btn, {
+          label: prop,
+          min,
+          max,
+          step,
+          getValue: () => {
+            const p = getLivePath();
+            return p ? (Number(p[prop]) || 0) : 0;
+          },
+          setValue: (next, shouldPushHistory = true) => {
+            const p = getLivePath();
+            if(!p) return;
+            const snapped = formatVal(next);
+            if(shouldPushHistory) pushHistory();
+            p[prop] = snapped;
+            if(isSmoothScrub){
+              p.smoothSourcePoints = (Array.isArray(p.smoothSourcePoints) && p.smoothSourcePoints.length === p.points.length)
+                ? p.smoothSourcePoints
+                : clonePenPoints(smoothSourcePoints || p.points);
+              const source = Array.isArray(smoothSourcePoints) ? smoothSourcePoints : clonePenPoints(p.points);
+              p.points = window.oniwirePenSmoothPath ? window.oniwirePenSmoothPath(source, Boolean(p.closed), snapped) : clonePenPoints(source);
+            }
+            const liveValueEl = btn.querySelector('.smScrubValue');
+            if(liveValueEl) liveValueEl.textContent = String(Math.round(snapped));
+            evaluateAndRender();
+            drawPenCanvasOverlay();
+          },
+          getResetValue: () => {
+            const fallback = prop === 'smoothStrength' ? 0 : (prop === 'taperStartStrength' || prop === 'taperEndStrength' ? 70 : 0);
+            return scrubResetValue(btn, 'data-sm-reset', fallback);
+          }
         });
       });
 
@@ -12020,6 +12418,7 @@ function serializeGraph(){
     version: "0.2.1",
     nextId: state.nextId,
     nextGroupId: state.nextGroupId,
+    activeOutputNodeId: state.activeOutputNodeId ? String(state.activeOutputNodeId) : null,
     panX: state.panX,
     panY: state.panY,
     zoom: state.zoom,
@@ -12249,6 +12648,10 @@ function deleteSelectedNode(){
     return !nodesToDelete.some(id => String(id) === fromId || String(id) === toId);
   });
 
+  if(state.activeOutputNodeId && nodesToDelete.some(id => String(id) === String(state.activeOutputNodeId))){
+    state.activeOutputNodeId = null;
+  }
+
   // Clear selection + connecting
   state.selected = null;
   state.selectedNodes.clear();
@@ -12264,7 +12667,7 @@ function deleteSelectedNode(){
   toast(`Deleted ${count} node${count > 1 ? 's' : ''}`);
 }
 
-function quickConnectSelectedToOutput(){
+function quickConnectSelectedToOutput(outputNode = findActiveOutputNode()){
   const nodeId = state.selected;
   if(!nodeId){
     toast("Select a node first.");
@@ -12290,7 +12693,9 @@ function quickConnectSelectedToOutput(){
 
   pushHistory();
 
-  let outputNode = findActiveOutputNode();
+  if(!outputNode || outputNode.type !== "Output"){
+    outputNode = findActiveOutputNode();
+  }
   if(!outputNode){
     const pos = { x: node.pos.x + 360, y: node.pos.y };
     outputNode = addNode("Output", pos);
@@ -12306,6 +12711,7 @@ function quickConnectSelectedToOutput(){
     from: { nodeId: node.id, port: outPort },
     to: { nodeId: outputNode.id, port: "in" }
   });
+  setActiveOutputNode(outputNode);
 
   state.connecting = null;
   state.rewiringFromInput = null;
@@ -12438,22 +12844,41 @@ window.addEventListener("keydown", (e) => {
   drawPenCanvasOverlay();
 });
 
-// O centers view on Output node. Shift+O quick connects selected node to Output.
+// O centers view on the active Output node.
+// Ctrl/Cmd+1..0 quick-connect the selected node to Output 1..10.
+// 1..0 switch the active Output node (0 = Output 10).
 window.addEventListener("keydown", (e) => {
   if(helpVisible) return;
   if(isTypingTarget(e.target)) return;
   if(isNodeSearchOpen()) return;
-  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  const key = String(e.key || "");
+  const digitIndex = key === "0" ? 10 : (/^[1-9]$/.test(key) ? Number(key) : null);
+  if(digitIndex !== null){
+    if(e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    const targetOutput = getOutputNodeByShortcutIndex(digitIndex);
+    if(!targetOutput){
+      toast(`No Output ${digitIndex} found.`);
+      return;
+    }
 
-  if(e.key.toLowerCase() !== "o") return;
+    setActiveOutputNode(targetOutput);
+    syncPreviewOutputBadge(targetOutput);
+    if(e.ctrlKey || e.metaKey){
+      quickConnectSelectedToOutput(targetOutput);
+    }else{
+      renderInspector();
+      evaluateAndRender();
+      toast(`Viewing Output ${digitIndex} (${String(targetOutput.id)}).`);
+    }
+    return;
+  }
+
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  if(key.toLowerCase() !== "o") return;
 
   e.preventDefault();
-  if(e.shiftKey){
-    e.preventDefault();
-    quickConnectSelectedToOutput();
-  }else{
-    centerEditorOnOutputNode();
-  }
+  centerEditorOnOutputNode();
 });
 
 // I — color picker (eyedropper)
@@ -12542,6 +12967,7 @@ function loadGraph(data){
   state.rewiringFromInput = null;
   state.selected = null;
   state.selectedNodes.clear();
+  state.activeOutputNodeId = data.activeOutputNodeId ? String(data.activeOutputNodeId) : null;
 
   state.nextId = Number(data.nextId) || 1;
   state.nextGroupId = Number(data.nextGroupId) || 1;

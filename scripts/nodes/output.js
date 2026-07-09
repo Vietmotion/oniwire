@@ -19,7 +19,8 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             hint: "Single frame snapshot",
             buttons: [
               { label: "PNG", id: "exportPNG" },
-              { label: "JPG", id: "exportJPG" }
+              { label: "JPG", id: "exportJPG" },
+              { label: "SVG", id: "exportSVG" }
             ]
           },
           {

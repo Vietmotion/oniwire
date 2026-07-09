@@ -8,6 +8,8 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
       color: "#ffffff",
       x: 40,
       y: 60,
+      lineHeight: 0,
+      letterSpacing: 0,
       weight: 700,
       font: "Inter",
       orientation: "horizontal",
@@ -31,6 +33,9 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
       t.style.fontSize = (Number(node.params.size) || 32) + "px";
       t.style.fontWeight = String(node.params.weight || 700);
       t.style.fontFamily = node.params.font || "Inter";
+      const lineHeight = Number(node.params.lineHeight);
+      t.style.lineHeight = lineHeight > 0 ? (lineHeight + "px") : "normal";
+      t.style.letterSpacing = (Number(node.params.letterSpacing) || 0) + "px";
 
       const orientation = String(node.params.orientation || "horizontal").toLowerCase();
       if(orientation === "vertical"){
@@ -173,9 +178,37 @@ window.createOniwireTextNodeDef = function createOniwireTextNodeDef(){
       { k: "wrapMode", type: "select", label: "Line Break", options: ["manual", "box"] },
       { k: "boxWidth", type: "range", label: "Box Width", min: 80, max: 1200, step: 1, showIf: { k: "wrapMode", equals: "box" } },
       { k: "size", type: "range", label: "Size", min: 8, max: 300, step: 1 },
+      {
+        type: "compactScrub2d",
+        label: "Spacing",
+        kx: "lineHeight",
+        ky: "letterSpacing",
+        lx: "Line space",
+        ly: "Letter spacing",
+        resetX: 0,
+        resetY: 0,
+        minX: 0,
+        maxX: 300,
+        minY: -20,
+        maxY: 80,
+        step: 0.1
+      },
       { k: "color", type: "color", label: "Color" },
-      { k: "x", type: "range", label: "X", min: 0, max: 1200, step: 1 },
-      { k: "y", type: "range", label: "Y", min: 0, max: 1200, step: 1 }
+      {
+        type: "compactScrub2d",
+        label: "Position",
+        kx: "x",
+        ky: "y",
+        lx: "X",
+        ly: "Y",
+        resetX: 40,
+        resetY: 60,
+        minX: -1200,
+        maxX: 2400,
+        minY: -1200,
+        maxY: 1600,
+        step: 1
+      }
     ])
   };
 };

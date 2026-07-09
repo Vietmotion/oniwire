@@ -2574,6 +2574,12 @@ select optgroup{
   transition: background .12s ease, border-color .12s ease, transform .12s ease, opacity .12s ease;
 }
 
+.smScrubBox.isEditing{
+  border-color: rgba(122,167,255,.55);
+  background: rgba(122,167,255,.12);
+  box-shadow: 0 0 0 2px rgba(122,167,255,.10);
+}
+
 .smScrubBox:hover{
   background: rgba(255,255,255,.09);
   border-color: rgba(255,255,255,.14);
@@ -2598,6 +2604,7 @@ select optgroup{
   font-size: 14px;
   font-weight: 650;
   line-height: 1;
+  cursor: text;
 }
 
 .clonePivotCompact{
