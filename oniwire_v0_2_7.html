@@ -1325,6 +1325,7 @@
       scrubValueEditorDismiss = null;
     }
     if(scrubValueEditorEl){
+      scrubValueEditorEl._scrubClosing = true;
       const btn = scrubValueEditorEl._scrubButton || null;
       if(btn) btn.classList.remove("isEditing");
       if(!keepValue && scrubValueEditorEl._scrubRestore){
@@ -1363,6 +1364,68 @@
     const raw = btn?.getAttribute?.(attrName);
     const next = Number(raw);
     return Number.isFinite(next) ? next : fallback;
+  }
+
+  function beginHorizontalScrubStream(targetEl, startEv, onDelta){
+    if(!targetEl || !startEv || typeof onDelta !== "function"){
+      return () => {};
+    }
+
+    const pointerId = startEv.pointerId;
+    let lastClientX = Number.isFinite(startEv.clientX) ? startEv.clientX : 0;
+    const canUsePointerLock = startEv.pointerType === "mouse" && typeof targetEl.requestPointerLock === "function";
+    let pointerLockRequested = false;
+    let skipNextLockedMove = false;
+    const MAX_DELTA_PER_EVENT = 48;
+
+    const stabilizeDelta = (deltaX) => {
+      const n = Number(deltaX);
+      if(!Number.isFinite(n) || n === 0) return 0;
+      return Math.max(-MAX_DELTA_PER_EVENT, Math.min(MAX_DELTA_PER_EVENT, n));
+    };
+
+    const maybeRequestPointerLock = () => {
+      if(!canUsePointerLock || pointerLockRequested || document.pointerLockElement === targetEl) return;
+      pointerLockRequested = true;
+      skipNextLockedMove = true;
+      try{ targetEl.requestPointerLock(); }catch(_){/* ignore */}
+    };
+
+    const dispatchDelta = (deltaX, shiftKey) => {
+      if(!Number.isFinite(deltaX) || deltaX === 0) return;
+      onDelta(deltaX, Boolean(shiftKey));
+    };
+
+    const onPointerMove = (moveEv) => {
+      if(moveEv.pointerId !== pointerId) return;
+      if(document.pointerLockElement === targetEl) return;
+      const fallbackDelta = Number.isFinite(moveEv.clientX) ? (moveEv.clientX - lastClientX) : 0;
+      const deltaX = stabilizeDelta(fallbackDelta);
+      if(Number.isFinite(moveEv.clientX)) lastClientX = moveEv.clientX;
+      if(Math.abs(deltaX) > 0.25) maybeRequestPointerLock();
+      dispatchDelta(deltaX, moveEv.shiftKey);
+    };
+
+    const onLockedMouseMove = (mouseEv) => {
+      if(document.pointerLockElement !== targetEl) return;
+      if(skipNextLockedMove){
+        skipNextLockedMove = false;
+        return;
+      }
+      const deltaX = stabilizeDelta(mouseEv.movementX);
+      dispatchDelta(deltaX, mouseEv.shiftKey);
+    };
+
+    targetEl.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("mousemove", onLockedMouseMove);
+
+    return () => {
+      targetEl.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("mousemove", onLockedMouseMove);
+      if(document.pointerLockElement === targetEl && typeof document.exitPointerLock === "function"){
+        try{ document.exitPointerLock(); }catch(_){/* ignore */}
+      }
+    };
   }
 
   function openScrubValueMenu(btn, getValue, copyLabel){
@@ -1435,7 +1498,8 @@
 
     const rect = btn.getBoundingClientRect();
     const input = document.createElement("input");
-    input.type = "number";
+    input.type = "text";
+    input.inputMode = "decimal";
     input.className = "numDragInput isNumEditing scrubValueEditor";
     input.value = scrubNumberToText(getValue(), step);
     input.min = String(min);
@@ -1448,6 +1512,8 @@
     input.style.height = rect.height + "px";
     input.style.zIndex = "10090";
     input.style.margin = "0";
+    input.style.textAlign = "right";
+    input._scrubClosing = false;
 
     let originalValue = input.value;
     let committed = false;
@@ -1501,7 +1567,10 @@
       document.addEventListener("keydown", dismiss, true);
     }, 0);
 
-    input.addEventListener("blur", () => commit(true));
+    input.addEventListener("blur", () => {
+      if(input._scrubClosing) return;
+      commit(true);
+    });
   }
 
   function enableScrubBoxExtras(btn, options){
@@ -1509,6 +1578,7 @@
     if(!valueEl) return;
 
     let openEditTimer = null;
+    let tapStart = null;
 
     const cancelPendingEdit = () => {
       if(openEditTimer !== null){
@@ -1517,14 +1587,46 @@
       }
     };
 
+    const triggerReset = (ev) => {
+      if(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      cancelPendingEdit();
+      closeScrubValueEditor(true);
+      options.setValue(options.getResetValue(), true);
+    };
+
     valueEl.addEventListener("pointerdown", (ev) => {
       ev.stopPropagation();
+      if(ev.button !== 0) return;
+      tapStart = { x: ev.clientX, y: ev.clientY, pointerId: ev.pointerId, t: Date.now() };
     });
 
-    valueEl.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
+    valueEl.addEventListener("pointercancel", () => {
+      tapStart = null;
       cancelPendingEdit();
+    });
+
+    valueEl.addEventListener("pointerup", (ev) => {
+      ev.stopPropagation();
+      if(ev.button !== 0) return;
+      if(ev.detail >= 2){
+        tapStart = null;
+        return;
+      }
+      const start = tapStart;
+      tapStart = null;
+      if(!start || start.pointerId !== ev.pointerId) return;
+
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      const movedPx = Math.hypot(dx, dy);
+      const heldMs = Date.now() - start.t;
+      if(movedPx > 6 || heldMs > 600) return;
+
+      cancelPendingEdit();
+      // Wait briefly so a second click can become a dblclick reset.
       openEditTimer = setTimeout(() => {
         openEditTimer = null;
         openScrubValueEditor(
@@ -1536,16 +1638,14 @@
           options.step,
           options.label
         );
-      }, 160);
+      }, 220);
     });
 
+    valueEl.addEventListener("dblclick", triggerReset);
+
     btn.addEventListener("dblclick", (ev) => {
-      if(ev.button !== 0 && ev.detail !== 2) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      cancelPendingEdit();
-      closeScrubValueEditor(true);
-      options.setValue(options.getResetValue(), true);
+      if(ev.detail < 2) return;
+      triggerReset(ev);
     });
 
     btn.addEventListener("contextmenu", (ev) => {
@@ -1558,7 +1658,7 @@
     });
 
     btn.addEventListener("pointerleave", () => {
-      cancelPendingEdit();
+      tapStart = null;
     });
   }
 
@@ -8611,9 +8711,55 @@ async function evaluate(){
           </div>
         </div>
       `;
+    } else if(f.type === "figma2d"){
+      const kx = f.kx || "x";
+      const ky = f.ky || "y";
+      const lx = String(f.lx || "X");
+      const ly = String(f.ly || "Y");
+      const defaults = NODE_DEFS[node.type]?.defaults || {};
+
+      let minX = Number.isFinite(Number(f.minX)) ? Number(f.minX) : -1200;
+      let maxX = Number.isFinite(Number(f.maxX)) ? Number(f.maxX) : 2400;
+      let minY = Number.isFinite(Number(f.minY)) ? Number(f.minY) : -1200;
+      let maxY = Number.isFinite(Number(f.maxY)) ? Number(f.maxY) : 1600;
+
+      const usePreviewMaxX = kx === "x" && !kx.includes("origin") && !Number.isFinite(Number(f.maxX));
+      const usePreviewMaxY = ky === "y" && !ky.includes("origin") && !Number.isFinite(Number(f.maxY));
+      if(usePreviewMaxX || usePreviewMaxY){
+        const previewEl = document.getElementById("previewInner") || document.querySelector(".screen");
+        const limitX = previewEl ? Math.max(0, (previewEl.clientWidth || previewEl.offsetWidth) - 1) : maxX;
+        const limitY = previewEl ? Math.max(0, (previewEl.clientHeight || previewEl.offsetHeight) - 1) : maxY;
+        if(usePreviewMaxX) maxX = limitX;
+        if(usePreviewMaxY) maxY = limitY;
+      }
+
+      const step = (typeof f.step !== "undefined") ? f.step : 1;
+      const vx = Math.round(Number(node.params[kx]) || 0);
+      const vy = Math.round(Number(node.params[ky]) || 0);
+      const resetX = Number.isFinite(Number(f.resetX))
+        ? Number(f.resetX)
+        : (Number.isFinite(Number(defaults[kx])) ? Number(defaults[kx]) : (Number(node.params[kx]) || 0));
+      const resetY = Number.isFinite(Number(f.resetY))
+        ? Number(f.resetY)
+        : (Number.isFinite(Number(defaults[ky])) ? Number(defaults[ky]) : (Number(node.params[ky]) || 0));
+
+      controlHtml = `
+        <div class="figmaPairInputs" style="${disabledStyle}">
+          <button type="button" class="smScrubBox figmaBox" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}" data-pivot-reset="${resetX}"${disabledAttr} title="Drag left or right to change ${escapeAttr(lx)}">
+            <span class="smScrubTag">${escapeAttr(lx)}</span>
+            <span class="smScrubValue">${vx}</span>
+          </button>
+          <button type="button" class="smScrubBox figmaBox" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}" data-pivot-reset="${resetY}"${disabledAttr} title="Drag left or right to change ${escapeAttr(ly)}">
+            <span class="smScrubTag">${escapeAttr(ly)}</span>
+            <span class="smScrubValue">${vy}</span>
+          </button>
+        </div>
+      `;
     } else if(f.type === "clonePivotCompact"){
       const kx = f.kx || "pivotX";
       const ky = f.ky || "pivotY";
+      const centerActionId = String(f.centerActionId || "cloneCenterPivot");
+      const centerLabel = String(f.centerLabel || "⊕ Center");
       const minX = Number.isFinite(Number(f.minX)) ? Number(f.minX) : 0;
       const maxX = Number.isFinite(Number(f.maxX)) ? Number(f.maxX) : 1280;
       const minY = Number.isFinite(Number(f.minY)) ? Number(f.minY) : 0;
@@ -8633,7 +8779,7 @@ async function evaluate(){
             <span class="smScrubTag">Y</span>
             <span class="smScrubValue">${valY}</span>
           </button>
-          <button type="button" class="clonePivotCenterBtn" data-action-btn="cloneCenterPivot"${disabledAttr}>⊕ Center</button>
+          <button type="button" class="clonePivotCenterBtn" data-action-btn="${escapeAttr(centerActionId)}"${disabledAttr}>${escapeAttr(centerLabel)}</button>
         </div>
       `;
     } else if(f.type === "compactScrub2d"){
@@ -8648,17 +8794,17 @@ async function evaluate(){
       const step = Number.isFinite(Number(f.step)) ? Number(f.step) : 1;
       const resetX = Number.isFinite(Number(f.resetX)) ? Number(f.resetX) : 0;
       const resetY = Number.isFinite(Number(f.resetY)) ? Number(f.resetY) : 0;
-      const valX = clamp(Number(node.params[kx]) || 0, minX, maxX);
-      const valY = clamp(Number(node.params[ky]) || 0, minY, maxY);
+      const valX = Number(node.params[kx]) || 0;
+      const valY = Number(node.params[ky]) || 0;
       controlHtml = `
         <div class="clonePivotCompact" style="grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); ${disabledStyle}"${disabledTitleAttr}>
           <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${kx}" data-pivot-min="${minX}" data-pivot-max="${maxX}" data-pivot-step="${step}" data-pivot-reset="${resetX}"${disabledAttr} title="Drag left or right to change ${escapeAttr(lx)}">
             <span class="smScrubTag">${escapeAttr(lx)}</span>
-            <span class="smScrubValue">${Number.isInteger(valX) ? Math.round(valX) : valX}</span>
+            <span class="smScrubValue">${Math.round(valX)}</span>
           </button>
           <button type="button" class="smScrubBox clonePivotScrub" data-pivot-scrub="${ky}" data-pivot-min="${minY}" data-pivot-max="${maxY}" data-pivot-step="${step}" data-pivot-reset="${resetY}"${disabledAttr} title="Drag left or right to change ${escapeAttr(ly)}">
             <span class="smScrubTag">${escapeAttr(ly)}</span>
-            <span class="smScrubValue">${Number.isInteger(valY) ? Math.round(valY) : valY}</span>
+            <span class="smScrubValue">${Math.round(valY)}</span>
           </button>
         </div>
       `;
@@ -9223,6 +9369,29 @@ async function evaluate(){
           renderInspector();
           updatePreviewSelectionBox();
           toast(`Pivot centered at (${node.params.pivotX}, ${node.params.pivotY})`);
+        } else if(actionType === "transformCenterPivot" && node.type === "Transform"){
+          pushHistory();
+          let cx = previewBase.w / 2;
+          let cy = previewBase.h / 2;
+          const inputWire = state.wires.find(w => String(w.to.nodeId) === String(node.id) && w.to.port === "in");
+          if(inputWire){
+            const srcEl = renderRoot.querySelector(`[data-bound-id="${inputWire.from.nodeId}"]`);
+            if(srcEl){
+              const srcRect = srcEl.getBoundingClientRect();
+              const rootRect = renderRoot.getBoundingClientRect();
+              cx = ((srcRect.left + srcRect.right) / 2 - rootRect.left) / previewScale;
+              cy = ((srcRect.top + srcRect.bottom) / 2 - rootRect.top) / previewScale;
+            }
+          }
+
+          const oxRaw = ((cx / Math.max(1, previewBase.w)) * 200) - 100;
+          const oyRaw = ((cy / Math.max(1, previewBase.h)) * 200) - 100;
+          node.params.originX = Math.round(clamp(oxRaw, -100, 100) * 2) / 2;
+          node.params.originY = Math.round(clamp(oyRaw, -100, 100) * 2) / 2;
+          evaluateAndRender();
+          renderInspector();
+          updatePreviewSelectionBox();
+          toast(`Pivot centered at (${Math.round(cx)}, ${Math.round(cy)})`);
         } else if(actionType === "compositeRemoveInput" && node.type === "Composite"){
           pushHistory();
           const currentPorts = Array.isArray(node.params.inputPorts) && node.params.inputPorts.length
@@ -9679,19 +9848,32 @@ async function evaluate(){
         return dot >= 0 ? Math.max(0, stepRaw.length - dot - 1) : 0;
       })();
       const formatVal = (v) => {
-        const n = clamp(Number(v), min, max);
-        return decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n);
+        const n = Number(v);
+        const safe = Number.isFinite(n) ? n : 0;
+        if(!Number.isFinite(step) || step <= 0) return safe;
+        const units = Math.round(safe / step);
+        const snapped = units * step;
+        if(decimals > 0) return Number(snapped.toFixed(decimals));
+        return Math.round(snapped);
+      };
+      const toDisplayInt = (v) => {
+        const n = Number(v);
+        return String(Math.round(Number.isFinite(n) ? n : 0));
       };
       const valueEl = btn.querySelector('.smScrubValue');
 
       btn.addEventListener('pointerdown', (ev) => {
         if(ev.button !== 0) return;
+        if(ev.detail >= 2) return;
         ev.preventDefault();
 
-        let currentValue = clamp(Number(node.params[prop]) || 0, min, max);
+        let currentValue = Number(node.params[prop]);
+        if(!Number.isFinite(currentValue)) currentValue = 0;
         let carry = 0;
         let moved = false;
+        let dragArmed = false;
         let rafId = null;
+        let stopScrubStream = () => {};
         document.body.style.cursor = 'ew-resize';
         document.body.style.userSelect = 'none';
         btn.setPointerCapture(ev.pointerId);
@@ -9699,29 +9881,36 @@ async function evaluate(){
         const commitRender = () => {
           rafId = null;
           node.params[prop] = formatVal(currentValue);
-          if(valueEl) valueEl.textContent = String(node.params[prop]);
+          if(valueEl) valueEl.textContent = toDisplayInt(node.params[prop]);
           evaluateAndRender();
           updatePreviewSelectionBox();
         };
 
-        const onMove = (moveEv) => {
-          const deltaX = moveEv.movementX !== undefined ? moveEv.movementX : 0;
+        const handleDelta = (deltaX, isShiftKey) => {
           if(deltaX === 0) return;
-          moved = true;
 
-          const scrubScale = moveEv.shiftKey ? 0.2 : 1;
+          // Ignore initial jitter/spike so first drag does not jump.
+          if(!dragArmed){
+            if(Math.abs(deltaX) < 1.25) return;
+            dragArmed = true;
+            carry = 0;
+            return;
+          }
+
+          const scrubScale = isShiftKey ? 0.2 : 1;
           carry += deltaX * scrubScale;
           const units = Math.trunc(carry);
           if(units === 0) return;
           carry -= units;
+          moved = true;
 
-          currentValue = clamp(currentValue + (units * step), min, max);
-          if(valueEl) valueEl.textContent = String(formatVal(currentValue));
+          currentValue = currentValue + (units * step);
+          if(valueEl) valueEl.textContent = toDisplayInt(formatVal(currentValue));
           if(rafId === null) rafId = requestAnimationFrame(commitRender);
         };
 
         const onUp = () => {
-          btn.removeEventListener('pointermove', onMove);
+          stopScrubStream();
           btn.removeEventListener('pointerup', onUp);
           btn.removeEventListener('pointercancel', onUp);
           try{ btn.releasePointerCapture(ev.pointerId); }catch{}
@@ -9729,12 +9918,13 @@ async function evaluate(){
           document.body.style.userSelect = '';
           if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
           node.params[prop] = formatVal(currentValue);
+          if(valueEl) valueEl.textContent = toDisplayInt(node.params[prop]);
           evaluateAndRender();
           updatePreviewSelectionBox();
           if(moved) pushHistory();
         };
 
-        btn.addEventListener('pointermove', onMove);
+        stopScrubStream = beginHorizontalScrubStream(btn, ev, handleDelta);
         btn.addEventListener('pointerup', onUp);
         btn.addEventListener('pointercancel', onUp);
       });
@@ -9749,7 +9939,7 @@ async function evaluate(){
           const snapped = formatVal(next);
           if(shouldPushHistory) pushHistory();
           node.params[prop] = snapped;
-          if(valueEl) valueEl.textContent = String(snapped);
+          if(valueEl) valueEl.textContent = toDisplayInt(snapped);
           evaluateAndRender();
           updatePreviewSelectionBox();
         },
@@ -9778,18 +9968,16 @@ async function evaluate(){
         evaluateAndRender();
       };
 
-      setKnobValue(Number(node.params[k] ?? min), true);
-
       const onPointerMove = (ev) => {
         const rect = knob.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
         const dx = ev.clientX - cx;
         const dy = ev.clientY - cy;
-        let angle = (Math.atan2(dy, dx) * 180 / Math.PI) + 90;
-        if(angle < 0) angle += 360;
-        const val = min + (angle / 360) * (max - min);
-        setKnobValue(val, true);
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+        const wrapped = (angle + 360) % 360;
+        const value = min + (wrapped / 360) * (max - min);
+        setKnobValue(value, true);
       };
 
       const onPointerUp = (ev) => {
@@ -10289,10 +10477,144 @@ async function evaluate(){
         return true;
       };
 
+      const movePathSelectionToIndex = (selectionIndices, targetStartIndex) => {
+        const paths = node.params.paths;
+        if(!Array.isArray(paths) || paths.length < 2) return false;
+
+        const selected = [...new Set(selectionIndices || [])]
+          .map(v => Number(v))
+          .filter(v => Number.isInteger(v) && v >= 0 && v < paths.length)
+          .sort((a, b) => a - b);
+        if(!selected.length) return false;
+
+        const clampedStart = clamp(Number(targetStartIndex) || 0, 0, Math.max(0, paths.length - 1));
+        const selectedSet = new Set(selected);
+        const movingPaths = selected.map(i => paths[i]);
+        const oldActive = clamp(Number(node.params.activePath) || 0, 0, paths.length - 1);
+        const oldActiveRef = paths[oldActive];
+
+        const remaining = [];
+        for(let i = 0; i < paths.length; i++){
+          if(!selectedSet.has(i)) remaining.push(paths[i]);
+        }
+
+        let insertAt = 0;
+        for(let i = 0; i < clampedStart; i++){
+          if(!selectedSet.has(i)) insertAt++;
+        }
+        insertAt = clamp(insertAt, 0, remaining.length);
+
+        const nextPaths = [
+          ...remaining.slice(0, insertAt),
+          ...movingPaths,
+          ...remaining.slice(insertAt)
+        ];
+
+        let changed = false;
+        if(nextPaths.length === paths.length){
+          for(let i = 0; i < paths.length; i++){
+            if(nextPaths[i] !== paths[i]){
+              changed = true;
+              break;
+            }
+          }
+        }
+        if(!changed) return false;
+
+        node.params.paths = nextPaths;
+        const nextSelected = movingPaths.map((_, i) => insertAt + i);
+        const nextActive = Math.max(0, nextPaths.indexOf(oldActiveRef));
+        setPenSelectedPathIndices(node, nextSelected, nextActive);
+        setPenSelectedIndices(node, [], nextActive);
+        return true;
+      };
+
+      let suppressPathItemClick = false;
+
       // Click path item ? select
       sm.querySelectorAll('.smItem[data-sm-idx]').forEach(item => {
+        item.addEventListener('pointerdown', (ev) => {
+          if(ev.button !== 0) return;
+          if(ev.target.closest('.smVis, .smDel')) return;
+
+          const startIdx = Number(item.getAttribute('data-sm-idx'));
+          if(Number.isNaN(startIdx)) return;
+
+          const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
+          if(paths.length < 2) return;
+
+          const current = getPenSelectedPathIndices(node, paths);
+          const dragSelection = current.includes(startIdx) ? current : [startIdx];
+          const dragSelectionSet = new Set(dragSelection);
+          const listEl = sm.querySelector('.smList');
+          const startX = ev.clientX;
+          const startY = ev.clientY;
+          let dragging = false;
+          let dropTargetIdx = startIdx;
+
+          const clearDragVisual = () => {
+            listEl?.classList.remove('isPathDragging');
+            sm.querySelectorAll('.smItem.smDragSource').forEach(el => el.classList.remove('smDragSource'));
+            sm.querySelectorAll('.smItem.smDropTarget').forEach(el => el.classList.remove('smDropTarget'));
+          };
+
+          const updateDropTarget = (clientY) => {
+            const items = [...sm.querySelectorAll('.smItem[data-sm-idx]')];
+            if(!items.length) return;
+            let bestEl = items[0];
+            let bestDist = Infinity;
+            items.forEach((el) => {
+              const rect = el.getBoundingClientRect();
+              const cy = rect.top + (rect.height / 2);
+              const dist = Math.abs(clientY - cy);
+              if(dist < bestDist){
+                bestDist = dist;
+                bestEl = el;
+              }
+            });
+            const idx = Number(bestEl.getAttribute('data-sm-idx'));
+            if(!Number.isNaN(idx)) dropTargetIdx = idx;
+            sm.querySelectorAll('.smItem.smDropTarget').forEach(el => el.classList.remove('smDropTarget'));
+            bestEl.classList.add('smDropTarget');
+          };
+
+          const onMove = (moveEv) => {
+            const dist = Math.hypot(moveEv.clientX - startX, moveEv.clientY - startY);
+            if(!dragging && dist < 5) return;
+            if(!dragging){
+              dragging = true;
+              suppressPathItemClick = true;
+              listEl?.classList.add('isPathDragging');
+              sm.querySelectorAll('.smItem[data-sm-idx]').forEach((el) => {
+                const idx = Number(el.getAttribute('data-sm-idx'));
+                if(dragSelectionSet.has(idx)) el.classList.add('smDragSource');
+              });
+            }
+            updateDropTarget(moveEv.clientY);
+          };
+
+          const onUp = () => {
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onUp);
+            document.removeEventListener('pointercancel', onUp);
+            clearDragVisual();
+
+            if(!dragging) return;
+            if(!movePathSelectionToIndex(dragSelection, dropTargetIdx)) return;
+            syncAndRefresh();
+          };
+
+          document.addEventListener('pointermove', onMove);
+          document.addEventListener('pointerup', onUp);
+          document.addEventListener('pointercancel', onUp);
+        });
+
         item.addEventListener('click', (ev) => {
           if(ev.target.closest('.smVis, .smDel')) return;
+          if(suppressPathItemClick){
+            suppressPathItemClick = false;
+            return;
+          }
           const idx = Number(item.getAttribute('data-sm-idx'));
           if(Number.isNaN(idx)) return;
           const paths = Array.isArray(node.params.paths) ? node.params.paths : [];
@@ -10437,12 +10759,14 @@ async function evaluate(){
 
         btn.addEventListener('pointerdown', (ev) => {
           if(ev.button !== 0) return;
+          if(ev.detail >= 2) return;
           ev.preventDefault();
 
           let currentValue = Number(live[prop]) || 0;
           let carry = 0;
           let moved = false;
           let rafId = null;
+          let stopScrubStream = () => {};
           const isSmoothScrub = prop === 'smoothStrength';
           const smoothSourcePoints = isSmoothScrub
             ? ((Array.isArray(live.smoothSourcePoints) && live.smoothSourcePoints.length === live.points.length) ? clonePenPoints(live.smoothSourcePoints) : clonePenPoints(live.points))
@@ -10474,12 +10798,11 @@ async function evaluate(){
             drawPenCanvasOverlay();
           };
 
-          const onMove = (moveEv) => {
-            const deltaX = moveEv.movementX !== undefined ? moveEv.movementX : 0;
+          const handleDelta = (deltaX, isShiftKey) => {
             if(deltaX === 0) return;
             moved = true;
 
-            const scrubScale = moveEv.shiftKey ? 0.2 : 1;
+            const scrubScale = isShiftKey ? 0.2 : 1;
             carry += deltaX * scrubScale;
             const units = Math.trunc(carry);
             if(units === 0) return;
@@ -10493,7 +10816,7 @@ async function evaluate(){
           };
 
           const onUp = () => {
-            btn.removeEventListener('pointermove', onMove);
+            stopScrubStream();
             btn.removeEventListener('pointerup', onUp);
             btn.removeEventListener('pointercancel', onUp);
             try{ btn.releasePointerCapture(ev.pointerId); }catch{}
@@ -10517,7 +10840,7 @@ async function evaluate(){
             if(moved) pushHistory();
           };
 
-          btn.addEventListener('pointermove', onMove);
+          stopScrubStream = beginHorizontalScrubStream(btn, ev, handleDelta);
           btn.addEventListener('pointerup', onUp);
           btn.addEventListener('pointercancel', onUp);
         });
@@ -10604,10 +10927,6 @@ async function evaluate(){
 
       const stepRaw = Number(inp.step);
       const step = Number.isFinite(stepRaw) && stepRaw > 0 ? stepRaw : 1;
-      const minRaw = Number(inp.min);
-      const maxRaw = Number(inp.max);
-      const hasMin = Number.isFinite(minRaw);
-      const hasMax = Number.isFinite(maxRaw);
 
       const stepStr = String(inp.step || '1');
       const stepDecimals = (() => {
@@ -10616,25 +10935,23 @@ async function evaluate(){
         return dot >= 0 ? Math.max(0, stepStr.length - dot - 1) : 0;
       })();
 
-      const clampVal = (v) => {
+      const coerceVal = (v) => {
         let out = Number(v);
         if(!Number.isFinite(out)) out = Number(inp.value);
         if(!Number.isFinite(out)) out = 0;
-        if(hasMin) out = Math.max(minRaw, out);
-        if(hasMax) out = Math.min(maxRaw, out);
         return out;
       };
 
       const snapToStep = (v) => {
         if(!(step > 0)) return v;
-        const base = hasMin ? minRaw : 0;
+        const base = 0;
         const units = Math.round((v - base) / step);
         return base + (units * step);
       };
 
       const setValue = (v) => {
-        const clamped = clampVal(snapToStep(v));
-        inp.value = stepDecimals > 0 ? clamped.toFixed(stepDecimals) : String(Math.round(clamped));
+        const next = coerceVal(snapToStep(v));
+        inp.value = stepDecimals > 0 ? next.toFixed(stepDecimals) : String(Math.round(next));
       };
 
       inp.addEventListener('dblclick', (ev) => {
@@ -10661,14 +10978,17 @@ async function evaluate(){
 
       inp.addEventListener('pointerdown', (ev) => {
         if(ev.button !== 0) return;
+        if(ev.detail >= 2) return;
         if(inp.classList.contains('isNumEditing')) return;
         ev.preventDefault();
 
-        const startX = ev.clientX;
-        const startValue = clampVal(Number(inp.value));
+        const startValue = Number(inp.value);
+        const safeStartValue = Number.isFinite(startValue) ? startValue : 0;
+        let carry = 0;
         let moved = false;
         let rafId = null;
-        let nextValue = startValue;
+        let nextValue = safeStartValue;
+        let stopScrubStream = () => {};
 
         inp.classList.add('isNumScrubbing');
         try{ inp.setPointerCapture(ev.pointerId); }catch(_){ }
@@ -10679,17 +10999,21 @@ async function evaluate(){
           inp.dispatchEvent(new Event('input', { bubbles: true }));
         };
 
-        const onMove = (moveEv) => {
-          const dx = moveEv.clientX - startX;
-          if(!moved && Math.abs(dx) < 2) return;
+        const handleDelta = (deltaX, isShiftKey) => {
+          if(!moved && Math.abs(deltaX) < 0.1) return;
           moved = true;
-          const sensitivity = moveEv.shiftKey ? 0.05 : 0.18;
-          nextValue = startValue + (dx * step * sensitivity);
+
+          const sensitivity = isShiftKey ? 0.05 : 0.18;
+          carry += deltaX * sensitivity;
+          if(Math.abs(carry) < 0.0001) return;
+          nextValue = coerceVal(nextValue + (carry * step));
+          carry = 0;
+
           if(rafId === null) rafId = requestAnimationFrame(flush);
         };
 
         const onUp = (upEv) => {
-          inp.removeEventListener('pointermove', onMove);
+          stopScrubStream();
           inp.removeEventListener('pointerup', onUp);
           inp.removeEventListener('pointercancel', onUp);
           try{ inp.releasePointerCapture(upEv.pointerId); }catch(_){ }
@@ -10707,7 +11031,7 @@ async function evaluate(){
           }
         };
 
-        inp.addEventListener('pointermove', onMove);
+        stopScrubStream = beginHorizontalScrubStream(inp, ev, handleDelta);
         inp.addEventListener('pointerup', onUp);
         inp.addEventListener('pointercancel', onUp);
       });
