@@ -9860,6 +9860,15 @@ async function evaluate(){
         const n = Number(v);
         return String(Math.round(Number.isFinite(n) ? n : 0));
       };
+      const syncShapeUniformDimension = (primaryProp, primaryValue) => {
+        if(node.type !== "Shape" || !node.params?.uniform) return;
+        if(primaryProp !== "width" && primaryProp !== "height") return;
+        const otherProp = primaryProp === "width" ? "height" : "width";
+        node.params[otherProp] = primaryValue;
+        const otherBtn = inspectorBody.querySelector(`[data-pivot-scrub="${otherProp}"]`);
+        const otherValueEl = otherBtn?.querySelector('.smScrubValue');
+        if(otherValueEl) otherValueEl.textContent = toDisplayInt(primaryValue);
+      };
       const valueEl = btn.querySelector('.smScrubValue');
 
       btn.addEventListener('pointerdown', (ev) => {
@@ -9881,6 +9890,7 @@ async function evaluate(){
         const commitRender = () => {
           rafId = null;
           node.params[prop] = formatVal(currentValue);
+          syncShapeUniformDimension(prop, node.params[prop]);
           if(valueEl) valueEl.textContent = toDisplayInt(node.params[prop]);
           evaluateAndRender();
           updatePreviewSelectionBox();
@@ -9918,6 +9928,7 @@ async function evaluate(){
           document.body.style.userSelect = '';
           if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
           node.params[prop] = formatVal(currentValue);
+          syncShapeUniformDimension(prop, node.params[prop]);
           if(valueEl) valueEl.textContent = toDisplayInt(node.params[prop]);
           evaluateAndRender();
           updatePreviewSelectionBox();
@@ -9939,6 +9950,7 @@ async function evaluate(){
           const snapped = formatVal(next);
           if(shouldPushHistory) pushHistory();
           node.params[prop] = snapped;
+          syncShapeUniformDimension(prop, snapped);
           if(valueEl) valueEl.textContent = toDisplayInt(snapped);
           evaluateAndRender();
           updatePreviewSelectionBox();
@@ -12673,10 +12685,29 @@ async function evaluate(){
     e.preventDefault();
     if(zoomAnimId) cancelAnimationFrame(zoomAnimId);
 
+    const isPinch = e.ctrlKey || e.metaKey;
+    const absDeltaX = Math.abs(e.deltaX);
+    const absDeltaY = Math.abs(e.deltaY);
+    const isLikelyTrackpadScroll = !isPinch && e.deltaMode === 0 && (
+      absDeltaX > 0 ||
+      (absDeltaY > 0 && absDeltaY < 80 && (absDeltaY % 100 !== 0) && (absDeltaY % 120 !== 0) && (absDeltaY % 125 !== 0))
+    );
+
+    // Two-finger trackpad scroll should pan the editor stage.
+    if(isLikelyTrackpadScroll){
+      const panSpeed = 1.12;
+      state.panX -= e.deltaX * panSpeed;
+      state.panY -= e.deltaY * panSpeed;
+      applyEditorTransform();
+      return;
+    }
+
     const m = editorMouse(e);
     const beforeWorld = editorToWorld(m.x, m.y);
 
-    const delta = -e.deltaY * settings.zoomSpeed;
+    // Pinch gestures report as wheel+modifier on Mac; boost sensitivity for faster zoom.
+    const zoomBoost = isPinch ? 2.6 : 1;
+    const delta = -e.deltaY * settings.zoomSpeed * zoomBoost;
     const factor = Math.exp(delta * 0.0012);
     const nextZoom = clamp(state.zoom * factor, EDITOR_MIN_ZOOM, EDITOR_MAX_ZOOM);
 
