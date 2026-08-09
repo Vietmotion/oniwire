@@ -5966,7 +5966,7 @@ const NODE_TIPS = {
   ],
   Blur: [
     "<strong>Blur</strong> - Applies a blur effect to any layer.",
-    "Use Radius to control softness. Higher values create stronger blur.",
+    "Type supports <em>Gaussian</em>, <em>Direction</em>, and <em>Zoom</em>. Use Strength to control blur intensity.",
     "<em>in</em> -> the layer to blur (image, pen, text, composite, etc.)."
   ],
   Erode: [
@@ -7392,6 +7392,131 @@ async function evaluate(){
     return out;
   }
 
+  function getNodeOwnedGroupId(nodeId){
+    const sid = String(nodeId || "");
+    if(!sid) return null;
+    for(const g of state.groups.values()){
+      const memberIds = getNormalizedGroupMemberIds(g);
+      if(memberIds.includes(sid)) return String(g.id);
+    }
+    return null;
+  }
+
+  function getOverlapArea(a, b){
+    if(!a || !b) return 0;
+    const left = Math.max(Number(a.left) || 0, Number(b.left) || 0);
+    const top = Math.max(Number(a.top) || 0, Number(b.top) || 0);
+    const right = Math.min(Number(a.right) || 0, Number(b.right) || 0);
+    const bottom = Math.min(Number(a.bottom) || 0, Number(b.bottom) || 0);
+    const w = right - left;
+    const h = bottom - top;
+    if(w <= 0 || h <= 0) return 0;
+    return w * h;
+  }
+
+  function getBestGroupIdByBoundsForNode(nodeId, candidateGroupIds = null){
+    const node = state.nodes.get(String(nodeId));
+    if(!node) return null;
+    const bounds = getNodeVisualBounds(node);
+    let best = null;
+
+    const allowed = Array.isArray(candidateGroupIds) && candidateGroupIds.length
+      ? new Set(candidateGroupIds.map(id => String(id)))
+      : null;
+
+    for(const group of state.groups.values()){
+      const gid = String(group.id);
+      if(allowed && !allowed.has(gid)) continue;
+      const gr = group?.collapsed ? getGroupAnchorRect(group) : getGroupRect(group);
+      const overlap = getOverlapArea(bounds, gr);
+      if(overlap <= 0) continue;
+      const groupArea = Math.max(1, (Number(gr.width) || 0) * (Number(gr.height) || 0));
+      const score = overlap / groupArea;
+      if(!best || score > best.score || (score === best.score && overlap > best.overlap)){
+        best = { gid, score, overlap };
+      }
+    }
+
+    return best ? best.gid : null;
+  }
+
+  function setNodeOwnedGroupId(nodeId, targetGroupId){
+    const sid = String(nodeId || "");
+    if(!sid || !state.nodes.has(sid)) return false;
+    const targetId = targetGroupId ? String(targetGroupId) : null;
+    let changed = false;
+
+    for(const group of state.groups.values()){
+      const gid = String(group.id);
+      const ids = getNormalizedGroupMemberIds(group);
+      if(ids.includes(sid) && gid !== targetId){
+        group.memberIds = ids.filter(id => id !== sid);
+        changed = true;
+      } else if(ids.length !== (Array.isArray(group.memberIds) ? group.memberIds.length : 0)){
+        group.memberIds = ids;
+      }
+    }
+
+    if(targetId){
+      const target = state.groups.get(targetId);
+      if(target){
+        const ids = getNormalizedGroupMemberIds(target);
+        if(!ids.includes(sid)){
+          ids.push(sid);
+          target.memberIds = ids;
+          changed = true;
+        } else if(ids.length !== (Array.isArray(target.memberIds) ? target.memberIds.length : 0)){
+          target.memberIds = ids;
+        }
+      }
+    }
+
+    return changed;
+  }
+
+  function syncExclusiveGroupMembership(){
+    let changed = false;
+    for(const group of state.groups.values()){
+      const ids = getNormalizedGroupMemberIds(group);
+      if(ids.length !== (Array.isArray(group.memberIds) ? group.memberIds.length : 0)){
+        group.memberIds = ids;
+        changed = true;
+      }
+    }
+
+    const ownersByNode = new Map();
+    for(const group of state.groups.values()){
+      const gid = String(group.id);
+      for(const nid of getNormalizedGroupMemberIds(group)){
+        if(!ownersByNode.has(nid)) ownersByNode.set(nid, []);
+        ownersByNode.get(nid).push(gid);
+      }
+    }
+
+    for(const [nid, owners] of ownersByNode.entries()){
+      if(!Array.isArray(owners) || owners.length <= 1) continue;
+      const best = getBestGroupIdByBoundsForNode(nid, owners);
+      const keep = best || String(owners[0]);
+      if(setNodeOwnedGroupId(nid, keep)) changed = true;
+    }
+
+    return changed;
+  }
+
+  function syncDraggedNodesGroupOwnership(nodeIds){
+    const ids = Array.isArray(nodeIds) ? nodeIds : [];
+    let changed = false;
+    for(const nodeId of ids){
+      const sid = String(nodeId || "");
+      if(!sid || !state.nodes.has(sid)) continue;
+      const targetId = getBestGroupIdByBoundsForNode(sid);
+      const currentId = getNodeOwnedGroupId(sid);
+      if(String(currentId || "") === String(targetId || "")) continue;
+      if(setNodeOwnedGroupId(sid, targetId)) changed = true;
+    }
+    return changed;
+  }
+
   function getCollapsedMemberSetExcludingGroup(groupId){
     const excludeId = String(groupId || "");
     const claimed = new Set();
@@ -7406,41 +7531,11 @@ async function evaluate(){
   }
 
   function captureGroupMembersForCollapse(group){
-    const existingMembers = getNormalizedGroupMemberIds(group);
-    const boundedMembers = getGroupMemberIdsByBounds(group).map(id => String(id));
-    const claimedByOthers = getCollapsedMemberSetExcludingGroup(group?.id);
-
-    const existingSet = new Set(existingMembers);
-    const merged = [];
-    const seen = new Set();
-    const source = [...existingMembers, ...boundedMembers];
-
-    for(const id of source){
-      const sid = String(id);
-      if(!sid || seen.has(sid) || !state.nodes.has(sid)) continue;
-      // Keep existing ownership, but do not newly steal nodes that are already
-      // owned by another collapsed group.
-      if(claimedByOthers.has(sid) && !existingSet.has(sid)) continue;
-      seen.add(sid);
-      merged.push(sid);
-    }
-
-    return merged;
+    return getNormalizedGroupMemberIds(group);
   }
 
   function getNodeIdsInsideGroup(group){
-    if(group?.collapsed){
-      return getNormalizedGroupMemberIds(group);
-    }
-    const gr = getGroupRect(group);
-    const inside = [];
-    for(const node of state.nodes.values()){
-      const b = getNodeVisualBounds(node);
-      if(rectsOverlap(b, gr)){
-        inside.push(node.id);
-      }
-    }
-    return inside;
+    return getNormalizedGroupMemberIds(group);
   }
 
   function getCollapsedGroupForNodeId(nodeId){
@@ -7459,7 +7554,7 @@ async function evaluate(){
     if(!targetId) return false;
     for(const group of state.groups.values()){
       if(!group?.bypassed) continue;
-      const memberIds = getNodeIdsInsideGroup(group);
+      const memberIds = getNormalizedGroupMemberIds(group);
       if(memberIds.some(id => String(id) === targetId)) return true;
     }
     return false;
@@ -7484,6 +7579,7 @@ async function evaluate(){
       if(memberIds.length > 0) continue;
       group.memberIds = getGroupMemberIdsByBounds(group);
     }
+    syncExclusiveGroupMembership();
   }
 
   function getAnchorPointOnGroup(group, point, sideHint = "auto"){
@@ -7575,6 +7671,9 @@ async function evaluate(){
       }
     };
     state.groups.set(gid, group);
+    for(const nodeId of ids){
+      setNodeOwnedGroupId(nodeId, gid);
+    }
     render();
     renderInspector();
     requestWireDraw();
@@ -9281,6 +9380,8 @@ async function evaluate(){
           runExport(() => exportSVG(projectName));
         }else if(exportType === "exportMp4"){
           runExport(() => exportMp4(projectName));
+        }else if(exportType === "exportPngSequence"){
+          runExport(() => exportPngSequence(projectName));
         }else{
           runExport(() => exportCanvasAsImage(exportType, { saveHandle: null, projectName }));
         }
@@ -9801,6 +9902,10 @@ async function evaluate(){
           renderInspector();
         }
 
+        if(node.type === "Blur" && k === "blurType"){
+          renderInspector();
+        }
+
         if(node.type === "Clone" && k === "mode"){
           renderInspector();
         }
@@ -9850,11 +9955,13 @@ async function evaluate(){
       const formatVal = (v) => {
         const n = Number(v);
         const safe = Number.isFinite(n) ? n : 0;
-        if(!Number.isFinite(step) || step <= 0) return safe;
-        const units = Math.round(safe / step);
+        const bounded = clamp(safe, min, max);
+        if(!Number.isFinite(step) || step <= 0) return bounded;
+        const units = Math.round(bounded / step);
         const snapped = units * step;
-        if(decimals > 0) return Number(snapped.toFixed(decimals));
-        return Math.round(snapped);
+        const clamped = clamp(snapped, min, max);
+        if(decimals > 0) return Number(clamped.toFixed(decimals));
+        return Math.round(clamped);
       };
       const toDisplayInt = (v) => {
         const n = Number(v);
@@ -11920,6 +12027,256 @@ async function evaluate(){
     }
   }
 
+  async function exportPngSequence(name){
+    const outNode = findActiveOutputNode();
+    if(!outNode){ toast("No Output node found."); return; }
+    if(typeof window.showDirectoryPicker !== "function"){
+      toast("PNG sequence export requires Chrome/Edge desktop (File System Access API).");
+      return;
+    }
+
+    const duration = Math.max(0.5, Number(outNode.params?.duration) || 5);
+    const fps = Math.max(1, Math.min(60, Number(outNode.params?.fps) || 30));
+    const totalFrames = Math.max(1, Math.round(duration * fps));
+    const w = Math.max(1, Math.round(previewBase.w));
+    const h = Math.max(1, Math.round(previewBase.h));
+
+    const safeName = String(name || "animation").trim().replace(/[\\/:*?"<>|]+/g, "_") || "animation";
+    const ts = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+
+    let rootDirHandle = null;
+    try{
+      rootDirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+    }catch(err){
+      // User cancelled picker.
+      if(String(err?.name || "") !== "AbortError"){
+        const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+        toast(`Folder pick failed: ${msg}`);
+      }
+      return;
+    }
+
+    const overlay = buildMp4ProgressOverlay();
+    const iconEl = overlay.querySelector(".mp4ProgressIcon");
+    const titleEl = overlay.querySelector(".mp4ProgressTitle");
+    const noteEl = overlay.querySelector(".mp4ProgressNote");
+    const cancelBtn = overlay.querySelector("#btnCancelMp4");
+    if(iconEl) iconEl.textContent = "PNG";
+    if(titleEl) titleEl.textContent = "Exporting PNG Sequence";
+    if(noteEl) noteEl.textContent = "Full-duration frame export in progress.";
+    if(cancelBtn) cancelBtn.textContent = "Cancel";
+    document.body.appendChild(overlay);
+
+    let cancelled = false;
+    cancelBtn?.addEventListener("click", () => { cancelled = true; }, { once: true });
+
+    const pbPlayPauseBtn = document.getElementById("pbPlayPause");
+    const wasPlaybackRunning = String(pbPlayPauseBtn?.textContent || "").includes("\u23F8");
+    if(wasPlaybackRunning){
+      try{ pbPlayPauseBtn.click(); }catch(_){ }
+    }
+
+    try{
+      updateMp4Progress(overlay, 0, totalFrames, "Preparing preview");
+      const html2canvasFn = await ensureHtml2CanvasLoaded();
+
+      const runCaptureAttempt = async (label, task, timeoutMs = 0) => {
+        try{
+          let out = null;
+          if(Number(timeoutMs) > 0){
+            out = await Promise.race([
+              task(),
+              new Promise((resolve) => setTimeout(() => resolve(null), Math.max(2000, Number(timeoutMs) || 12000)))
+            ]);
+          }else{
+            out = await task();
+          }
+          if(!out){
+            console.warn(`PNG sequence capture returned empty: ${label}`);
+          }
+          return out;
+        }catch(err){
+          console.warn(`PNG sequence capture failed: ${label}`, err);
+          return null;
+        }
+      };
+
+      await evaluateAndRender();
+      await waitForRenderFlush();
+
+      const outDir = await rootDirHandle.getDirectoryHandle(`${safeName}_png_sequence_${ts}`, { create: true });
+
+      const frameCanvas = document.createElement("canvas");
+      frameCanvas.width = w;
+      frameCanvas.height = h;
+      const frameCtx = frameCanvas.getContext("2d", { alpha: true });
+      if(!frameCtx) throw new Error("Could not create frame canvas.");
+
+      const canvasToPngBlob = () => new Promise((resolve) => {
+        frameCanvas.toBlob((blob) => resolve(blob || null), "image/png");
+      });
+
+      for(let frameIdx = 0; frameIdx < totalFrames; frameIdx++){
+        if(cancelled) break;
+
+        const t = frameIdx / fps;
+        updateMp4Progress(overlay, frameIdx + 1, totalFrames, "Rendering and writing PNG frames");
+
+        freezeAnimationsAtTime(renderRoot, t);
+        await waitForRenderFlush(1);
+
+        let capturedCanvas = null;
+        const hasCssMaskInScene = sceneHasCssMask(renderRoot);
+        const hasMaskInScene = hasCssMaskInScene;
+        const hasImagesInScene = renderRoot.querySelector("img") !== null;
+        const hasFilterEffectsInScene = sceneHasFilterEffects(renderRoot);
+        const hasSvgUrlFilterInScene = sceneHasSvgUrlFilters(renderRoot);
+        const hasClipPathInScene = sceneHasClipPath(renderRoot);
+        const premaskCanvas = (hasMaskInScene && hasImagesInScene)
+          ? await runCaptureAttempt(
+              `buildLuminanceMaskCanvas (frame ${frameIdx + 1})`,
+              () => buildLuminanceMaskCanvas(renderRoot, w, h),
+              0
+            )
+          : null;
+        const captureOptions = {
+          disableBakeMaskedElements: false,
+          backgroundColor: null
+        };
+
+        if(hasClipPathInScene){
+          capturedCanvas = await runCaptureAttempt(
+            `captureFrameCanvasFromDomSnapshot (frame ${frameIdx + 1}, clip-first)`,
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha: true }),
+            0
+          );
+          if(!capturedCanvas){
+            capturedCanvas = await runCaptureAttempt(
+              `captureFrameCanvasWithHtml2canvas (frame ${frameIdx + 1}, clip-fallback)`,
+              () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+              0
+            );
+          }
+        }else if(hasFilterEffectsInScene){
+          if(hasSvgUrlFilterInScene){
+            capturedCanvas = await runCaptureAttempt(
+              `captureFrameCanvasFromDomSnapshot (frame ${frameIdx + 1}, svg-filter-first)`,
+              () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha: true }),
+              0
+            );
+          }
+          if(!capturedCanvas){
+            capturedCanvas = await runCaptureAttempt(
+              `captureFrameCanvasWithHtml2canvas (frame ${frameIdx + 1}, filter-fallback)`,
+              () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+              0
+            );
+          }
+        }else{
+          capturedCanvas = await runCaptureAttempt(
+            `captureFrameCanvasFromDomSnapshot (frame ${frameIdx + 1}, fast-path)`,
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha: true }),
+            0
+          );
+          if(!capturedCanvas){
+            capturedCanvas = await runCaptureAttempt(
+              `captureFrameCanvasWithHtml2canvas (frame ${frameIdx + 1}, fallback)`,
+              () => captureFrameCanvasWithHtml2canvas(w, h, html2canvasFn, hasCssMaskInScene, premaskCanvas, captureOptions),
+              0
+            );
+          }
+        }
+
+        if(!capturedCanvas && hasFilterEffectsInScene){
+          capturedCanvas = await runCaptureAttempt(
+            `captureLiveFrameCanvasWithHtml2canvas (frame ${frameIdx + 1}, filter-live-fallback)`,
+            () => captureLiveFrameCanvasWithHtml2canvas(w, h, html2canvasFn, premaskCanvas, captureOptions),
+            0
+          );
+        }
+
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            `captureFrameCanvasFromDomSnapshot (frame ${frameIdx + 1}, retry-1)`,
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha: true }),
+            0
+          );
+        }
+
+        if(!capturedCanvas){
+          capturedCanvas = await runCaptureAttempt(
+            `captureFrameCanvasFromDomSnapshot (frame ${frameIdx + 1}, retry-2)`,
+            () => captureFrameCanvasFromDomSnapshot(w, h, { preserveAlpha: true }),
+            0
+          );
+        }
+
+        if(!capturedCanvas){
+          throw new Error(`Could not capture frame ${frameIdx + 1}/${totalFrames}.`);
+        }
+
+        try{
+          frameCtx.clearRect(0, 0, w, h);
+          drawCanvasPreservingAspect(frameCtx, capturedCanvas, w, h);
+
+          const frameBlob = await canvasToPngBlob();
+          if(!frameBlob || frameBlob.size <= 0){
+            throw new Error(`Frame ${frameIdx + 1} produced empty PNG data.`);
+          }
+
+          const fileName = `frame_${String(frameIdx + 1).padStart(6, "0")}.png`;
+          const fileHandle = await outDir.getFileHandle(fileName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(frameBlob);
+          await writable.close();
+        }catch(writeErr){
+          throw new Error(`Failed writing frame ${frameIdx + 1}: ${String(writeErr?.message || writeErr)}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      await evaluateAndRender();
+
+      if(cancelled){
+        toast("PNG sequence export cancelled.");
+        return;
+      }
+
+      updateMp4Progress(overlay, totalFrames, totalFrames, "Writing manifest");
+      const manifest = {
+        version: "oniwire-png-sequence-1",
+        projectName: safeName,
+        createdAt: new Date().toISOString(),
+        width: w,
+        height: h,
+        fps,
+        durationSec: duration,
+        totalFrames,
+        firstFrame: 1,
+        lastFrame: totalFrames,
+        framePattern: "frame_%06d.png",
+        hasAlpha: true
+      };
+      const manifestHandle = await outDir.getFileHandle("manifest.json", { create: true });
+      const manifestWritable = await manifestHandle.createWritable();
+      await manifestWritable.write(JSON.stringify(manifest, null, 2));
+      await manifestWritable.close();
+
+      toast(`PNG sequence exported OK (${totalFrames} frames)`);
+    }catch(err){
+      console.error("PNG sequence export failed", err);
+      const msg = String(err?.message || err || "Unknown error").slice(0, 120);
+      toast(`Export failed: ${msg}`);
+      try{ await evaluateAndRender(); }catch(_){ }
+    }finally{
+      if(wasPlaybackRunning){
+        try{ pbPlayPauseBtn.click(); }catch(_){ }
+      }
+      overlay.remove();
+    }
+  }
+
   async function exportMp4(name){
     const outNode = findActiveOutputNode();
     if(!outNode){ toast("No Output node found."); return; }
@@ -11938,6 +12295,12 @@ async function evaluate(){
     document.body.appendChild(overlay);
     let cancelled = false;
     overlay.querySelector("#btnCancelMp4")?.addEventListener("click", () => { cancelled = true; }, { once: true });
+
+    const pbPlayPauseBtn = document.getElementById("pbPlayPause");
+    const wasPlaybackRunning = String(pbPlayPauseBtn?.textContent || "").includes("\u23F8");
+    if(wasPlaybackRunning){
+      try{ pbPlayPauseBtn.click(); }catch(_){ }
+    }
 
     let encoder = null;
     let encoderFailure = null;
@@ -12075,6 +12438,9 @@ async function evaluate(){
       try{ await evaluateAndRender(); }catch(_){}
     }finally{
       try{ encoder?.close?.(); }catch(_){}
+      if(wasPlaybackRunning){
+        try{ pbPlayPauseBtn.click(); }catch(_){ }
+      }
       overlay.remove();
     }
   }
@@ -12578,6 +12944,11 @@ async function evaluate(){
   window.addEventListener("mouseup", (e) => {
     const dragSnapshot = state.draggingNode;
     const wasSingleDrag = Boolean(dragSnapshot && !dragSnapshot.ids && !dragSnapshot.kind);
+    const draggedNodeIds = dragSnapshot
+      ? (dragSnapshot.ids
+        ? Array.from(dragSnapshot.ids).map(id => String(id))
+        : (!dragSnapshot.kind && dragSnapshot.id ? [String(dragSnapshot.id)] : []))
+      : [];
     let insertedByDrop = false;
     if(e.button === 0 && wasSingleDrag){
       insertedByDrop = autoInsertDraggedNodeIntoWire(dragSnapshot.id);
@@ -12591,6 +12962,17 @@ async function evaluate(){
         requestWireDraw();
       }
     }
+
+    const groupOwnershipChanged = draggedNodeIds.length > 0
+      ? syncDraggedNodesGroupOwnership(draggedNodeIds)
+      : false;
+
+    if(groupOwnershipChanged){
+      render();
+      evaluateAndRender();
+      requestWireDraw();
+    }
+
     state.draggingNode = null;
     document.body.style.cursor = "";
     if(!insertedByDrop && state.wireDropCandidate){

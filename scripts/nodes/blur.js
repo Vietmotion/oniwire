@@ -234,10 +234,127 @@ window.createOniwireBlurNodeDef = function createOniwireBlurNodeDef({
     return false;
   }
 
+  function buildDirectionalBlurLayer(srcEl, radius, angleDeg, distancePx, samples, strengthNorm){
+    const layer = document.createElement("div");
+    layer.style.position = "absolute";
+    layer.style.inset = "0";
+    layer.style.pointerEvents = "none";
+
+    const norm = clamp(Number(strengthNorm) || 0, 0, 1);
+    if(norm <= 0.0001){
+      const base = srcEl.cloneNode(true);
+      base.style.position = "absolute";
+      base.style.inset = "0";
+      layer.appendChild(base);
+      return layer;
+    }
+
+    const response = Math.pow(norm, 0.78);
+
+    const count = Math.max(2, Math.round(samples));
+    const dist = Math.max(0, Number(distancePx) || 0);
+    const rad = (Number(angleDeg) || 0) * (Math.PI / 180);
+    // Screen-space angle mapping: 0=up, 90=right, 180/-180=down, -90=left.
+    const ux = Math.sin(rad);
+    const uy = -Math.cos(rad);
+
+    const spread = dist * (0.06 + (1.12 * response));
+    const blurPx = radius * (0.08 + (0.30 * response));
+
+    const weights = [];
+    let weightSum = 0;
+    for(let i = 0; i < count; i++){
+      const t = count > 1 ? (i / (count - 1)) : 0.5;
+      const centered = (t - 0.5) * 2;
+      const w = Math.exp(-2.4 * centered * centered);
+      weights.push(w);
+      weightSum += w;
+    }
+
+    for(let i = 0; i < count; i++){
+      const t = count > 1 ? (i / (count - 1)) : 0.5;
+      const centered = (t - 0.5) * 2;
+      const offset = centered * spread;
+      const dx = offset * ux;
+      const dy = offset * uy;
+      const slice = srcEl.cloneNode(true);
+      slice.style.position = "absolute";
+      slice.style.inset = "0";
+      slice.style.transform = `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px)`;
+      slice.style.filter = blurPx > 0 ? `blur(${blurPx.toFixed(2)}px)` : "none";
+      const w = weights[i] || 0;
+      const alpha = weightSum > 0 ? (w / weightSum) : 0;
+      slice.style.opacity = String(clamp(alpha, 0, 1));
+      layer.appendChild(slice);
+    }
+
+    return layer;
+  }
+
+  function buildZoomBlurLayer(srcEl, radius, samples, centerX, centerY, strengthNorm){
+    const layer = document.createElement("div");
+    layer.style.position = "absolute";
+    layer.style.inset = "0";
+    layer.style.pointerEvents = "none";
+
+    const count = Math.max(2, Math.round(samples));
+    const norm = clamp(Number(strengthNorm) || 0, 0, 1);
+    const centerNormX = clamp(Number(centerX) || 0, -100, 100);
+    const centerNormY = clamp(Number(centerY) || 0, -100, 100);
+    const ox = clamp(50 + (centerNormX * 0.5), 0, 100);
+    const oy = clamp(50 + (centerNormY * 0.5), 0, 100);
+
+    if(norm <= 0.0001){
+      const base = srcEl.cloneNode(true);
+      base.style.position = "absolute";
+      base.style.inset = "0";
+      layer.appendChild(base);
+      return layer;
+    }
+
+    const response = Math.pow(norm, 0.78);
+    const scaleMax = 1 + (response * 2.2);
+    const sampleOpacity = 1 / count;
+
+    for(let i = 0; i < count; i++){
+      const t = count > 1 ? (i / (count - 1)) : 0;
+      const scale = 1 + ((scaleMax - 1) * t);
+      const slice = srcEl.cloneNode(true);
+      slice.style.position = "absolute";
+      slice.style.inset = "0";
+      slice.style.transformOrigin = `${ox}% ${oy}%`;
+      slice.style.transform = `scale(${scale.toFixed(4)})`;
+      const blurPx = radius * (0.08 + (0.34 * t * response));
+      slice.style.filter = blurPx > 0 ? `blur(${blurPx.toFixed(2)}px)` : "none";
+      slice.style.opacity = String(clamp(sampleOpacity, 0, 1));
+      layer.appendChild(slice);
+    }
+
+    return layer;
+  }
+
+  function resolveBlurStrength(params){
+    const p = params || {};
+    if(Number.isFinite(Number(p.strength))){
+      return clamp(Number(p.strength), 0, 120);
+    }
+    const legacyRadius = Number.isFinite(Number(p.radius)) ? Number(p.radius) : 0;
+    const legacyZoom = Number.isFinite(Number(p.zoomStrength)) ? Number(p.zoomStrength) : 0;
+    return clamp(Math.max(legacyRadius, legacyZoom), 0, 120);
+  }
+
   return {
     inputs: ["in", "mask"],
     outputs: ["layer"],
-    defaults: { radius: 12 },
+    defaults: {
+      blurType: "gaussian",
+      strength: 24,
+      direction: 0,
+      distance: 40,
+      samples: 8,
+      zoomCenterX: 0,
+      zoomCenterY: 0
+    },
     icon: "🌫️",
     run: async (node, inputs) => {
       const src = inputs.in;
@@ -253,30 +370,79 @@ window.createOniwireBlurNodeDef = function createOniwireBlurNodeDef({
       wrap.style.overflow = "visible";
       propagateMotionFlag(wrap, src.el);
 
-      const base = src.el.cloneNode(true);
-      base.style.position = "absolute";
-      base.style.inset = "0";
-      base.style.opacity = "1";
-
-      const clone = src.el.cloneNode(true);
-      clone.style.position = "absolute";
-      clone.style.inset = "0";
-
-      const radius = clamp(Number(node.params.radius) || 0, 0, 200);
+      const strength = resolveBlurStrength(node.params);
+      const strengthNorm = clamp(strength / 120, 0, 1);
+      const radius = clamp(strength * 0.75, 0, 200);
+      const blurType = String(node.params.blurType || "gaussian").toLowerCase();
+      const direction = Number(node.params.direction) || 0;
+      const distance = clamp(Number(node.params.distance) || 0, 0, 1000);
+      const samples = clamp(Number(node.params.samples) || 8, 2, 32);
+      const zoomCenterX = clamp(Number(node.params.zoomCenterX) || 0, -100, 100);
+      const zoomCenterY = clamp(Number(node.params.zoomCenterY) || 0, -100, 100);
       const maskShape = String(inputs.mask?.el?.dataset?.maskShape || inputs.in?.el?.dataset?.maskShape || "");
       const maskWidth = String(inputs.mask?.el?.dataset?.maskWidth || inputs.in?.el?.dataset?.maskWidth || "");
       const maskHeight = String(inputs.mask?.el?.dataset?.maskHeight || inputs.in?.el?.dataset?.maskHeight || "");
       const maskX = String(inputs.mask?.el?.dataset?.maskX || inputs.in?.el?.dataset?.maskX || "");
       const maskY = String(inputs.mask?.el?.dataset?.maskY || inputs.in?.el?.dataset?.maskY || "");
-      wrap.dataset.liveMaskRevision = ["blur", radius, maskShape, maskWidth, maskHeight, maskX, maskY].join(":");
-      clone.style.filter = radius > 0 ? `blur(${radius}px)` : "none";
+      wrap.dataset.liveMaskRevision = [
+        "blur",
+        blurType,
+        strength,
+        direction,
+        distance,
+        samples,
+        zoomCenterX,
+        zoomCenterY,
+        maskShape,
+        maskWidth,
+        maskHeight,
+        maskX,
+        maskY
+      ].join(":");
 
-      await applyMaskToTarget(clone, wrap, inputs.mask, radius, canvasWidth, canvasHeight);
-      wrap.appendChild(clone);
+      let effectLayer = null;
+      if(blurType === "direction" || blurType === "directional"){
+        effectLayer = buildDirectionalBlurLayer(src.el, radius, direction, distance, samples, strengthNorm);
+      } else if(blurType === "zoom"){
+        effectLayer = buildZoomBlurLayer(src.el, radius, samples, zoomCenterX, zoomCenterY, strengthNorm);
+      } else {
+        const gaussianLayer = src.el.cloneNode(true);
+        gaussianLayer.style.position = "absolute";
+        gaussianLayer.style.inset = "0";
+        gaussianLayer.style.filter = radius > 0 ? `blur(${radius}px)` : "none";
+        effectLayer = gaussianLayer;
+      }
+
+      effectLayer.style.position = "absolute";
+      effectLayer.style.inset = "0";
+      effectLayer.style.pointerEvents = "none";
+
+      await applyMaskToTarget(effectLayer, wrap, inputs.mask, radius, canvasWidth, canvasHeight);
+      wrap.appendChild(effectLayer);
       return { el: wrap };
     },
     inspector: () => ([
-      { k: "radius", type: "range", label: "Radius", min: 0, max: 120, step: 1 }
+      { k: "blurType", type: "select", label: "Type", options: ["gaussian", "direction", "zoom"] },
+      { k: "strength", type: "range", label: "Strength", min: 0, max: 120, step: 1 },
+      { k: "direction", type: "knob", label: "Angle", min: -180, max: 180, step: 1, showIf: (node) => ["direction", "directional"].includes(String(node?.params?.blurType || "").toLowerCase()) },
+      { k: "distance", type: "range", label: "Distance", min: 0, max: 240, step: 1, showIf: (node) => ["direction", "directional"].includes(String(node?.params?.blurType || "").toLowerCase()) },
+      { k: "samples", type: "range", label: "Samples", min: 2, max: 24, step: 1, showIf: (node) => ["direction", "zoom", "directional"].includes(String(node?.params?.blurType || "").toLowerCase()) },
+      {
+        type: "figma2d",
+        label: "Zoom Center",
+        kx: "zoomCenterX",
+        ky: "zoomCenterY",
+        lx: "X",
+        ly: "Y",
+        minX: -100,
+        maxX: 100,
+        minY: -100,
+        maxY: 100,
+        step: 1,
+        resetX: 0,
+        resetY: 0,
+        showIf: { k: "blurType", equals: "zoom" }
+      }
     ])
   };
 };

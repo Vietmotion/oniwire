@@ -34,7 +34,8 @@ window.createOniwireOutputNodeDef = function createOniwireOutputNodeDef(){
             title: "MP4 Video",
             hint: "Frame-by-frame render (project fps, default 30)",
             buttons: [
-              { label: "Export MP4", id: "exportMp4" }
+              { label: "Export MP4", id: "exportMp4" },
+              { label: "PNG Sequence", id: "exportPngSequence" }
             ]
           }
         ]

@@ -625,8 +625,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
     },
     inspector: (node) => ([
       { k: "shape", type: "select", label: "Shape", options: ["circle", "rectangle", "triangle", "diamond", "hexagon", "star"] },
-      { k: "width", type: "range", label: "Width", min: 10, max: 1500, step: 1 },
-      { k: "height", type: "range", label: "Height", min: 10, max: 1500, step: 1 },
+      { type: "figma2d", label: "Size", kx: "width", ky: "height", lx: "W", ly: "H", minX: 10, maxX: 1500, minY: 10, maxY: 1500, step: 1, resetX: 120, resetY: 120 },
       { k: "uniform", type: "checkbox", label: "Uniform" },
       {
         k: "color",
@@ -646,8 +645,7 @@ window.createOniwireShapeNodeDef = function createOniwireShapeNodeDef(){
       },
       { k: "strokeWidth", type: "range", label: "Stroke Width", min: 0, max: 200, step: 1 },
       { k: "strokeOpacity", type: "range", label: "Stroke Opacity", min: 0, max: 1, step: 0.01 },
-      { k: "x", type: "range", label: "X", min: 0, max: 1200, step: 1 },
-      { k: "y", type: "range", label: "Y", min: 0, max: 1200, step: 1 }
+      { type: "figma2d", label: "Position", kx: "x", ky: "y", lx: "X", ly: "Y", minX: 0, minY: 0, step: 1, resetX: 100, resetY: 100 }
     ])
   };
 };
