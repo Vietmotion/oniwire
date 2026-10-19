@@ -1,0 +1,99 @@
+:root {
+  --bg: #0b1020;
+  --panel: #121b33;
+  --panel-border: #233257;
+  --text: #e8eefc;
+  --muted: #9fb0d6;
+  --accent: #4cc9f0;
+  --danger: #f26d6d;
+  --ok: #70d6a3;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 15% 0%, #1b2a4a 0%, var(--bg) 55%);
+}
+
+.app {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.hero h1 { margin: 0; font-size: 30px; }
+.hero p { margin: 6px 0 0; color: var(--muted); }
+
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid #3b4e82;
+  background: #223560;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: #1a5f81; border-color: #2e8bb8; }
+button.danger { background: #6f2f36; border-color: #9d4d57; }
+
+label { color: var(--muted); font-size: 14px; }
+input[type="number"], select {
+  background: #0f1830;
+  border: 1px solid #314772;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.check { display: inline-flex; align-items: center; gap: 8px; }
+.muted { color: var(--muted); font-size: 13px; }
+.meta { color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.hidden { display: none; }
+
+.progressTrack {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: #0b152d;
+  border: 1px solid #2d3f68;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--ok));
+}
+
+.log {
+  margin: 0;
+  min-height: 100px;
+  max-height: 180px;
+  overflow: auto;
+  background: #0a1227;
+  border: 1px solid #22345b;
+  border-radius: 8px;
+  padding: 10px;
+  color: #cbe1ff;
+  font-size: 12px;
+}
